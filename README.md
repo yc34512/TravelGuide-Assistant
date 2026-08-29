@@ -60,24 +60,44 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 
 或直接双击 `运行.bat`，按提示输入关键词。报告输出到 `data/reports/`。
 
+## 服务模式（网页界面，推荐）
+
+双击 `运行服务.bat`（或 `python run_server.py`），浏览器自动打开 `http://127.0.0.1:8000`：
+
+- 输入景点关键词 → 实时进度 → 页面直接阅读渲染好的报告；
+- **景点知识库**：采集成果沉淀在本地 SQLite（`data/knowledge.db`），保鲜期内（默认 7 天，`KB_TTL_DAYS` 可配）重复查询免重爬，约 30 秒出报告；勾选"强制重新采集"可跳过缓存；
+- API 形态（可供其他程序/小程序调用）：`POST /api/research`、`GET /api/jobs/{id}`、`GET /api/health`。
+
 ## 目录结构
 
 ```
 ├── main.py              # CLI 入口：搜索 → 采集 → LLM → 报告
-├── config.py            # 频控/数量限制/LLM 配置（.env 可覆盖）
+├── run_server.py        # 服务入口：python run_server.py（或双击 运行服务.bat）
+├── api_server.py        # FastAPI：网页 + 任务接口
+├── run_cli.py           # 双击运行.bat 的交互入口（含 API Key 配置向导）
+├── report_from_raw.py   # 从已采集 JSON 重新生成报告（不重爬）
+├── config.py            # 频控/限量/LLM/知识库配置（.env 可覆盖）
 ├── core/
 │   ├── models.py        # VideoItem / Comment / InfoPoint 统一数据模型
+│   ├── credentials.py   # API Key 安全存取（系统凭据管理器）+ 配置向导
+│   ├── knowledge.py     # 景点知识库（SQLite）
 │   ├── rate_limiter.py  # 随机间隔频控
-│   ├── sanitize.py      # 评论去标识化白名单（合规闸口）
-│   └── llm.py           # OpenAI 兼容客户端（JSON 输出 + 重试）
+│   ├── sanitize.py      # 评论去标识化 + 文本清洗（合规闸口）
+│   └── llm.py           # OpenAI 兼容客户端（JSON/重试/思考模式控制）
 ├── crawler/
 │   ├── browser.py       # 浏览器会话、登录态管理（Chrome/Edge 自动检测）
-│   └── douyin.py        # 抖音适配器：搜索 / 视频详情 / 评论
+│   └── douyin.py        # 抖音适配器：搜索 / 视频详情 / 评论（选择器集中管理）
 ├── pipeline/
-│   ├── extract.py       # Map：逐条视频提取要点（防幻觉提示词）
+│   ├── extract.py       # Map：逐条视频提取要点（防幻觉 + 噪声过滤）
+│   ├── verify.py        # 多源交叉验证 + 置信度分级
 │   ├── report.py        # Reduce：汇总生成报告正文
 │   └── render.py        # 报告组装（溯源清单 + 免责声明）
+├── service/
+│   └── research.py      # 任务编排：知识库判定 → 采集/复用 → 提取 → 验证 → 报告
+├── web/
+│   └── index.html       # 网页界面
 └── data/
+    ├── knowledge.db     # 景点知识库
     ├── raw/             # 原始采集 JSON
     ├── reports/         # 生成的攻略报告
     └── debug/           # 页面处理失败时的 HTML 快照

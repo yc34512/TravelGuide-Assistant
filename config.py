@@ -32,3 +32,9 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 # 交叉验证（聚类判断）是否开启思考模式：判断更准但单次耗时从约10秒增至3~4分钟。
 # 默认关闭（快速迭代用）；要出高质量最终报告时在 .env 里设 true。
 VERIFY_ENABLE_THINKING = os.getenv("VERIFY_ENABLE_THINKING", "false").lower() == "true"
+
+# —— 知识库与服务 ——
+# 景点采集结果的保鲜天数：期内再次查询直接复用，不重新采集
+KB_TTL_DAYS = int(os.getenv("KB_TTL_DAYS", "7"))
+SERVER_HOST = os.getenv("SERVER_HOST", "127.0.0.1")
+SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
