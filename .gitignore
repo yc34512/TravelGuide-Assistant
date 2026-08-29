@@ -1,0 +1,7 @@
+.env
+data/
+browser_profile/
+__pycache__/
+*.pyc
+.idea/
+.vscode/
