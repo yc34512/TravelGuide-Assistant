@@ -8,6 +8,7 @@ from __future__ import annotations
 import random
 import re
 import time
+from datetime import datetime
 from urllib.parse import quote
 
 from DrissionPage import ChromiumPage
@@ -19,11 +20,22 @@ from core.sanitize import clean_comment, parse_comment_block, parse_count
 
 VIDEO_ID_RE = re.compile(r"/video/(\d+)")
 TAG_RE = re.compile(r"#([^#\s\[\]，。：:；;！!？?]+)")
+_CREATE_TIME_RE = re.compile(r'"create_time"\s*:\s*(\d{10})')
 
 # —— 选择器集中管理（候选列表按顺序尝试，失效时改这里）——
 SEL_SEARCH_LINKS = 'css:a[href*="/video/"]'
-SEL_VIDEO_DESC = ['css:[data-e2e="video-desc"]', "css:.video-info-detail", "css:h1"]
+SEL_VIDEO_DESC = [
+    'css:[data-e2e="video-desc"]',
+    'css:[data-e2e="detail-video-info"]',
+    "css:.video-info-detail",
+    "css:h1",
+]
 SEL_VIDEO_LIKE = ['css:[data-e2e="video-player-digg"]']
+SEL_VIDEO_PUBTIME = [
+    'css:[data-e2e="detail-video-publish-time"]',
+    'css:[data-e2e="video-create-time"]',
+    "css:.create-time",
+]
 SEL_COMMENT_LIST = ['css:[data-e2e="comment-list"]', "css:.comment-mainContent"]
 SEL_COMMENT_ITEM = ['css:[data-e2e="comment-item"]', "css:.comment-item"]
 
@@ -87,8 +99,35 @@ class DouyinCrawler:
         if like:
             item.like_count = parse_count(like.text)
 
+        item.publish_time = self._extract_publish_time()
+
         item.comments = self._fetch_comments(max_comments)
         return item
+
+    def _extract_publish_time(self) -> str | None:
+        """视频发布日期，YYYY-MM-DD。双通道：DOM 文本 -> 页面内嵌状态 JSON。
+
+        时效过滤的依据：JSON 里的 create_time 是 unix 秒级时间戳，取最小值——
+        视频本体一定早于页面上其他带时间戳的对象。
+        """
+        for sel in SEL_VIDEO_PUBTIME:
+            ele = self.page.ele(sel, timeout=2)
+            if ele:
+                text = ele.text.strip()
+                m = re.search(r"20\d{2}-\d{2}-\d{2}", text)
+                if m:
+                    return m.group(0)
+        try:
+            stamps = [
+                int(t)
+                for t in _CREATE_TIME_RE.findall(self.page.html)
+                if 1467000000 <= int(t) <= time.time()  # 抖音上线(2016年)至今为合理区间
+            ]
+        except Exception:
+            return None
+        if stamps:
+            return datetime.fromtimestamp(min(stamps)).strftime("%Y-%m-%d")
+        return None
 
     def _fetch_comments(self, max_n: int) -> list[Comment]:
         """读取评论区：滚动加载 -> 结构化解析（昵称等个人信息在解析时即被丢弃）。"""

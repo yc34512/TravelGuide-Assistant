@@ -12,7 +12,7 @@ def render_report(keyword: str, body_md: str, items: list[VideoItem], points: li
     total_comments = sum(len(i.comments) for i in items)
 
     point_lines = "\n".join(
-        f"{i + 1}. ({p['topic']}{' · ⚠️时效敏感' if p['time_sensitive'] else ''}) {p['claim']} —— 来源：{p['source']}"
+        f"{i + 1}. ({p['topic']} · {p.get('confidence', '单源')}{' · ⚠️时效敏感' if p['time_sensitive'] else ''}) {p['claim']} —— 来源：{p['source']}"
         for i, p in enumerate(points)
     )
     video_lines = "\n".join(f"- [{it.video_id}]({it.url})" for it in items)

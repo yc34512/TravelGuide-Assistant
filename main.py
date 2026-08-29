@@ -94,6 +94,7 @@ def main():
         from pipeline.extract import extract_points
         from pipeline.render import render_report
         from pipeline.report import synthesize_report
+        from pipeline.verify import annotate_confidence
 
         all_points = []
         for it in items:
@@ -107,6 +108,9 @@ def main():
         if not all_points:
             console.print("[yellow]没有提取到任何要点，跳过报告生成。[/yellow]")
             return
+
+        console.print("    多源交叉验证与置信度标注…")
+        all_points = annotate_confidence(all_points)
 
         body = synthesize_report(args.keyword, all_points)
         report_path = REPORT_DIR / f"{args.keyword}_{ts}.md"

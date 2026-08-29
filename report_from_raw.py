@@ -16,6 +16,7 @@ from core.models import Comment, VideoItem
 from pipeline.extract import extract_points
 from pipeline.render import render_report
 from pipeline.report import synthesize_report
+from pipeline.verify import annotate_confidence
 
 
 def main():
@@ -44,6 +45,9 @@ def main():
         pts = extract_points(it)
         all_points.extend(pts)
         print(f"  {it.video_id}: 提取 {len(pts)} 条要点")
+
+    print("交叉验证与置信度标注…")
+    all_points = annotate_confidence(all_points)
 
     body = synthesize_report(keyword, all_points)
     out = REPORT_DIR / f"{keyword}_{datetime.now():%Y%m%d_%H%M%S}.md"
