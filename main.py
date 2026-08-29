@@ -96,27 +96,37 @@ def main():
         from pipeline.report import synthesize_report
         from pipeline.verify import annotate_confidence
 
+        # 并行提取：LLM 调用相互独立，3 路并发把墙钟时间压到约 1/3
+        import time as _time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         all_points = []
-        for it in items:
-            try:
-                pts = extract_points(it)
-                all_points.extend(pts)
-                console.print(f"    {it.video_id}: 提取 {len(pts)} 条要点")
-            except Exception as e:
-                console.print(f"    [red]{it.video_id} 提取失败：{e}[/red]")
+        t0 = _time.time()
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(extract_points, it): it for it in items}
+            for fut in as_completed(futures):
+                it = futures[fut]
+                try:
+                    pts = fut.result()
+                    all_points.extend(pts)
+                    console.print(f"    {it.video_id}: 提取 {len(pts)} 条要点")
+                except Exception as e:
+                    console.print(f"    [red]{it.video_id} 提取失败：{e}[/red]")
+        console.print(f"    提取耗时 {_time.time() - t0:.1f} 秒")
 
         if not all_points:
             console.print("[yellow]没有提取到任何要点，跳过报告生成。[/yellow]")
             return
 
+        t0 = _time.time()
         console.print("    多源交叉验证与置信度标注…")
         all_points = annotate_confidence(all_points)
-
         body = synthesize_report(args.keyword, all_points)
         report_path = REPORT_DIR / f"{args.keyword}_{ts}.md"
         report_path.write_text(
             render_report(args.keyword, body, items, all_points), encoding="utf-8"
         )
+        console.print(f"    汇总生成耗时 {_time.time() - t0:.1f} 秒")
         console.print(f"[green]✔ 攻略报告已生成：{report_path}[/green]")
 
     except KeyboardInterrupt:

@@ -40,18 +40,30 @@ def main():
     keyword = raw_path.stem.split("_")[0]
     print(f"载入 {len(items)} 条视频（{sum(len(i.comments) for i in items)} 条评论），开始生成报告…")
 
-    all_points = []
-    for it in items:
-        pts = extract_points(it)
-        all_points.extend(pts)
-        print(f"  {it.video_id}: 提取 {len(pts)} 条要点")
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    t0 = _time.time()
+    all_points = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(extract_points, it): it for it in items}
+        for fut in as_completed(futures):
+            it = futures[fut]
+            try:
+                pts = fut.result()
+                all_points.extend(pts)
+                print(f"  {it.video_id}: 提取 {len(pts)} 条要点")
+            except Exception as e:
+                print(f"  {it.video_id}: 提取失败 {e}")
+    print(f"  提取耗时 {_time.time() - t0:.1f} 秒")
+
+    t0 = _time.time()
     print("交叉验证与置信度标注…")
     all_points = annotate_confidence(all_points)
-
     body = synthesize_report(keyword, all_points)
     out = REPORT_DIR / f"{keyword}_{datetime.now():%Y%m%d_%H%M%S}.md"
     out.write_text(render_report(keyword, body, items, all_points), encoding="utf-8")
+    print(f"  汇总生成耗时 {_time.time() - t0:.1f} 秒")
     print(f"✔ 报告已生成：{out}")
 
 
