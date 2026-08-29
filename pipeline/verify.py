@@ -8,6 +8,7 @@
 验证本身用一次 LLM 调用做语义等价聚类；任何解析异常都回退为"全部单源"，
 宁可保守也不阻断主流程。
 """
+from config import VERIFY_ENABLE_THINKING
 from core.llm import chat_json
 
 VERIFY_SYSTEM = """你是信息核查助手。输入是编号的旅游信息要点列表，你的任务：
@@ -30,7 +31,9 @@ def annotate_confidence(points: list[dict]) -> list[dict]:
         f"[{i + 1}] ({p['topic']}) {p['claim']}" for i, p in enumerate(points)
     )
     try:
-        data = chat_json(VERIFY_SYSTEM, numbered)
+        # 聚类是管道里最依赖推理的环节：开思考更准（实测可修正约 2 成判定）但慢一个量级，
+        # 由 VERIFY_ENABLE_THINKING 配置控制，兼顾"快速迭代"与"深度出报告"两种场景
+        data = chat_json(VERIFY_SYSTEM, numbered, enable_thinking=VERIFY_ENABLE_THINKING)
         groups = [
             _clean_ids(g, n)
             for g in data.get("groups", [])

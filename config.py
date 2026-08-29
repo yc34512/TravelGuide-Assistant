@@ -28,3 +28,7 @@ HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
+
+# 交叉验证（聚类判断）是否开启思考模式：判断更准但单次耗时从约10秒增至3~4分钟。
+# 默认关闭（快速迭代用）；要出高质量最终报告时在 .env 里设 true。
+VERIFY_ENABLE_THINKING = os.getenv("VERIFY_ENABLE_THINKING", "false").lower() == "true"

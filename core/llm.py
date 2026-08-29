@@ -50,9 +50,15 @@ def _client_and_model() -> tuple[OpenAI, str]:
 _EXTRA_BODY = {"enable_thinking": False}
 
 
-def chat_json(system: str, user: str, retries: int = 3) -> dict:
-    """带重试的 JSON 输出调用；鉴权/欠费类错误不重试，直接给出可操作提示。"""
+def chat_json(system: str, user: str, retries: int = 3, enable_thinking: bool = False) -> dict:
+    """带重试的 JSON 输出调用；鉴权/欠费类错误不重试，直接给出可操作提示。
+
+    enable_thinking=True 供判断型环节（如语义聚类）使用：更准但慢一个量级，
+    因此调用超时也相应放宽。
+    """
     client, model = _client_and_model()
+    if enable_thinking:
+        client = OpenAI(api_key=client.api_key, base_url=client.base_url, timeout=300)
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
@@ -60,7 +66,7 @@ def chat_json(system: str, user: str, retries: int = 3) -> dict:
                 model=model,
                 temperature=0.2,
                 response_format={"type": "json_object"},
-                extra_body=_EXTRA_BODY,
+                extra_body={"enable_thinking": enable_thinking},
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
