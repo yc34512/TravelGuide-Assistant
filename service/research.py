@@ -12,7 +12,14 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from config import KB_TTL_DAYS, MAX_COMMENTS_PER_VIDEO, MAX_VIDEOS_PER_RUN, RAW_DIR, REPORT_DIR
+from config import (
+    ASR_ENABLED,
+    KB_TTL_DAYS,
+    MAX_COMMENTS_PER_VIDEO,
+    MAX_VIDEOS_PER_RUN,
+    RAW_DIR,
+    REPORT_DIR,
+)
 from core import knowledge
 from core.models import Comment, VideoItem
 
@@ -56,9 +63,14 @@ def _crawl(keyword: str, limit: int, comments: int, log) -> tuple[list[VideoItem
             log(f"搜到 {len(urls)} 条视频")
             for i, url in enumerate(urls, 1):
                 try:
-                    item = crawler.fetch_video(url, max_comments=comments)
+                    item = crawler.fetch_video(url, max_comments=comments,
+                                               with_asr=ASR_ENABLED)
                     items.append(item)
-                    log(f"[{i}/{len(urls)}] {item.video_id} | 文案 {len(item.description)} 字 | 评论 {len(item.comments)} 条")
+                    msg = (f"[{i}/{len(urls)}] {item.video_id} | 文案 {len(item.description)} 字 | "
+                           f"评论 {len(item.comments)} 条")
+                    if ASR_ENABLED:
+                        msg += f" | 口播转写 {len(item.transcript)} 字" if item.transcript else " | 口播转写不可用"
+                    log(msg)
                 except Exception as e:
                     log(f"[{i}/{len(urls)}] 采集失败：{e}")
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")

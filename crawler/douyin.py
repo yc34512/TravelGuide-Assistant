@@ -83,11 +83,16 @@ class DouyinCrawler:
             time.sleep(random.uniform(2.5, 4.0))
         return found
 
-    # ---- 单个视频页：文案 + 标签 + 点赞 + 评论 ----
-    def fetch_video(self, url: str, max_comments: int = MAX_COMMENTS_PER_VIDEO) -> VideoItem:
+    # ---- 单个视频页：文案 + 标签 + 点赞 + 发布时间 + (可选)口播转写 + 评论 ----
+    def fetch_video(self, url: str, max_comments: int = MAX_COMMENTS_PER_VIDEO,
+                    with_asr: bool = False) -> VideoItem:
         self.limiter.wait()
         m = VIDEO_ID_RE.search(url)
         item = VideoItem(video_id=m.group(1) if m else url, url=url)
+
+        if with_asr:
+            # 监听必须在导航前开启；douyinvod 是抖音视频 CDN 专用域
+            self.page.listen.start("douyinvod")
         self.page.get(url)
         time.sleep(4)
 
@@ -101,8 +106,35 @@ class DouyinCrawler:
 
         item.publish_time = self._extract_publish_time()
 
+        if with_asr:
+            item.transcript = self._capture_transcript() or ""
+            self.page.listen.stop()
+
         item.comments = self._fetch_comments(max_comments)
         return item
+
+    def _capture_transcript(self) -> str | None:
+        """等视频 CDN 请求 -> 下载 -> 本地转写 -> 即删。失败返回 None 不阻塞。"""
+        from core.asr import transcribe_from_url
+
+        try:
+            p = self.page.listen.wait(count=1, timeout=20)
+            packets = p if isinstance(p, list) else [p]
+            play_url = next(
+                (pk.url for pk in packets
+                 if pk is not None and "douyinvod" in (pk.url or "")),
+                None,
+            )
+        except Exception:
+            play_url = None
+        if not play_url:
+            return None
+        t0 = time.time()
+        text = transcribe_from_url(play_url)
+        if text:
+            # 转写耗时仅用于运行观察，不打扰调用方
+            print(f"      [ASR] 口播转写 {len(text)} 字（{time.time() - t0:.0f} 秒）")
+        return text
 
     def _extract_publish_time(self) -> str | None:
         """视频发布日期，YYYY-MM-DD。双通道：DOM 文本 -> 页面内嵌状态 JSON。

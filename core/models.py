@@ -28,6 +28,7 @@ class VideoItem:
     like_count: int | None = None
     comment_count: int | None = None
     publish_time: str | None = None
+    transcript: str = ""  # 口播转写文本（ASR 开启时才有；随原始 JSON 持久化，缓存命中可复用）
     comments: list[Comment] = field(default_factory=list)
 
     def to_dict(self) -> dict:

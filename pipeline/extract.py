@@ -49,7 +49,8 @@ def extract_points(item: VideoItem) -> list[dict]:
     )
     user = (
         f"video_url: {item.url}\n"
-        f"视频文案: {item.description or '(无)'}\n\n"
+        f"视频文案: {item.description or '(无)'}\n"
+        f"视频口播内容: {item.transcript or '(无)'}\n\n"
         f"评论区:\n{comments_text or '(无评论)'}"
     )
     data = chat_json(EXTRACT_SYSTEM, user)

@@ -39,7 +39,12 @@ def main():
     ap.add_argument("--limit", type=int, default=MAX_VIDEOS_PER_RUN, help="采集视频数上限")
     ap.add_argument("--comments", type=int, default=MAX_COMMENTS_PER_VIDEO, help="每条视频评论数上限")
     ap.add_argument("--no-llm", action="store_true", help="只采集原始数据，不调用 LLM")
+    ap.add_argument("--asr", action="store_true", help="开启口播转写（本地 ASR，较慢）")
     args = ap.parse_args()
+
+    from config import ASR_ENABLED
+
+    asr_on = args.asr or ASR_ENABLED
 
     # 开源安全设计：生成报告前确保 API Key 已配置（向导式配置，Key 存系统凭据管理器）
     if not args.no_llm:
@@ -70,7 +75,7 @@ def main():
         console.print(f"[cyan]2/3[/cyan] 逐条读取视频内容与评论（每条约 20~40 秒，共 {len(urls)} 条）")
         for i, url in enumerate(urls, 1):
             try:
-                item = crawler.fetch_video(url, max_comments=args.comments)
+                item = crawler.fetch_video(url, max_comments=args.comments, with_asr=asr_on)
                 items.append(item)
                 console.print(
                     f"    [{i}/{len(urls)}] {item.video_id} | 文案 {len(item.description)} 字 | 评论 {len(item.comments)} 条"

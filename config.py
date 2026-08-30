@@ -38,3 +38,9 @@ VERIFY_ENABLE_THINKING = os.getenv("VERIFY_ENABLE_THINKING", "false").lower() ==
 KB_TTL_DAYS = int(os.getenv("KB_TTL_DAYS", "7"))
 SERVER_HOST = os.getenv("SERVER_HOST", "127.0.0.1")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
+
+# —— ASR 口播转写（faster-whisper 本地推理）——
+# 开启后：抓视频播放地址 -> 下载 -> 本地转写 -> 即删文件。CPU int8 推理，
+# 每条视频增加约 30~90 秒；转写文本随原始 JSON 存入知识库，缓存命中时零成本复用
+ASR_ENABLED = os.getenv("ASR_ENABLED", "false").lower() == "true"
+ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "small")
