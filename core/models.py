@@ -29,10 +29,13 @@ class VideoItem:
     comment_count: int | None = None
     publish_time: str | None = None
     transcript: str = ""  # 口播转写文本（ASR 开启时才有；随原始 JSON 持久化，缓存命中可复用）
+    play_urls: list[str] = field(default_factory=list)  # 媒体 CDN 临时地址（含纯视频/纯音频流，签名会过期，不持久化）
     comments: list[Comment] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("play_urls", None)  # 临时签名地址不入库
+        return d
 
 
 @dataclass

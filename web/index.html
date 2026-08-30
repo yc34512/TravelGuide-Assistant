@@ -57,8 +57,11 @@
       <button id="btn" onclick="go()">生成攻略报告</button>
     </div>
     <div class="opts">
-      <span>采集视频 <input id="limit" type="number" value="10" min="3" max="20"> 条</span>
-      <span>每条评论 <input id="comments" type="number" value="50" min="10" max="100"> 条</span>
+      <label><input type="radio" name="mode" value="fast"> 快速 · 约3分钟 · 5条视频</label>
+      <label><input type="radio" name="mode" value="standard" checked> 标准 · 约6分钟 · 8条视频</label>
+      <label><input type="radio" name="mode" value="deep"> 深度 · 约15~25分钟 · 含口播转写（出发前用）</label>
+    </div>
+    <div class="opts">
       <label><input id="force" type="checkbox"> 忽略知识库缓存，强制重新采集</label>
     </div>
   </div>
@@ -96,8 +99,7 @@ async function go() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         keyword: kw,
-        limit: parseInt($('limit').value) || 10,
-        comments: parseInt($('comments').value) || 50,
+        mode: document.querySelector('input[name=mode]:checked').value,
         force: $('force').checked,
       }),
     });

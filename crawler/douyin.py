@@ -107,34 +107,27 @@ class DouyinCrawler:
         item.publish_time = self._extract_publish_time()
 
         if with_asr:
-            item.transcript = self._capture_transcript() or ""
+            # 只捕获媒体地址（音视频分离：需挑含音轨的），转写在采集结束后并行做
+            item.play_urls = self._capture_play_urls()
             self.page.listen.stop()
 
         item.comments = self._fetch_comments(max_comments)
         return item
 
-    def _capture_transcript(self) -> str | None:
-        """等视频 CDN 请求 -> 下载 -> 本地转写 -> 即删。失败返回 None 不阻塞。"""
-        from core.asr import transcribe_from_url
-
+    def _capture_play_urls(self) -> list[str]:
+        """收集监听窗口内所有 douyinvod 地址（去重）。抖音是音视频分离流，
+        纯视频/纯音频各一个地址，转写要用含音轨的那个，由 asr 层自动挑选。"""
         try:
-            p = self.page.listen.wait(count=1, timeout=20)
-            packets = p if isinstance(p, list) else [p]
-            play_url = next(
-                (pk.url for pk in packets
-                 if pk is not None and "douyinvod" in (pk.url or "")),
-                None,
-            )
+            p = self.page.listen.wait(count=4, timeout=20)
+            packets = p if isinstance(p, list) else ([p] if p else [])
+            urls: list[str] = []
+            for pk in packets:
+                u = getattr(pk, "url", "") or ""
+                if "douyinvod" in u and u not in urls:
+                    urls.append(u)
+            return urls
         except Exception:
-            play_url = None
-        if not play_url:
-            return None
-        t0 = time.time()
-        text = transcribe_from_url(play_url)
-        if text:
-            # 转写耗时仅用于运行观察，不打扰调用方
-            print(f"      [ASR] 口播转写 {len(text)} 字（{time.time() - t0:.0f} 秒）")
-        return text
+            return []
 
     def _extract_publish_time(self) -> str | None:
         """视频发布日期，YYYY-MM-DD。双通道：DOM 文本 -> 页面内嵌状态 JSON。

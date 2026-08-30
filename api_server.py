@@ -23,8 +23,7 @@ _WEB_DIR = Path(__file__).parent / "web"
 
 class ResearchIn(BaseModel):
     keyword: str
-    limit: int = 10
-    comments: int = 50
+    mode: str = "standard"  # fast / standard / deep
     force: bool = False
 
 
@@ -43,10 +42,7 @@ def start_research(body: ResearchIn):
     keyword = body.keyword.strip()
     if not keyword:
         raise HTTPException(status_code=400, detail="关键词不能为空")
-    # 入参收敛：防止单次任务过大
-    limit = min(max(body.limit, 3), 20)
-    comments = min(max(body.comments, 10), 100)
-    job_id = research.start_job(keyword, limit=limit, comments=comments, force=body.force)
+    job_id = research.start_job(keyword, mode=body.mode, force=body.force)
     return {"job_id": job_id}
 
 

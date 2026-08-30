@@ -84,6 +84,24 @@ def main():
                 console.print(f"    [red][{i}/{len(urls)}] 处理失败：{e}（已存调试快照）[/red]")
                 dump_debug(page, f"fail_{ts}_{i}")
 
+        if asr_on:
+            from concurrent.futures import ThreadPoolExecutor  # noqa: F401
+
+            from core.asr import transcribe_items
+
+            import time as _t
+
+            pending = [it for it in items if it.play_urls]
+            if pending:
+                console.print(f"    口播转写：{len(pending)} 条视频并行处理…")
+                t0 = _t.time()
+
+                def _prog(done, total, it, text):
+                    console.print(f"    [ASR] 转写 {done}/{total}：{it.video_id} -> {len(text)} 字")
+
+                transcribe_items(items, progress=_prog)
+                console.print(f"    转写耗时 {_t.time() - t0:.0f} 秒")
+
         raw_path = RAW_DIR / f"{args.keyword}_{ts}.json"
         raw_path.write_text(
             json.dumps([it.to_dict() for it in items], ensure_ascii=False, indent=2),

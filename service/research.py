@@ -12,14 +12,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from config import (
-    ASR_ENABLED,
-    KB_TTL_DAYS,
-    MAX_COMMENTS_PER_VIDEO,
-    MAX_VIDEOS_PER_RUN,
-    RAW_DIR,
-    REPORT_DIR,
-)
+from config import KB_TTL_DAYS, RAW_DIR, REPORT_DIR
 from core import knowledge
 from core.models import Comment, VideoItem
 
@@ -45,7 +38,7 @@ def load_items_from_raw(raw_path: str) -> list[VideoItem]:
     ]
 
 
-def _crawl(keyword: str, limit: int, comments: int, log) -> tuple[list[VideoItem], str]:
+def _crawl(keyword: str, limit: int, comments: int, asr: bool, log) -> tuple[list[VideoItem], str]:
     """浏览器采集。全程持锁：同一时刻只跑一个采集任务。"""
     with _CRAWL_LOCK:
         from crawler.browser import create_page, ensure_login
@@ -63,38 +56,64 @@ def _crawl(keyword: str, limit: int, comments: int, log) -> tuple[list[VideoItem
             log(f"搜到 {len(urls)} 条视频")
             for i, url in enumerate(urls, 1):
                 try:
-                    item = crawler.fetch_video(url, max_comments=comments,
-                                               with_asr=ASR_ENABLED)
+                    item = crawler.fetch_video(url, max_comments=comments, with_asr=asr)
                     items.append(item)
                     msg = (f"[{i}/{len(urls)}] {item.video_id} | 文案 {len(item.description)} 字 | "
                            f"评论 {len(item.comments)} 条")
-                    if ASR_ENABLED:
-                        msg += f" | 口播转写 {len(item.transcript)} 字" if item.transcript else " | 口播转写不可用"
+                    if asr and item.play_urls:
+                        msg += f" | 已捕获 {len(item.play_urls)} 个媒体地址"
                     log(msg)
                 except Exception as e:
                     log(f"[{i}/{len(urls)}] 采集失败：{e}")
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            raw_path = RAW_DIR / f"{keyword}_{ts}.json"
-            raw_path.write_text(
-                json.dumps([it.to_dict() for it in items], ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            log(f"原始数据已保存：{raw_path.name}")
-            return items, str(raw_path)
+            return items
         finally:
             try:
                 page.quit()
             except Exception:
                 pass
 
+    # 转写在浏览器释放后并行进行：下载+CPU 推理不占用浏览器，2 路并发
+    if asr:
+        from core.asr import transcribe_items
 
-def start_job(keyword: str, limit: int = MAX_VIDEOS_PER_RUN,
-              comments: int = MAX_COMMENTS_PER_VIDEO, force: bool = False) -> str:
+        pending = [it for it in items if it.play_urls and not it.transcript]
+        if pending:
+            log(f"开始口播转写：{len(pending)} 条视频并行处理")
+            t0 = time.time()
+
+            def _prog(done, total, it, text):
+                log(f"  转写 {done}/{total}：{it.video_id} -> {len(text)} 字")
+
+            transcribe_items(items, workers=2, progress=_prog)
+            ok = sum(1 for it in items if it.transcript)
+            log(f"转写完成 {ok}/{len(items)} 条，耗时 {time.time() - t0:.0f} 秒")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    raw_path = RAW_DIR / f"{keyword}_{ts}.json"
+    raw_path.write_text(
+        json.dumps([it.to_dict() for it in items], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    log(f"原始数据已保存：{raw_path.name}")
+    return items, str(raw_path)
+
+
+# 模式预设：快速迭代用 fast，出发前做最终规划用 deep
+MODES = {
+    "fast":     {"limit": 5,  "comments": 30, "asr": False},
+    "standard": {"limit": 8,  "comments": 40, "asr": False},
+    "deep":     {"limit": 10, "comments": 50, "asr": True},
+}
+
+
+def start_job(keyword: str, mode: str = "standard", force: bool = False) -> str:
+    preset = MODES.get(mode, MODES["standard"])
     job_id = uuid.uuid4().hex[:12]
     with _LOCK:
         JOBS[job_id] = {
             "id": job_id,
             "keyword": keyword,
+            "mode": mode,
             "status": "running",
             "stage": "排队中",
             "log": [],
@@ -102,7 +121,9 @@ def start_job(keyword: str, limit: int = MAX_VIDEOS_PER_RUN,
             "error": None,
         }
     threading.Thread(
-        target=_run_job, args=(job_id, keyword, limit, comments, force), daemon=True
+        target=_run_job,
+        args=(job_id, keyword, preset["limit"], preset["comments"], preset["asr"], force),
+        daemon=True,
     ).start()
     return job_id
 
@@ -113,7 +134,7 @@ def get_job(job_id: str) -> dict | None:
         return dict(job) if job else None
 
 
-def _run_job(job_id: str, keyword: str, limit: int, comments: int, force: bool) -> None:
+def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, force: bool) -> None:
     job = JOBS[job_id]
     started = time.time()
 
@@ -135,7 +156,7 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, force: bool) 
             reason = "已过期" if (not force and knowledge.find_fresh(keyword, KB_TTL_DAYS * 365)) else "首次查询"
             log(f"知识库未命中（{reason}），开始采集")
             job["stage"] = "采集数据"
-            items, raw_path = _crawl(keyword, limit, comments, log)
+            items, raw_path = _crawl(keyword, limit, comments, asr, log)
             if not items:
                 raise RuntimeError("没有采集到任何内容：可能页面改版或关键词过冷，请查看调试快照")
             record_id = knowledge.record_crawl(
