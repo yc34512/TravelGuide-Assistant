@@ -33,6 +33,10 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 # 默认关闭（快速迭代用）；要出高质量最终报告时在 .env 里设 true。
 VERIFY_ENABLE_THINKING = os.getenv("VERIFY_ENABLE_THINKING", "false").lower() == "true"
 
+# 候选圈定是否启用 LLM 服务商的联网搜索能力（候选清单更贴近近期真实热度）：
+# 服务商不支持时自动降级为纯基线知识，不影响功能可用。
+LLM_WEB_SEARCH = os.getenv("LLM_WEB_SEARCH", "true").lower() == "true"
+
 # —— 知识库与服务 ——
 # 景点采集结果的保鲜天数：期内再次查询直接复用，不重新采集
 KB_TTL_DAYS = int(os.getenv("KB_TTL_DAYS", "7"))

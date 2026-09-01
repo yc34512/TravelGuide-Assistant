@@ -49,16 +49,41 @@ def _client_and_model() -> tuple[OpenAI, str]:
 # 本管道是确定性结构化抽取，思考没有收益只有延迟，统一关闭。
 _EXTRA_BODY = {"enable_thinking": False}
 
+# 联网搜索能力探测：服务商不支持联网参数时置 True，后续调用不再携带（降级为纯基线）。
+# 兼容键同时下发两系：通义/百炼系认 enable_search，智谱 glm 系认 search.enable；
+# 不认识的键会触发 400 参数错误，被探测逻辑捕获后去参重试。
+_WEB_SEARCH_UNSUPPORTED = False
 
-def chat_json(system: str, user: str, retries: int = 3, enable_thinking: bool = False) -> dict:
+
+def _is_param_err(e: Exception) -> bool:
+    """参数类错误（400/invalid request）：联网参数不兼容的典型信号，重试无意义。"""
+    if type(e).__name__ == "BadRequestError":
+        return True
+    m = str(e).lower()
+    return "invalid_request" in m or "unsupported parameter" in m or "unknown parameter" in m
+
+
+def _extra_body(enable_thinking: bool, web_search: bool) -> dict:
+    body = {"enable_thinking": enable_thinking}
+    if web_search and not _WEB_SEARCH_UNSUPPORTED:
+        body["enable_search"] = True
+        body["search"] = {"enable": True}
+    return body
+
+
+def chat_json(system: str, user: str, retries: int = 3, enable_thinking: bool = False,
+              web_search: bool = False) -> dict:
     """带重试的 JSON 输出调用；鉴权/欠费类错误不重试，直接给出可操作提示。
 
     enable_thinking=True 供判断型环节（如语义聚类）使用：更准但慢一个量级，
     因此调用超时也相应放宽。
+    web_search=True 尝试启用服务商联网搜索；服务商不支持时自动去参降级（本进程内不再尝试）。
     """
+    global _WEB_SEARCH_UNSUPPORTED
     client, model = _client_and_model()
     if enable_thinking:
         client = OpenAI(api_key=client.api_key, base_url=client.base_url, timeout=300)
+    use_ws = web_search and not _WEB_SEARCH_UNSUPPORTED
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
@@ -66,7 +91,7 @@ def chat_json(system: str, user: str, retries: int = 3, enable_thinking: bool = 
                 model=model,
                 temperature=0.2,
                 response_format={"type": "json_object"},
-                extra_body={"enable_thinking": enable_thinking},
+                extra_body=_extra_body(enable_thinking, use_ws),
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
@@ -76,6 +101,11 @@ def chat_json(system: str, user: str, retries: int = 3, enable_thinking: bool = 
         except Exception as e:
             if isinstance(e, AuthenticationError) or _is_billing(e):
                 _raise_friendly(e)
+            if use_ws and _is_param_err(e):
+                # 服务商不认联网参数：记下降级标记，去参立即重试（不消耗重试配额）
+                _WEB_SEARCH_UNSUPPORTED = True
+                use_ws = False
+                continue
             last_err = e  # 网络抖动 / 偶发 JSON 不合法才重试
             time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"LLM JSON 调用失败：{last_err}")

@@ -8,6 +8,7 @@
 """
 import re
 
+from config import LLM_WEB_SEARCH
 from core.llm import chat_json
 
 # 营销号文案特征（宁缺勿滥：只命中强营销信号，避免误伤普通探店分享）
@@ -27,7 +28,7 @@ GEN_SYSTEM = """你是旅行候选圈定专家。为指定城市生成值得实�
 规则：
 1. 总数 15~20 个，按类别配额：景点约10、美食约5、体验约3、购物约2（购物仅列 1~2 个代表性场所）；
 2. 候选要具体到可直接搜索的名称（如"云冈石窟"而非"古建筑"；"凤临阁"而非"好吃的"）；
-3. 优先选游客真实会去、有讨论热度的，避免冷门到搜不到内容的；
+3. 优先选游客真实会去、有讨论热度的，避免冷门到搜不到内容的；结合近期真实热度与开放情况（如有联网信息可参考）；
 4. 结合用户偏好与天数调整侧重（如天数短则砍购物/体验）；
 5. 输出严格 JSON：{"candidates": [{"name": "...", "category": "景点|美食|体验|购物", "reason": "一句话理由"}]}"""
 
@@ -60,11 +61,13 @@ def _normalize_candidate(x: dict) -> dict | None:
 
 
 def generate_candidates(city: str, days: int, preferences: str) -> list[dict]:
-    """大模型圈定候选：按类别配额裁剪后返回（上限 TOTAL_CANDIDATES_MAX）。"""
+    """大模型圈定候选：按类别配额裁剪后返回（上限 TOTAL_CANDIDATES_MAX）。
+    联网搜索默认开启（服务商不支持时自动降级为纯基线）。"""
     data = chat_json(
         GEN_SYSTEM,
         f"城市：{city}\n天数：{days}\n用户偏好：{preferences or '无'}\n"
         f"类别配额：{CATEGORY_QUOTA}",
+        web_search=LLM_WEB_SEARCH,
     )
     raw = [_normalize_candidate(x) for x in (data.get("candidates") or []) if isinstance(x, dict)]
     picked: list[dict] = []
