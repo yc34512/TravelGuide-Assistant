@@ -32,6 +32,7 @@ def load_items_from_raw(raw_path: str) -> list[VideoItem]:
             tags=d.get("tags", []),
             like_count=d.get("like_count"),
             publish_time=d.get("publish_time"),
+            transcript=d.get("transcript", ""),  # deep 模式的转写成果随原始 JSON 复用
             comments=[Comment(**c) for c in d.get("comments", [])],
         )
         for d in data
@@ -39,7 +40,8 @@ def load_items_from_raw(raw_path: str) -> list[VideoItem]:
 
 
 def _crawl(keyword: str, limit: int, comments: int, asr: bool, log) -> tuple[list[VideoItem], str]:
-    """浏览器采集。全程持锁：同一时刻只跑一个采集任务。"""
+    """浏览器采集。浏览器阶段持锁：同一时刻只跑一个采集任务；
+    转写与落盘在锁释放后进行，不阻塞其他任务排队。"""
     with _CRAWL_LOCK:
         from crawler.browser import create_page, ensure_login
         from crawler.douyin import DouyinCrawler
@@ -65,7 +67,6 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, log) -> tuple[lis
                     log(msg)
                 except Exception as e:
                     log(f"[{i}/{len(urls)}] 采集失败：{e}")
-            return items
         finally:
             try:
                 page.quit()
@@ -210,6 +211,7 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
         job["stage"] = "完成"
         job["result"] = {
             "report_path": str(report_path),
+            "report_name": report_path.name,
             "markdown": report_path.read_text(encoding="utf-8"),
             "cache_hit": job.get("cache_hit", False),
             "stats": {

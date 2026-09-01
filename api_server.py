@@ -1,10 +1,12 @@
 """FastAPI 服务：网页界面 + 任务接口。
 
 接口：
-    GET  /                 网页界面
-    GET  /api/health       健康检查 + 知识库概览
-    POST /api/research     发起研究任务 {keyword, limit, comments, force} -> {job_id}
-    GET  /api/jobs/{id}    轮询任务状态/进度/结果
+    GET  /                     网页界面
+    GET  /api/health           健康检查 + 知识库概览
+    POST /api/research         发起研究任务 {keyword, mode, force} -> {job_id}
+    GET  /api/jobs/{id}        轮询任务状态/进度/结果
+    GET  /api/reports          历史报告列表
+    GET  /api/reports/download 下载指定报告文件（防目录穿越）
 """
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from config import KB_TTL_DAYS
+from config import KB_TTL_DAYS, REPORT_DIR
 from core import knowledge
 from service import research
 
@@ -52,3 +54,18 @@ def job_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
     return job
+
+
+@app.get("/api/reports")
+def report_history():
+    """历史报告列表（知识库登记且文件仍存在的）。"""
+    return {"reports": knowledge.list_history()}
+
+
+@app.get("/api/reports/download")
+def download_report(name: str):
+    """按文件名下载报告。路径先 resolve 再校验父目录，防止 ../ 目录穿越。"""
+    path = (REPORT_DIR / name).resolve()
+    if path.parent != REPORT_DIR.resolve() or path.suffix != ".md" or not path.exists():
+        raise HTTPException(status_code=404, detail="报告不存在")
+    return FileResponse(path, filename=path.name, media_type="text/markdown")

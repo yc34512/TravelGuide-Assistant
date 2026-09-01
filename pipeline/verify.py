@@ -2,24 +2,67 @@
 
 置信度三级：
 - 多源一致：≥2 个独立来源（不同视频）说同一件事，可信度最高；
-- 存分歧：来源互相矛盾（如票价说法不一），报告中必须并列呈现；
+- 存分歧：来源互相矛盾（如票价说法不一）或立场对立（一说推荐一说避雷），
+  报告中必须并列呈现；
 - 单源：仅一个来源，报告中用"有博主提到"等谨慎语气。
 
-验证本身用一次 LLM 调用做语义等价聚类；任何解析异常都回退为"全部单源"，
-宁可保守也不阻断主流程。
+验证本身用 LLM 调用做语义等价聚类；要点数超过 BATCH_THRESHOLD 时按批次聚类再合并，
+避免单次大输入漏分组；任何解析异常都回退为"全部单源"，宁可保守也不阻断主流程。
 """
 from config import VERIFY_ENABLE_THINKING
 from core.llm import chat_json
+
+# 超过该数量的要点分批聚类：大输入下单次调用容易漏分组，分批后各批编号短小、判断更稳。
+BATCH_THRESHOLD = 40
+BATCH_SIZE = 30
 
 VERIFY_SYSTEM = """你是信息核查助手。输入是编号的旅游信息要点列表，你的任务：
 
 1. 分组：把"说的是同一件事"的要点归为一组（语义等价即可，允许措辞不同，
    例如两条都说"苏堤不能骑车"）。主体不同、地点不同、行为不同不算同一件事；
-2. 冲突：找出互相矛盾的要点（例如对同一事物给出不同的价格/开放结论），成对列出；
+2. 冲突：找出互相矛盾的要点，成对列出。两种都算矛盾：
+   - 事实矛盾：对同一事物给出不同的价格/开放时间/结论；
+   - 立场对立：对同一件事一说"推荐"一说"避雷"；
 3. 输出严格 JSON：{"groups": [[编号...], ...], "conflicts": [[编号, 编号], ...]}
 
 要求：groups 必须不重不漏地覆盖全部编号；conflicts 可为空数组；
 编号一律使用输入中的原始编号。"""
+
+
+def _cluster_once(points: list[dict]) -> tuple[list[list[int]], list[tuple[int, int]]]:
+    """单次聚类调用：返回 (分组, 冲突对)，编号从 1 开始。解析异常抛给调用方兜底。"""
+    n = len(points)
+    numbered = "\n".join(
+        f"[{i + 1}] ({p['topic']}|立场:{p.get('stance', '中性')}) {p['claim']}"
+        for i, p in enumerate(points)
+    )
+    # 聚类是管道里最依赖推理的环节：开思考更准（实测可修正约 2 成判定）但慢一个量级，
+    # 由 VERIFY_ENABLE_THINKING 配置控制，兼顾"快速迭代"与"深度出报告"两种场景
+    data = chat_json(VERIFY_SYSTEM, numbered, enable_thinking=VERIFY_ENABLE_THINKING)
+    groups = [
+        _clean_ids(g, n)
+        for g in data.get("groups", [])
+        if isinstance(g, list)
+    ]
+    conflicts = [
+        (int(a), int(b))
+        for a, b in (data.get("conflicts") or [])
+        if _is_id(a, n) and _is_id(b, n) and int(a) != int(b)
+    ]
+    return groups, conflicts
+
+
+def _stance_conflicts(points: list[dict], groups: list[list[int]]) -> list[tuple[int, int]]:
+    """代码兜底的立场冲突检测：同一分组内既有人说推荐又有人说避雷，
+    成对记为冲突——不依赖模型自觉，立场对立绝不漏判。"""
+    pairs: list[tuple[int, int]] = []
+    for members in groups:
+        rec = [x for x in members if points[x - 1].get("stance") == "推荐"]
+        avoid = [x for x in members if points[x - 1].get("stance") == "避雷"]
+        for a in rec:
+            for b in avoid:
+                pairs.append((a, b))
+    return pairs
 
 
 def annotate_confidence(points: list[dict]) -> list[dict]:
@@ -27,23 +70,19 @@ def annotate_confidence(points: list[dict]) -> list[dict]:
     if n == 0:
         return points
 
-    numbered = "\n".join(
-        f"[{i + 1}] ({p['topic']}) {p['claim']}" for i, p in enumerate(points)
-    )
     try:
-        # 聚类是管道里最依赖推理的环节：开思考更准（实测可修正约 2 成判定）但慢一个量级，
-        # 由 VERIFY_ENABLE_THINKING 配置控制，兼顾"快速迭代"与"深度出报告"两种场景
-        data = chat_json(VERIFY_SYSTEM, numbered, enable_thinking=VERIFY_ENABLE_THINKING)
-        groups = [
-            _clean_ids(g, n)
-            for g in data.get("groups", [])
-            if isinstance(g, list)
-        ]
-        conflicts = [
-            (int(a), int(b))
-            for a, b in (data.get("conflicts") or [])
-            if _is_id(a, n) and _is_id(b, n) and int(a) != int(b)
-        ]
+        if n <= BATCH_THRESHOLD:
+            groups, conflicts = _cluster_once(points)
+        else:
+            # 分批聚类：各批编号独立从 1 起，回填全局编号后合并。
+            # 同批内才比较等价关系，跨批漏组会使少量要点降级为单源——保守但安全。
+            groups, conflicts = [], []
+            for start in range(0, n, BATCH_SIZE):
+                batch = points[start:start + BATCH_SIZE]
+                b_groups, b_conflicts = _cluster_once(batch)
+                groups.append([[x + start for x in g] for g in b_groups])
+                conflicts.extend((a + start, b + start) for a, b in b_conflicts)
+            groups = [g for sub in groups for g in sub]
     except Exception:
         groups, conflicts = [], []
 
@@ -73,6 +112,7 @@ def annotate_confidence(points: list[dict]) -> list[dict]:
         group_sources[group_of[i]].add(p.get("source", ""))
 
     conflict_ids = {i for pair in conflicts for i in pair}
+    conflict_ids |= {i for pair in _stance_conflicts(points, group_members) for i in pair}
 
     out = []
     for i, p in enumerate(points, 1):

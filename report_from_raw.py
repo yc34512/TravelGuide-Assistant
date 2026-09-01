@@ -33,6 +33,8 @@ def main():
             description=d.get("description", ""),
             tags=d.get("tags", []),
             like_count=d.get("like_count"),
+            publish_time=d.get("publish_time"),
+            transcript=d.get("transcript", ""),
             comments=[Comment(**c) for c in d.get("comments", [])],
         )
         for d in raw

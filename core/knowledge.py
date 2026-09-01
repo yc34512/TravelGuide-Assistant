@@ -6,6 +6,7 @@
 
 选 SQLite 而非 PostgreSQL：单机单用户场景零部署成本，将来上云再平滑迁移。
 """
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,20 @@ from pathlib import Path
 from config import DATA_DIR
 
 _DB_PATH = DATA_DIR / "knowledge.db"
+
+# 关键词归一化："西湖攻略"与"西湖"应命中同一缓存。去除常见后缀与空白；
+# 归一化后为空则保留原串，避免全部归入同一个伪关键词。
+_NOISE_SUFFIXES = ("旅游攻略", "攻略", "旅游", "旅行", "游玩", "怎么玩", "游记", "自由行")
+
+
+def normalize_keyword(keyword: str) -> str:
+    k = keyword.strip()
+    for suf in _NOISE_SUFFIXES:
+        if k.endswith(suf) and len(k) > len(suf):
+            k = k[: -len(suf)]
+            break
+    k = re.sub(r"\s+", "", k)
+    return k or keyword.strip()
 
 
 def _conn() -> sqlite3.Connection:
@@ -36,12 +51,13 @@ def _conn() -> sqlite3.Connection:
 
 
 def record_crawl(keyword: str, raw_path: str, video_count: int, comment_count: int) -> int:
-    """采集完成后登记一条知识库记录，返回记录 id。"""
+    """采集完成后登记一条知识库记录（关键词归一化后入库），返回记录 id。"""
     with _conn() as conn:
         cur = conn.execute(
             "INSERT INTO spot_cache (keyword, raw_path, video_count, comment_count, crawled_at)"
             " VALUES (?, ?, ?, ?, ?)",
-            (keyword, raw_path, video_count, comment_count, datetime.now().isoformat(timespec="seconds")),
+            (normalize_keyword(keyword), raw_path, video_count, comment_count,
+             datetime.now().isoformat(timespec="seconds")),
         )
         return cur.lastrowid
 
@@ -55,13 +71,18 @@ def update_report(record_id: int, report_path: str) -> None:
 
 
 def find_fresh(keyword: str, ttl_days: int) -> dict | None:
-    """返回该关键词保鲜期内的最新一条记录；过期或不存在返回 None。"""
+    """返回该关键词保鲜期内的最新一条记录；过期或不存在返回 None。
+
+    同时用归一化形式与原始形式查询：旧版本入库的记录未经归一化（如存的是"东湖游玩"），
+    双形式兼容避免存量缓存失效。"""
     since = (datetime.now() - timedelta(days=ttl_days)).isoformat(timespec="seconds")
+    candidates = list(dict.fromkeys([normalize_keyword(keyword), keyword.strip()]))
+    marks = ", ".join("?" for _ in candidates)
     with _conn() as conn:
         row = conn.execute(
-            "SELECT * FROM spot_cache WHERE keyword = ? AND crawled_at >= ?"
+            f"SELECT * FROM spot_cache WHERE keyword IN ({marks}) AND crawled_at >= ?"
             " ORDER BY crawled_at DESC LIMIT 1",
-            (keyword, since),
+            (*candidates, since),
         ).fetchone()
     if not row:
         return None
@@ -78,3 +99,31 @@ def stats() -> dict:
         reports = conn.execute("SELECT COUNT(*) AS n FROM spot_cache WHERE report_path IS NOT NULL").fetchone()["n"]
         latest = conn.execute("SELECT MAX(crawled_at) AS t FROM spot_cache").fetchone()["t"]
     return {"spots": spots, "reports": reports, "latest_crawl": latest}
+
+
+def list_history(limit: int = 20) -> list[dict]:
+    """最近的已生成报告列表（供网页历史卡片）：只返回报告文件仍存在的记录。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT keyword, video_count, comment_count, crawled_at, reported_at, report_path"
+            " FROM spot_cache WHERE report_path IS NOT NULL"
+            " ORDER BY reported_at DESC LIMIT ?",
+            (limit * 2,),  # 多取一些，兼容文件被手动删除后的过滤
+        ).fetchall()
+    out = []
+    for r in rows:
+        if not Path(r["report_path"]).exists():
+            continue
+        out.append(
+            {
+                "keyword": r["keyword"],
+                "video_count": r["video_count"],
+                "comment_count": r["comment_count"],
+                "crawled_at": r["crawled_at"],
+                "reported_at": r["reported_at"],
+                "report_path": Path(r["report_path"]).name,
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out

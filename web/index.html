@@ -40,6 +40,17 @@
   article blockquote { background: #f2f7f5; margin: 8px 0; padding: 8px 14px;
                        border-radius: 8px; color: #5b6b78; font-size: 13px; }
   article a { color: #1f7a5c; word-break: break-all; }
+  .hist { list-style: none; margin: 0; padding: 0; }
+  .hist li { display: flex; justify-content: space-between; align-items: center;
+             padding: 9px 4px; border-bottom: 1px solid #eef1f3; font-size: 14px; gap: 8px; }
+  .hist li:last-child { border-bottom: 0; }
+  .hist .kw { font-weight: 600; cursor: pointer; color: #1f7a5c; }
+  .hist .kw:hover { text-decoration: underline; }
+  .hist .meta { color: #93a3ae; font-size: 12px; white-space: nowrap; }
+  .mini-btn { background: #fff; border: 1px solid #1f7a5c; color: #1f7a5c; font-size: 13px;
+              padding: 5px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  .mini-btn:hover { background: #eef6f2; }
+  .card h3 { margin: 0 0 10px; font-size: 15px; color: #22303c; }
   .hidden { display: none; }
   footer { text-align: center; color: #93a3ae; font-size: 12px; padding: 14px; }
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #cfe6dd;
@@ -72,8 +83,16 @@
   </div>
 
   <div id="result" class="card hidden">
-    <div class="stats" id="stats"></div>
+    <div class="row" style="justify-content: space-between; margin-bottom: 8px;">
+      <div class="stats" id="stats" style="margin-bottom: 0;"></div>
+      <a id="dl" class="mini-btn" style="text-decoration: none;" download>下载 Markdown</a>
+    </div>
     <article id="report"></article>
+  </div>
+
+  <div id="history" class="card hidden">
+    <h3>历史报告（知识库）</h3>
+    <ul class="hist" id="hist"></ul>
   </div>
 </main>
 <footer>报告由 AI 汇总抖音公开内容生成，仅供参考；价格/政策等时效信息出发前请务必官方核实。</footer>
@@ -131,15 +150,44 @@ async function poll(id) {
   $('progress').classList.add('hidden');
   const r = job.result, s = r.stats;
   $('result').classList.remove('hidden');
+  $('dl').href = '/api/reports/download?name=' + encodeURIComponent(r.report_name);
   $('stats').innerHTML =
     `<span>关键词 <b>${job.keyword}</b></span><span>视频 <b>${s.videos}</b> 条</span>` +
     `<span>评论 <b>${s.comments}</b> 条</span><span>要点 <b>${s.points}</b> 条</span>` +
     `<span>耗时 <b>${s.elapsed}</b> 秒</span>` +
     (r.cache_hit ? '<span>⚡ 知识库命中，免采集</span>' : '<span>🆕 本次全新采集</span>') +
-    `<span>文件：${r.report_path}</span>`;
+    `<span>文件：${r.report_name}</span>`;
   $('report').innerHTML = renderMd(r.markdown);
   window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
+  loadHistory();
 }
+
+async function loadHistory() {
+  try {
+    const resp = await fetch('/api/reports');
+    const { reports } = await resp.json();
+    if (!reports || !reports.length) return;
+    $('history').classList.remove('hidden');
+    $('hist').innerHTML = reports.map(r =>
+      `<li><span class="kw" onclick="viewReport('${encodeURIComponent(r.report_path)}')">${r.keyword}</span>` +
+      `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
+      `<a class="mini-btn" download href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">下载</a></li>`
+    ).join('');
+  } catch (e) { /* 历史加载失败不影响主流程 */ }
+}
+
+async function viewReport(name) {
+  const resp = await fetch('/api/reports/download?name=' + name);
+  if (!resp.ok) { alert('报告文件不存在或已被删除'); return; }
+  const md = await resp.text();
+  $('result').classList.remove('hidden');
+  $('dl').href = '/api/reports/download?name=' + encodeURIComponent(decodeURIComponent(name));
+  $('stats').innerHTML = `<span>文件：${decodeURIComponent(name)}</span>`;
+  $('report').innerHTML = renderMd(md);
+  window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
+}
+
+loadHistory();
 </script>
 </body>
 </html>

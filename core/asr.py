@@ -145,34 +145,3 @@ def transcribe_items(items: list, workers: int = 2, progress=None) -> None:
             done += 1
             if progress:
                 progress(done, len(todo), it, text)
-
-
-def transcribe_from_url(url: str, retries: int = 3) -> str | None:
-    """下载 -> 校验 -> 转写 -> 删除临时文件。CDN 截断自动重下，最终失败返回 None。"""
-    tmp_dir = DATA_DIR / "asr_tmp"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    path: Path | None = None
-    try:
-        for attempt in range(retries):
-            try:
-                path = _download(url, tmp_dir)
-                if not _is_decodable(path):
-                    raise IOError("视频文件无法解码（疑似截断）")
-                text = transcribe_file(path)
-                if text:
-                    return text
-                raise IOError("转写结果为空")
-            except Exception:
-                if path is not None:
-                    path.unlink(missing_ok=True)
-                    path = None
-                if attempt == retries - 1:
-                    return None
-                time.sleep(2 * (attempt + 1))
-        return None
-    finally:
-        if path is not None:
-            try:
-                path.unlink(missing_ok=True)
-            except Exception:
-                pass

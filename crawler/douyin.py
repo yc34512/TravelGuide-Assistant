@@ -39,6 +39,11 @@ SEL_VIDEO_PUBTIME = [
 SEL_COMMENT_LIST = ['css:[data-e2e="comment-list"]', "css:.comment-mainContent"]
 SEL_COMMENT_ITEM = ['css:[data-e2e="comment-item"]', "css:.comment-item"]
 
+# 质量过滤：点赞低于门槛的评论信息量低（表情/跟风刷屏居多），采集后丢弃；
+# 高赞评论不足保底数时放宽门槛，避免过冷门的视频被过滤到所剩无几。
+MIN_COMMENT_LIKES = 2
+MIN_COMMENTS_KEEP = 5
+
 
 def _first(scope, selectors: list[str], timeout: int = 3):
     """在候选选择器里找到第一个命中的元素。"""
@@ -176,7 +181,12 @@ class DouyinCrawler:
             time.sleep(random.uniform(1.5, 2.5))
             stale_rounds = stale_rounds + 1 if len(collected) == before else 0
 
-        return sorted(collected.values(), key=lambda c: c.like_count or 0, reverse=True)
+        # 点赞排序 + 低质过滤：高赞评论更可能含真实经验；不足保底数时放宽，保证条数
+        ranked = sorted(collected.values(), key=lambda c: c.like_count or 0, reverse=True)
+        keep = [c for c in ranked if (c.like_count or 0) >= MIN_COMMENT_LIKES]
+        if len(keep) < MIN_COMMENTS_KEEP:
+            keep = ranked
+        return keep[:max_n]
 
     def _scroll_comment_panel(self, container) -> None:
         """评论面板是独立滚动容器：向上找到真正可滚动的祖先元素滚到底，
