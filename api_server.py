@@ -6,7 +6,7 @@
     POST /api/research         发起攻略研究任务 {keyword, mode, force} -> {job_id}
     POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?, budget?, preference_mode?} -> {job_id}
     POST /api/heat/refresh     发起城市热度刷榜任务 {city} -> {job_id}（元数据轻量采集）
-    GET  /api/heat/{city}      查询城市实时热度榜（本周最火/正在降温）
+    GET  /api/heat/{city}      查询城市实时热度榜（本周最火/长盛不衰/正在降温/平稳）
     GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
     POST /api/jobs/{id}/cancel 取消运行中的任务（攻略/行程通用）
     GET  /api/jobs/history     历史任务摘要（持久化档案）

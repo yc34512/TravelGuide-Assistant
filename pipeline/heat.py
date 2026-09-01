@@ -14,8 +14,9 @@ from datetime import datetime, timedelta
 FRESH_DAYS = 90
 DIGEST_MAX = 12  # 避坑专题条数上限，多了没人看
 
-# 三态趋势判定阈值（初始常量，集中在此便于调参）：
-# 本周最火：近 7 天发布占比高，或综合热度足够强；正在降温：内容主要在 60 天前且近 7 天几乎无新增。
+# 趋势判定阈值（初始常量，集中在此便于调参）：
+# 本周最火：近 7 天发布占比高（新鲜内容井喷）；长盛不衰：热度高但新增不多（经典常青）；
+# 正在降温：内容主要在 60 天前且近 7 天几乎无新增，且综合热度也不高。
 HOT_FRESH7 = 0.3
 HOT_SCORE = 0.6
 COOL_OLD60 = 0.5
@@ -111,9 +112,16 @@ def time_windows(items: list, now: datetime | None = None) -> dict:
 
 
 def trend_of(fresh7: float, old60: float, score: float) -> str:
-    """三态趋势判定：本周最火 / 正在降温 / 平稳。纯函数可测。"""
-    if fresh7 >= HOT_FRESH7 or score >= HOT_SCORE:
+    """四态趋势判定：本周最火 / 长盛不衰 / 正在降温 / 平稳。纯函数可测。
+
+    注意区分："本周最火"必须看新鲜度（新增内容井喷），综合分高只代表总热度；
+    高赞但内容偏旧的景点标"长盛不衰"而非"本周最火"，避免误导。
+    """
+    if fresh7 >= HOT_FRESH7:
         return "本周最火"
     if old60 >= COOL_OLD60 and fresh7 <= COOL_FRESH7:
-        return "正在降温"
+        # 无新增内容：高分 = 一直火（长盛不衰），低分 = 真降温
+        return "长盛不衰" if score >= HOT_SCORE else "正在降温"
+    if score >= HOT_SCORE:
+        return "长盛不衰"
     return "平稳"

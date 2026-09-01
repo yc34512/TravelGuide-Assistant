@@ -30,6 +30,7 @@
   .heat-tbl th, .heat-tbl td { padding: 7px 9px; border-bottom: 1px solid #e8ecee; text-align: left; }
   .heat-tbl th { color: #1f7a5c; background: #f4f8f6; }
   .trend-hot { color: #c0392b; font-weight: 600; }
+  .trend-ever { color: #b9770e; font-weight: 600; }
   .trend-cool { color: #2471a3; font-weight: 600; }
   .trend-flat { color: #7f8c8d; }
   .opts { margin-top: 12px; font-size: 13px; color: #5b6b78; display: flex;
@@ -121,7 +122,7 @@
         <button class="mini-btn" onclick="viewHeat()">查看榜单</button>
         <button id="heatBtn" onclick="goHeatRefresh()">刷新榜单（实时采集，约3~5分钟）</button>
       </div>
-      <div class="opts">基于抖音近 7 天/60 天内容分布判定：🔥 本周最火 / 🔻 正在降温 / ➖ 平稳。刷榜只采元数据（点赞与发布时间），不采评论。</div>
+      <div class="opts">基于抖音近 7 天/60 天内容分布判定：🔥 本周最火 / ✨ 长盛不衰 / 🔻 正在降温 / ➖ 平稳。刷榜只采元数据（点赞与发布时间），不采评论。</div>
     </div>
   </div>
 
@@ -296,6 +297,7 @@ async function goTrip() {
 
 function trendTag(t) {
   if (t === '本周最火') return '<span class="trend-hot">🔥 ' + t + '</span>';
+  if (t === '长盛不衰') return '<span class="trend-ever">✨ ' + t + '</span>';
   if (t === '正在降温') return '<span class="trend-cool">🔻 ' + t + '</span>';
   return '<span class="trend-flat">➖ ' + (t || '平稳') + '</span>';
 }

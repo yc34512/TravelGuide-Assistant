@@ -605,14 +605,14 @@ class TestHeatTrend(unittest.TestCase):
         self.assertEqual(time_windows([]), {"fresh7": 0.0, "fresh60": 0.0, "old60": 0.0})
 
     def test_trend_of(self):
-        """三态判定：本周最火 / 正在降温 / 平稳。"""
+        """四态判定：本周最火看新鲜度，高赞旧内容标长盛不衰而非最火。"""
         from pipeline.heat import trend_of
 
-        self.assertEqual(trend_of(0.4, 0.1, 0.2), "本周最火")   # 新内容占比高
-        self.assertEqual(trend_of(0.0, 0.2, 0.7), "本周最火")   # 综合分高也算
-        self.assertEqual(trend_of(0.0, 0.8, 0.3), "正在降温")   # 旧内容主导且无新增
+        self.assertEqual(trend_of(0.4, 0.1, 0.2), "本周最火")   # 新内容占比高（不看分数）
+        self.assertEqual(trend_of(0.0, 0.2, 0.7), "长盛不衰")   # 热度高但无新增：不是"本周最火"
+        self.assertEqual(trend_of(0.0, 0.8, 0.3), "正在降温")   # 旧内容主导且热度不高
+        self.assertEqual(trend_of(0.0, 0.8, 0.7), "长盛不衰")   # 高分缓解降温判定（一直火）
         self.assertEqual(trend_of(0.2, 0.3, 0.4), "平稳")
-        self.assertEqual(trend_of(0.0, 0.8, 0.7), "本周最火")   # 热度高优先于降温判定
 
 
 class TestDigestAndHeatApi(unittest.TestCase):
