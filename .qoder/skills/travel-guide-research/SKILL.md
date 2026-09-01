@@ -1,6 +1,6 @@
 ---
 name: travel-guide-research
-description: 调用本地"旅游攻略助手"服务（TravelGuide Assistant），对指定景点发起抖音公开内容采集与 AI 攻略生成任务，轮询进度并获取带来源引用和置信度的攻略报告。当用户提到查攻略、某景点值不值得去、行程规划需要攻略素材、旅游攻略、避雷/踩坑信息时使用。
+description: 调用本地"旅游攻略助手"服务（TravelGuide Assistant），对指定景点发起抖音公开内容采集与 AI 攻略生成任务，或输入城市+天数+酒店生成逐日分时段的行程规划，轮询进度并获取带来源引用的报告。当用户提到查攻略、某景点值不值得去、行程规划、几天怎么玩、旅游攻略、避雷/踩坑信息时使用。
 ---
 
 # 旅游攻略研究（TravelGuide Assistant 包装）
@@ -41,6 +41,21 @@ Content-Type: application/json
 
 {"keyword": "西湖", "mode": "standard", "force": false}
 ```
+
+若用户要的是**多天行程规划**（如"大同玩 3 天怎么排"），改用：
+
+```
+POST /api/trip
+Content-Type: application/json
+
+{"city": "大同", "days": 3, "hotel": "大同古城内", "spots": null, "preferences": ""}
+```
+
+- `spots` 传数组可指定景点；缺省时系统自动圈定（上限 天数×3）；
+- 行程任务耗时更长：未调研过的景点约 5 分钟/个，7 天内调研过的自动命中缓存；
+- 后续轮询、取消、结果处理与攻略任务完全一致（同一个 /api/jobs/{id}）。
+
+通用参数（攻略任务）：
 
 - `mode`：`fast`（约 3 分钟）/ `standard`（约 6 分钟，默认）/ `deep`（约 15~25 分钟，含口播转写，出发前深度规划用）
 - `force: true`：跳过知识库缓存强制重新采集；用户未明确要求时保持 `false`（7 天内重复关键词会命中缓存，约 30 秒出报告）

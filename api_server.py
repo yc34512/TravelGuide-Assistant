@@ -3,9 +3,10 @@
 接口：
     GET  /                     网页界面
     GET  /api/health           健康检查 + 知识库概览
-    POST /api/research         发起研究任务 {keyword, mode, force} -> {job_id}
+    POST /api/research         发起攻略研究任务 {keyword, mode, force} -> {job_id}
+    POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?} -> {job_id}
     GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
-    POST /api/jobs/{id}/cancel 取消运行中的任务
+    POST /api/jobs/{id}/cancel 取消运行中的任务（攻略/行程通用）
     GET  /api/jobs/history     历史任务摘要（持久化档案）
     GET  /api/reports          历史报告列表
     GET  /api/reports/download 下载指定报告文件（防目录穿越）
@@ -18,7 +19,7 @@ from pydantic import BaseModel
 
 from config import KB_TTL_DAYS, REPORT_DIR
 from core import knowledge
-from service import research
+from service import research, trip
 
 app = FastAPI(
     title="旅游攻略助手",
@@ -41,6 +42,14 @@ class ResearchIn(BaseModel):
     force: bool = False
 
 
+class TripIn(BaseModel):
+    city: str
+    days: int = 2
+    hotel: str = ""
+    spots: list[str] | None = None  # 指定景点清单；缺省时自动圈定
+    preferences: str = ""
+
+
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(_WEB_DIR / "index.html")
@@ -57,6 +66,19 @@ def start_research(body: ResearchIn):
     if not keyword:
         raise HTTPException(status_code=400, detail="关键词不能为空")
     job_id = research.start_job(keyword, mode=body.mode, force=body.force)
+    return {"job_id": job_id}
+
+
+@app.post("/api/trip", summary="发起行程规划任务（自动圈定景点/调研/排行程）")
+def start_trip_api(body: TripIn):
+    city = body.city.strip()
+    if not city:
+        raise HTTPException(status_code=400, detail="城市不能为空")
+    if not 1 <= body.days <= 7:
+        raise HTTPException(status_code=400, detail="天数需在 1~7 之间")
+    job_id = trip.start_trip(
+        city, body.days, body.hotel.strip(), body.spots, body.preferences.strip()
+    )
     return {"job_id": job_id}
 
 

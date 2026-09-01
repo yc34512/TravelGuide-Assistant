@@ -76,6 +76,26 @@ async def start_research(keyword: str, mode: str = "standard", force: bool = Fal
 
 
 @mcp.tool()
+async def plan_trip(city: str, days: int = 2, hotel: str = "",
+                    spots: str = "", preferences: str = "") -> dict:
+    """发起多天行程规划任务：自动圈定城市景点、逐个调研、按顺路原则排线。
+
+    city: 目的地城市，如"大同"。days: 出行天数 1~7。hotel: 酒店/住宿位置（用于排线）。
+    spots: 可选，指定景点用逗号分隔；留空则自动圈定。preferences: 可选偏好（如"带老人"）。
+    耗时较长：未调研过的景点约 5 分钟/个，调研过的秒级命中缓存。用 get_job_status 轮询。
+    """
+    body = {"city": city, "days": days, "hotel": hotel, "preferences": preferences}
+    if spots.strip():
+        body["spots"] = [s.strip() for s in spots.replace("、", ",").split(",") if s.strip()]
+    try:
+        data = await _post("/api/trip", body)
+        return {"ok": True, "job_id": data["job_id"],
+                "hint": "行程任务耗时较长，请每 30 秒调用 get_job_status 轮询，不要同步等待。"}
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
 async def get_job_status(job_id: str) -> dict:
     """查询任务进度。返回 status：running(继续轮询) / done(成功,结果在 result.markdown) /
     error(失败,原因在 error) / cancelled(已取消)。日志只保留末尾 8 行以节省上下文。"""

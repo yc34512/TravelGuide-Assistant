@@ -79,7 +79,21 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 - **口播转写**（深度模式）：本地 faster-whisper 推理，视频下载转写后即删，音频不出本机；转写文本随原始数据入库，缓存命中时零成本复用；
 - **景点知识库**：采集成果沉淀在本地 SQLite（`data/knowledge.db`），关键词自动归一化（"西湖攻略"≈"西湖"），保鲜期内（默认 7 天，`KB_TTL_DAYS` 可配）重复查询免重爬，约 30 秒出报告；勾选"强制重新采集"可跳过缓存；
 - **历史不丢**：任务终态（完成/失败/取消）与报告档案落库，服务重启后历史报告仍可浏览与下载；
-- API 形态（可供其他程序/小程序调用）：`POST /api/research`、`GET /api/jobs/{id}`、`POST /api/jobs/{id}/cancel`、`GET /api/reports`、`GET /api/health`。
+- API 形态（可供其他程序/小程序调用）：`POST /api/research`、`POST /api/trip`、`GET /api/jobs/{id}`、`POST /api/jobs/{id}/cancel`、`GET /api/reports`、`GET /api/health`。
+
+## 行程规划师（多天路书）
+
+网页切到"行程规划"页签，输入**城市 + 天数 + 酒店**即可生成逐日分时段路书：
+
+1. 自动圈定候选景点（上限 天数×3，也可手动指定清单）；
+2. 逐个景点调研：7 天内调研过的自动命中知识库缓存，未命中的现场采集（约 5 分钟/个）；
+3. 每个景点蒸馏结构化档案（建议时长/最佳时段/亮点/避雷/美食/打卡点）；
+4. 按顺路原则排线：配置高德 Key 时用真实通行时间（步行/公交），未配置则降级为 LLM 区域推断；
+5. 输出：每天上午/下午/晚上逐时段卡片（景点+时长+交通+值得去+注意事项+美食）+ 景点详情卡 + 全部来源链接。
+
+配置高德（可选但推荐）：[高德开放平台](https://lbs.amap.com/) → 控制台 → 创建"Web服务"类型 Key（个人每日 5000 次免费）→ 填入 `.env` 的 `AMAP_API_KEY`。
+
+API 形态：`POST /api/trip {"city": "大同", "days": 3, "hotel": "大同古城内", "spots": null, "preferences": ""}` → 返回 `job_id`，用 `GET /api/jobs/{id}` 轮询。
 
 ## 目录结构
 
@@ -98,6 +112,7 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 │   ├── models.py        # VideoItem / Comment / InfoPoint 统一数据模型
 │   ├── credentials.py   # API Key 安全存取（系统凭据管理器）+ 配置向导
 │   ├── knowledge.py     # 景点知识库 + 任务档案（SQLite，关键词归一化）
+│   ├── geo.py           # 高德地图：POI 定位 + 通行时间（无 Key 自动降级）
 │   ├── rate_limiter.py  # 随机间隔频控
 │   ├── sanitize.py      # 评论去标识化 + 文本清洗（合规闸口）
 │   ├── asr.py           # 本地口播转写（faster-whisper，转写后即删）
@@ -109,9 +124,11 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 │   ├── extract.py       # Map：逐条视频提取要点 + 立场评价（防幻觉 + 噪声过滤）
 │   ├── verify.py        # 多源交叉验证 + 立场冲突兜底 + 分批聚类 + 置信度分级
 │   ├── report.py        # Reduce：汇总生成报告正文（值得做/别踩坑双面覆盖）
+│   ├── planner.py       # 行程规划：景点档案蒸馏 + 行程生成 + 路书渲染
 │   └── render.py        # 报告组装（速览清单 + 溯源清单 + 免责声明）
 ├── service/
-│   └── research.py      # 任务编排：采集 → 提取 → 缺口补全 → 验证 → 报告（支持取消/重试）
+│   ├── research.py      # 攻略任务编排：采集 → 提取 → 缺口补全 → 验证 → 报告（支持取消/重试）
+│   └── trip.py          # 行程任务编排：圈定景点 → 逐点调研 → 档案 → 通行矩阵 → 排线
 ├── web/
 │   └── index.html       # 网页界面
 └── data/
@@ -191,7 +208,7 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 python tests_offline.py
 ```
 
-覆盖：关键词归一化、速览清单、立场冲突兜底、验证降级、评论过滤、时效判断、任务落库与取消、API 防目录穿越、搜索择优排序、缺口检测、作者回复识别。
+覆盖：关键词归一化、速览清单、立场冲突兜底、验证降级、评论过滤、时效判断、任务落库与取消、API 防目录穿越、搜索择优排序、缺口检测、作者回复识别、行程档案/规划规范化与路书渲染、高德降级路径。
 
 仓库已配置 GitHub Actions：每次 push / PR 自动执行语法检查与全部离线测试（见顶部徽章）。
 

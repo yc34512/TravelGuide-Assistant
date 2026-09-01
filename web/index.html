@@ -22,6 +22,10 @@
   button { background: #1f7a5c; border: 0; color: #fff; font-size: 16px;
            padding: 11px 22px; border-radius: 8px; cursor: pointer; }
   button:disabled { background: #9bb8ae; cursor: not-allowed; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab { background: #eef1f3; color: #5b6b78; border: 0; font-size: 14px; padding: 8px 18px;
+         border-radius: 8px 8px 0 0; cursor: pointer; }
+  .tab.active { background: #1f7a5c; color: #fff; }
   .opts { margin-top: 12px; font-size: 13px; color: #5b6b78; display: flex;
           gap: 16px; flex-wrap: wrap; align-items: center; }
   .opts input[type=number] { width: 64px; padding: 5px 8px; border: 1px solid #cfd8de;
@@ -65,17 +69,38 @@
 <header><h1>旅游攻略助手<span>抖音 UGC 挖掘 · AI 整合 · 来源可溯</span></h1></header>
 <main>
   <div class="card">
-    <div class="row">
-      <input type="text" id="kw" placeholder="输入景点关键词，如：西湖攻略" onkeydown="if(event.key==='Enter')go()">
-      <button id="btn" onclick="go()">生成攻略报告</button>
+    <div class="tabs">
+      <button id="tab-research" class="tab active" onclick="switchTab('research')">攻略报告</button>
+      <button id="tab-trip" class="tab" onclick="switchTab('trip')">行程规划</button>
     </div>
-    <div class="opts">
-      <label><input type="radio" name="mode" value="fast"> 快速 · 约3分钟 · 5条视频</label>
-      <label><input type="radio" name="mode" value="standard" checked> 标准 · 约6分钟 · 8条视频</label>
-      <label><input type="radio" name="mode" value="deep"> 深度 · 约15~25分钟 · 含口播转写（出发前用）</label>
+    <div id="form-research">
+      <div class="row">
+        <input type="text" id="kw" placeholder="输入景点关键词，如：西湖攻略" onkeydown="if(event.key==='Enter')go()">
+        <button id="btn" onclick="go()">生成攻略报告</button>
+      </div>
+      <div class="opts">
+        <label><input type="radio" name="mode" value="fast"> 快速 · 约3分钟 · 5条视频</label>
+        <label><input type="radio" name="mode" value="standard" checked> 标准 · 约6分钟 · 8条视频</label>
+        <label><input type="radio" name="mode" value="deep"> 深度 · 约15~25分钟 · 含口播转写（出发前用）</label>
+      </div>
+      <div class="opts">
+        <label><input id="force" type="checkbox"> 忽略知识库缓存，强制重新采集</label>
+      </div>
     </div>
-    <div class="opts">
-      <label><input id="force" type="checkbox"> 忽略知识库缓存，强制重新采集</label>
+    <div id="form-trip" class="hidden">
+      <div class="row">
+        <input type="text" id="city" placeholder="目的地城市，如：大同" style="flex:0 0 160px;">
+        <input type="number" id="days" value="2" min="1" max="7" style="width:60px;padding:11px 8px;border:1px solid #cfd8de;border-radius:8px;"> 天
+        <input type="text" id="hotel" placeholder="酒店/住宿位置（用于排线，如：大同古城内）" style="flex:1;min-width:200px;">
+      </div>
+      <div class="opts">
+        <input type="text" id="prefs" placeholder="偏好（可选）：如 带老人、喜欢历史、想拍日落" style="flex:1;min-width:240px;padding:9px 12px;border:1px solid #cfd8de;border-radius:6px;">
+      </div>
+      <div class="opts">
+        <input type="text" id="spots" placeholder="指定景点（可选，顿号/逗号分隔）；留空则自动圈定" style="flex:1;min-width:240px;padding:9px 12px;border:1px solid #cfd8de;border-radius:6px;">
+        <button id="tripBtn" onclick="goTrip()">生成行程规划</button>
+      </div>
+      <div class="opts">7 天内调研过的景点自动命中缓存；未命中的逐个调研（约 5 分钟/个），全程可取消。</div>
     </div>
   </div>
 
@@ -104,6 +129,15 @@
 <script>
 const $ = id => document.getElementById(id);
 let currentJobId = null;  // 当前正在轮询的任务，供取消按钮使用
+let currentTab = 'research';
+
+function switchTab(t) {
+  currentTab = t;
+  $('form-research').classList.toggle('hidden', t !== 'research');
+  $('form-trip').classList.toggle('hidden', t !== 'trip');
+  $('tab-research').classList.toggle('active', t === 'research');
+  $('tab-trip').classList.toggle('active', t === 'trip');
+}
 
 function renderMd(md) {
   return window.marked ? marked.parse(md) : '<pre style="white-space:pre-wrap">' + md + '</pre>';
@@ -151,6 +185,7 @@ async function poll(id) {
   $('log').scrollTop = $('log').scrollHeight;
   if (job.status === 'running') { setTimeout(() => poll(id), 2000); return; }
   $('btn').disabled = false;
+  $('tripBtn').disabled = false;
   currentJobId = null;
   if (job.status === 'cancelled') {
     $('stage').className = 'stage err';
@@ -175,6 +210,42 @@ async function poll(id) {
   $('report').innerHTML = renderMd(r.markdown);
   window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
   loadHistory();
+}
+
+async function goTrip() {
+  const city = $('city').value.trim();
+  const days = parseInt($('days').value || '2', 10);
+  if (!city) { $('city').focus(); return; }
+  if (!days || days < 1 || days > 7) { alert('天数需在 1~7 之间'); return; }
+  const spots = $('spots').value.trim();
+  $('tripBtn').disabled = true;
+  $('cancelBtn').disabled = false;
+  $('result').classList.add('hidden');
+  $('progress').classList.remove('hidden');
+  $('stage').className = 'stage';
+  $('stage').innerHTML = '<span class="spin"></span>准备中…';
+  $('log').textContent = '';
+  try {
+    const resp = await fetch('/api/trip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        city: city,
+        days: days,
+        hotel: $('hotel').value.trim(),
+        spots: spots ? spots.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : null,
+        preferences: $('prefs').value.trim(),
+      }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).detail || '请求失败');
+    const { job_id } = await resp.json();
+    currentJobId = job_id;
+    poll(job_id);
+  } catch (e) {
+    $('stage').className = 'stage err';
+    $('stage').textContent = '发起失败：' + e.message;
+    $('tripBtn').disabled = false;
+  }
 }
 
 async function cancelJob() {

@@ -242,9 +242,104 @@ class TestApi(unittest.TestCase):
             )
 
 
+class TestGeo(unittest.TestCase):
+    def test_distance_km(self):
+        """球面距离纯函数：北京两大坐标约 4.3km，非法输入返回 None。"""
+        from core.geo import distance_km
+
+        d = distance_km("116.391,39.907", "116.434,39.909")  # 故宫->国贸附近
+        self.assertIsNotNone(d)
+        self.assertTrue(3 < d < 6)
+        self.assertIsNone(distance_km("bad", "116.4,39.9"))
+        self.assertIsNone(distance_km(None, "116.4,39.9"))
+
+    def test_degrade_without_key(self):
+        """无高德 Key 时全部返回 None（降级路径，不抛异常）。"""
+        from core import geo
+
+        orig = geo.AMAP_API_KEY
+        geo.AMAP_API_KEY = ""
+        try:
+            self.assertFalse(geo.available())
+            self.assertIsNone(geo.geocode_poi("西湖", "杭州"))
+            self.assertIsNone(geo.travel_time("116.4,39.9", "116.5,39.9"))
+        finally:
+            geo.AMAP_API_KEY = orig
+
+
+class TestPlanner(unittest.TestCase):
+    def test_normalize_profile(self):
+        """档案规范化：非法时长/时段降级，字段补齐。"""
+        from pipeline.planner import _normalize_profile
+
+        p = _normalize_profile({
+            "duration_hours": "2.5", "best_time_slot": "凌晨",
+            "highlights": ["大佛", "  ", 123], "avoid": "不是列表",
+        })
+        self.assertEqual(p["duration_hours"], 2.5)
+        self.assertEqual(p["best_time_slot"], "全天")  # 非法时段降级
+        self.assertEqual(p["highlights"], ["大佛", "123"])
+        self.assertEqual(p["avoid"], [])
+        # 超范围时长与缺失字段
+        p2 = _normalize_profile({"duration_hours": 99})
+        self.assertIsNone(p2["duration_hours"])
+        self.assertEqual(p2["tips"], [])
+
+    def test_normalize_plan(self):
+        """行程规范化：不在名单的景点丢弃，非法时段修正，天数截断。"""
+        from pipeline.planner import _normalize_plan
+
+        data = {"days": [
+            {"slots": [
+                {"slot": "上午", "spot": "云冈石窟", "reasons": "大佛"},
+                {"slot": "半夜", "spot": "华严寺"},
+                {"slot": "下午", "spot": "不存在的景点"},
+            ]},
+            {"slots": [{"slot": "上午", "spot": "善化寺"}]},
+            {"slots": [{"slot": "上午", "spot": "华严寺"}]},  # 超出 days=2 截断
+        ]}
+        plan = _normalize_plan(data, {"云冈石窟", "华严寺", "善化寺"}, days=2)
+        self.assertEqual(len(plan["days"]), 2)
+        day1 = plan["days"][0]["slots"]
+        self.assertEqual([s["spot"] for s in day1], ["云冈石窟", "华严寺"])
+        self.assertEqual(day1[1]["slot"], "下午")  # 非法时段修正为默认值
+        self.assertEqual(plan["days"][1]["slots"][0]["spot"], "善化寺")
+
+    def test_render_trip(self):
+        """路书渲染：逐日卡片 + 景点详情卡 + 溯源链接都在。"""
+        from pipeline.planner import render_trip
+
+        plan = {"days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "云冈石窟", "duration": "约2.5小时",
+             "transport": "公交约40分钟", "reasons": "大佛震撞",
+             "notes": "全程两万步", "food": ""}]}]}
+        profiles = {"云冈石窟": {
+            "duration_hours": 2.5, "best_time_slot": "上午",
+            "highlights": ["露天大佛"], "avoid": ["两万步劝退"],
+            "food": [], "photo_spots": ["第20窟"], "tips": ["早去避开旅行团"]}}
+        md = render_trip("大同", 1, "大同站", plan, profiles,
+                         {"云冈石窟": ["https://www.douyin.com/video/123"]}, geo_on=False)
+        for expect in ("《大同》1 天行程规划", "上午 · 云冈石窟", "公交约40分钟",
+                       "全程两万步", "别踩坑", "[来源1]", "LLM 区域推断"):
+            self.assertIn(expect, md)
+
+
+class TestTripApi(unittest.TestCase):
+    def test_trip_validation(self):
+        """/api/trip 参数校验：空城市/非法天数拒绝，不实际起任务。"""
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        c = TestClient(app)
+        self.assertEqual(c.post("/api/trip", json={"city": "  "}).status_code, 400)
+        self.assertEqual(c.post("/api/trip", json={"city": "大同", "days": 0}).status_code, 400)
+        self.assertEqual(c.post("/api/trip", json={"city": "大同", "days": 8}).status_code, 400)
+
+
 class TestMcpAndOpenapi(unittest.TestCase):
     def test_mcp_tools_registered(self):
-        """MCP 服务器注册了全套 6 个工具（不拉起服务，只验证注册表）。"""
+        """MCP 服务器注册了全套 7 个工具（不拉起服务，只验证注册表）。"""
         import asyncio
 
         import mcp_server
@@ -253,7 +348,7 @@ class TestMcpAndOpenapi(unittest.TestCase):
         names = {t.name for t in tools}
         self.assertEqual(
             names,
-            {"check_service", "start_research", "get_job_status",
+            {"check_service", "start_research", "plan_trip", "get_job_status",
              "cancel_research", "list_reports", "get_report_content"},
         )
 
@@ -263,7 +358,7 @@ class TestMcpAndOpenapi(unittest.TestCase):
 
         spec = app.openapi()
         paths = set(spec["paths"].keys())
-        for p in ("/api/health", "/api/research", "/api/jobs/{job_id}",
+        for p in ("/api/health", "/api/research", "/api/trip", "/api/jobs/{job_id}",
                   "/api/jobs/{job_id}/cancel", "/api/jobs/history",
                   "/api/reports", "/api/reports/download"):
             self.assertIn(p, paths)
