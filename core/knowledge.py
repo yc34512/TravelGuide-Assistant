@@ -93,6 +93,20 @@ def _conn() -> sqlite3.Connection:
         )
         """
     )
+    # 报告登记表：行程等"无采集档案"的报告也在此登记，历史列表不遗漏。
+    # 攻略报告仍随 spot_cache 登记（与采集缓存绑定），两处合并不重复。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS report_registry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            keyword TEXT NOT NULL,
+            report_path TEXT NOT NULL,
+            reported_at TEXT NOT NULL,
+            video_count INTEGER DEFAULT 0,
+            comment_count INTEGER DEFAULT 0
+        )
+        """
+    )
     return conn
 
 
@@ -139,22 +153,41 @@ def find_fresh(keyword: str, ttl_days: int) -> dict | None:
 
 
 def stats() -> dict:
-    """知识库概览：景点数、报告数、最近采集。"""
+    """知识库概览：景点数、报告数（攻略 + 行程登记）、最近采集。"""
     with _conn() as conn:
         spots = conn.execute("SELECT COUNT(DISTINCT keyword) AS n FROM spot_cache").fetchone()["n"]
         reports = conn.execute("SELECT COUNT(*) AS n FROM spot_cache WHERE report_path IS NOT NULL").fetchone()["n"]
+        reports += conn.execute("SELECT COUNT(*) AS n FROM report_registry").fetchone()["n"]
         latest = conn.execute("SELECT MAX(crawled_at) AS t FROM spot_cache").fetchone()["t"]
     return {"spots": spots, "reports": reports, "latest_crawl": latest}
 
 
+def register_report(keyword: str, report_path: str, video_count: int = 0,
+                    comment_count: int = 0) -> None:
+    """登记一份无采集档案的报告（行程路书等），供历史列表展示。"""
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO report_registry (keyword, report_path, reported_at,"
+            " video_count, comment_count) VALUES (?, ?, ?, ?, ?)",
+            (keyword, report_path, datetime.now().isoformat(timespec="seconds"),
+             video_count, comment_count),
+        )
+
+
 def list_history(limit: int = 20) -> list[dict]:
-    """最近的已生成报告列表（供网页历史卡片）：只返回报告文件仍存在的记录。"""
+    """最近的已生成报告列表（供网页历史卡片）：攻略报告（spot_cache）与
+    行程报告（report_registry）合并，按生成时间降序；只返回文件仍存在的记录。"""
     with _conn() as conn:
         rows = conn.execute(
             "SELECT keyword, video_count, comment_count, crawled_at, reported_at, report_path"
             " FROM spot_cache WHERE report_path IS NOT NULL"
             " ORDER BY reported_at DESC LIMIT ?",
             (limit * 2,),  # 多取一些，兼容文件被手动删除后的过滤
+        ).fetchall()
+        reg_rows = conn.execute(
+            "SELECT keyword, video_count, comment_count, reported_at, report_path"
+            " FROM report_registry ORDER BY reported_at DESC LIMIT ?",
+            (limit,),
         ).fetchall()
     out = []
     for r in rows:
@@ -170,9 +203,21 @@ def list_history(limit: int = 20) -> list[dict]:
                 "report_path": Path(r["report_path"]).name,
             }
         )
-        if len(out) >= limit:
-            break
-    return out
+    for r in reg_rows:
+        if not Path(r["report_path"]).exists():
+            continue
+        out.append(
+            {
+                "keyword": r["keyword"],
+                "video_count": r["video_count"],
+                "comment_count": r["comment_count"],
+                "crawled_at": r["reported_at"],  # 行程报告无独立采集时间，以生成时间占位
+                "reported_at": r["reported_at"],
+                "report_path": Path(r["report_path"]).name,
+            }
+        )
+    out.sort(key=lambda x: x["reported_at"] or "", reverse=True)
+    return out[:limit]
 
 
 # —— 任务档案：只持久化终态（完成/失败/取消），运行中任务仅存内存 ——

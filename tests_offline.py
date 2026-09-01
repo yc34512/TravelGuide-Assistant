@@ -61,6 +61,29 @@ class TestKnowledge(unittest.TestCase):
         finally:
             knowledge._DB_PATH = orig
 
+    def test_report_registry_merge(self):
+        """行程报告登记后能进历史列表（与攻略报告合并，文件不存在则过滤）。"""
+        import tempfile as _tf
+
+        from core import knowledge
+
+        tmp_db = Path(_tf.mkdtemp()) / "test_reg.db"
+        tmp_md = Path(_tf.mkdtemp()) / "行程_测试.md"
+        tmp_md.write_text("x", encoding="utf-8")
+        orig = knowledge._DB_PATH
+        knowledge._DB_PATH = tmp_db
+        try:
+            knowledge.register_report("行程·测试2天", str(tmp_md), 3, 10)
+            rows = knowledge.list_history()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["keyword"], "行程·测试2天")
+            self.assertEqual(rows[0]["report_path"], tmp_md.name)
+            # 文件被删除后自动从列表消失（用户手动清理报告的兼容）
+            tmp_md.unlink()
+            self.assertEqual(knowledge.list_history(), [])
+        finally:
+            knowledge._DB_PATH = orig
+
 
 class TestRender(unittest.TestCase):
     def test_quick_glance(self):

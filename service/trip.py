@@ -324,6 +324,12 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                          digests=digests)
         report_path = REPORT_DIR / f"行程_{city}_{ts:%Y%m%d_%H%M%S}.md"
         report_path.write_text(md, encoding="utf-8")
+        # 行程报告无采集档案，单独登记进报告表，网页历史列表才不会遗漏
+        knowledge.register_report(
+            f"行程·{city}{days}天", str(report_path),
+            video_count=sum(len(v) for v in spot_items.values()),
+            comment_count=sum(len(it.comments) for items in spot_items.values() for it in items),
+        )
         html_path = report_path.with_suffix(".html")
         try:
             html_path.write_text(
