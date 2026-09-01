@@ -64,6 +64,51 @@ def geocode_poi(name: str, city: str) -> dict | None:
     return None
 
 
+def poi_detail(name: str, city: str) -> dict | None:
+    """POI 结构化详情（预算/营业信息交叉校验用）：返回 {"rating", "cost", "opentime", "tel"}。
+
+    字段均可为空字符串；无 Key / 未命中 / 异常返回 None，调用方改用评论提取值（标注"评论估算"）。
+    """
+    if not available():
+        return None
+    key = ("detail", name, city)
+    if key in _geo_cache:  # 复用地理编码缓存字典，避免重复消耗配额
+        return _geo_cache[key]
+    try:
+        r = httpx.get(
+            f"{_BASE}/place/text",
+            params={
+                "key": AMAP_API_KEY,
+                "keywords": name,
+                "city": city,
+                "citylimit": "true",
+                "offset": 1,
+                "extensions": "all",
+            },
+            timeout=10,
+        )
+        data = r.json()
+        if data.get("status") == "1" and data.get("pois"):
+            p = data["pois"][0]
+            biz = p.get("biz_ext") or {}
+
+            def _s(v):
+                return v if isinstance(v, str) and v and v not in ("[]", "{}") else ""
+
+            out = {
+                "rating": _s(biz.get("rating")),
+                "cost": _s(biz.get("cost")),
+                "opentime": _s(biz.get("opentime")),
+                "tel": _s(p.get("tel")),
+            }
+            _geo_cache[key] = out
+            return out
+    except Exception:
+        pass
+    _geo_cache[key] = None
+    return None
+
+
 def distance_km(loc1: str, loc2: str) -> float | None:
     """两个 'lng,lat' 坐标串的球面距离（km）；解析失败返回 None。纯函数，独立可测。"""
     try:
