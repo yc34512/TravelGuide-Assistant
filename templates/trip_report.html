@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>《{{ city }}》{{ days }} 天行程规划 · 避坑版</title>
+<!-- CDN：加载失败时页面自动切换到文本版（见底部 fallback 逻辑），不会白屏 -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
+<style>
+  :root { --green: #1f7a5c; --red: #c0392b; --amber: #b9770e; --ink: #2c3e50; --muted: #7f8c8d; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; background: #f4f6f7; color: var(--ink); line-height: 1.65; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px 60px; }
+  header { background: linear-gradient(135deg, #1f7a5c, #2e9e77); color: #fff; border-radius: 14px; padding: 26px 24px; margin-bottom: 18px; }
+  header h1 { font-size: 24px; margin-bottom: 10px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .meta span { background: rgba(255,255,255,.18); border-radius: 20px; padding: 3px 12px; font-size: 13px; }
+  section { background: #fff; border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  h2 { font-size: 18px; color: var(--green); margin-bottom: 14px; border-left: 4px solid var(--green); padding-left: 10px; }
+  .day-title { font-size: 16px; font-weight: 600; margin: 18px 0 10px; color: var(--ink); }
+  .slot { border-left: 3px solid var(--green); border-radius: 8px; background: #f8faf9; padding: 12px 14px; margin-bottom: 10px; }
+  .slot.pitfall { border-left-color: var(--red); background: #fdf3f2; }
+  .slot-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .slot-head .time { font-size: 12px; color: #fff; background: var(--green); border-radius: 4px; padding: 1px 8px; }
+  .slot.pitfall .slot-head .time { background: var(--red); }
+  .slot-head .name { font-weight: 600; font-size: 15px; }
+  .slot-head .cost { font-size: 13px; color: var(--amber); }
+  .slot p { font-size: 14px; margin-top: 3px; }
+  .slot .quote { font-size: 13px; color: var(--red); background: #fff; border-radius: 6px; padding: 5px 10px; margin-top: 6px; border: 1px dashed #e6b0aa; }
+  .quote::before { content: "避坑引用："; font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  #budget-chart, #map { width: 100%; height: 300px; border-radius: 10px; }
+  .fallback { display: none; font-size: 14px; background: #fbfbf3; border: 1px dashed #d5d8dc; border-radius: 8px; padding: 12px 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid #eef1f3; text-align: left; }
+  th { background: #f4f8f6; color: var(--green); }
+  .risk-high { color: var(--red); font-weight: 600; }
+  .digest-item { border-radius: 8px; background: #fdf3f2; border-left: 3px solid var(--red); padding: 10px 14px; margin-bottom: 10px; font-size: 14px; }
+  .digest-item .claim { font-weight: 600; }
+  .digest-item .conf { font-size: 12px; color: var(--muted); margin-left: 6px; }
+  .digest-item blockquote { margin: 6px 0 0; padding: 4px 10px; background: #fff; border-radius: 6px; color: #7b241c; font-size: 13px; }
+  .digest-item a { font-size: 12px; color: var(--muted); }
+  .card { border: 1px solid #e8ecee; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; font-size: 14px; }
+  .card h3 { font-size: 15px; margin-bottom: 6px; }
+  .card .src { font-size: 12px; }
+  .card .src a { color: var(--green); text-decoration: none; margin-right: 8px; }
+  .tag { display: inline-block; font-size: 12px; border-radius: 4px; padding: 0 8px; margin-right: 6px; background: #eaf4f0; color: var(--green); }
+  footer { font-size: 12px; color: var(--muted); text-align: center; padding: 10px 20px; }
+  .note-bar { font-size: 13px; background: #fef9e7; border-radius: 8px; padding: 8px 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>《{{ city }}》{{ days }} 天行程规划 · 避坑版</h1>
+    <div class="meta">
+      <span>生成于 {{ generated }}</span>
+      <span>住宿：{{ hotel or '未指定' }}</span>
+      <span>{{ profiles|length }} 个景点实地调研 · {{ total_slots }} 个行程点</span>
+      <span>{{ '路线依据：高德实测通行时间' if geo_on else '路线依据：区域推断（未配置地图）' }}</span>
+    </div>
+  </header>
+
+  {% if budget_summary %}
+  <section>
+    <h2>预算明细</h2>
+    <div class="grid2">
+      <div>
+        <div id="budget-chart"></div>
+        <div id="budget-fallback" class="fallback"></div>
+      </div>
+      <div>
+        <table>
+          <tr><th>项目</th><th>金额</th></tr>
+          <tr><td>门票（多源去重）</td><td>{{ '%.0f'|format(budget_summary.tickets) }} 元</td></tr>
+          <tr><td>餐饮（人均 {{ '%.0f'|format(budget_summary.food_avg) }} × 2 正餐 × {{ days }} 天）</td><td>{{ '%.0f'|format(budget_summary.food) }} 元</td></tr>
+          <tr><td>市内交通（估算）</td><td>{{ '%.0f'|format(budget_summary.transport) }} 元</td></tr>
+          <tr><td>弹性 10%</td><td>{{ '%.0f'|format(budget_summary.flex) }} 元</td></tr>
+          <tr><td><b>预估总花费</b></td><td><b>{{ '%.0f'|format(budget_summary.total) }} 元</b></td></tr>
+        </table>
+        {% if budget_summary.total_budget %}
+        <div class="note-bar">用户预算 {{ '%.0f'|format(budget_summary.total_budget) }} 元 · <b>{{ budget_summary.status }}</b>：{{ budget_summary.note }}</div>
+        {% endif %}
+        {% if plan.summary_note %}<div class="note-bar">规划说明：{{ plan.summary_note }}</div>{% endif %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if markers %}
+  <section>
+    <h2>景点分布</h2>
+    <div id="map"></div>
+    <div id="map-fallback" class="fallback"></div>
+  </section>
+  {% endif %}
+
+  {% for d in plan.days %}
+  <section>
+    <h2>第 {{ d.day }} 天</h2>
+    {% for s in d.slots %}
+    <div class="slot {{ 'pitfall' if s.pitfall_quotes else '' }}">
+      <div class="slot-head">
+        <span class="time">{{ s.slot }}</span>
+        <span class="name">{{ s.spot }}</span>
+        {% if s.duration %}<span class="tag">{{ s.duration }}</span>{% endif %}
+        {% if s.cost %}<span class="cost">约 {{ '%.0f'|format(s.cost) }} 元</span>{% endif %}
+      </div>
+      {% if s.transport %}<p>🚗 {{ s.transport }}</p>{% endif %}
+      {% if s.reasons %}<p>✅ {{ s.reasons }}</p>{% endif %}
+      {% if s.notes %}<p>⚠️ {{ s.notes }}</p>{% endif %}
+      {% for q in s.pitfall_quotes %}<div class="quote">“{{ q }}”</div>{% endfor %}
+      {% if s.food %}<p>🍜 {{ s.food }}</p>{% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
+  {% if pitfall %}
+  <section>
+    <h2>避坑专题（附评论原文）</h2>
+    {% for row in pitfall %}
+    <div class="digest-item">
+      <span class="claim">{{ loop.index }}. {{ row.claim }}</span><span class="conf">{{ row.confidence }}</span>
+      {% if row.quote %}<blockquote>“{{ row.quote }}”</blockquote>{% endif %}
+      {% if row.source %}<a href="{{ row.source }}" target="_blank" rel="noopener">查看来源视频 ↗</a>{% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if heat %}
+  <section>
+    <h2>热度榜（近 90 天抖音数据）</h2>
+    <table>
+      <tr><th>#</th><th>景点</th><th>热度指数</th><th>趋势</th><th>视频</th><th>点赞</th><th>评论</th></tr>
+      {% for h in heat %}
+      <tr>
+        <td>{{ loop.index }}</td><td>{{ h.spot }}</td><td>{{ '%.2f'|format(h.score) }}</td>
+        <td>{{ '🔥 ' + h.trend if h.trend == '近期热度上升' else h.trend }}</td>
+        <td>{{ h.videos }}</td><td>{{ h.likes }}</td><td>{{ h.comments }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
+
+  <section>
+    <h2>景点详情卡</h2>
+    {% for name, p in profiles.items() %}
+    <div class="card">
+      <h3>{{ name }}</h3>
+      <p>
+        <span class="tag">建议时长 {{ (p.duration_hours ~ ' 小时') if p.duration_hours else '见要点' }}</span>
+        <span class="tag">最佳时段 {{ p.best_time_slot }}</span>
+        {% for c in p.cost_items %}<span class="tag">{{ c.item }} {{ '%.0f'|format(c.amount) }} 元</span>{% endfor %}
+      </p>
+      {% if p.highlights %}<p>✨ 亮点：{{ p.highlights|join('；') }}</p>{% endif %}
+      {% if p.avoid %}<p class="risk-high">❌ 别踩坑：{{ p.avoid|join('；') }}</p>{% endif %}
+      {% if p.food %}<p>🍜 美食：{{ p.food|join('；') }}</p>{% endif %}
+      {% if p.photo_spots %}<p>📷 打卡：{{ p.photo_spots|join('；') }}</p>{% endif %}
+      {% if p.tips %}<p>💡 贴士：{{ p.tips|join('；') }}</p>{% endif %}
+      {% set urls = spot_sources.get(name, []) %}
+      {% if urls %}
+      <p class="src">信息溯源：{% for u in urls[:6] %}<a href="{{ u }}" target="_blank" rel="noopener">来源{{ loop.index }} ↗</a>{% endfor %}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+
+  <footer>
+    本行程由 AI 基于抖音公开内容与地图数据生成，仅供参考；开放时间、票价、班次等时效信息出发前请务必通过官方渠道核实。<br>
+    评论内容为匿名摘录，不含任何用户身份信息。
+  </footer>
+</div>
+
+<script>
+// 离线降级：CDN 加载失败时不白屏，把图表/地图区替换为文本版
+(function () {
+  var B = {{ budget_summary|tojson if budget_summary else 'null' }};
+  if (B) {
+    if (typeof echarts !== 'undefined') {
+      var chart = echarts.init(document.getElementById('budget-chart'));
+      chart.setOption({
+        tooltip: { trigger: 'item', formatter: '{b}: {c} 元 ({d}%)' },
+        series: [{
+          type: 'pie', radius: ['38%', '68%'],
+          label: { formatter: '{b}\n{c} 元' },
+          data: [
+            { name: '门票', value: Math.round(B.tickets) },
+            { name: '餐饮', value: Math.round(B.food) },
+            { name: '市内交通', value: Math.round(B.transport) },
+            { name: '弹性', value: Math.round(B.flex) }
+          ]
+        }]
+      });
+      window.addEventListener('resize', function () { chart.resize(); });
+    } else {
+      document.getElementById('budget-chart').style.display = 'none';
+      var fb = document.getElementById('budget-fallback');
+      fb.style.display = 'block';
+      fb.textContent = '图表组件加载失败（离线？）——文本版：门票 ' + Math.round(B.tickets) +
+        ' 元 / 餐饮 ' + Math.round(B.food) + ' 元 / 交通 ' + Math.round(B.transport) +
+        ' 元 / 弹性 ' + Math.round(B.flex) + ' 元，合计 ' + Math.round(B.total) + ' 元。';
+    }
+  }
+  var MARKERS = {{ markers|tojson }};
+  if (MARKERS.length) {
+    if (typeof L !== 'undefined') {
+      var map = L.map('map');
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      MARKERS.forEach(function (m) {
+        L.marker([m.lat, m.lng]).addTo(map).bindPopup(m.name);
+      });
+      map.fitBounds(L.latLngBounds(MARKERS.map(function (m) { return [m.lat, m.lng]; })).pad(0.2));
+    } else {
+      document.getElementById('map').style.display = 'none';
+      var mf = document.getElementById('map-fallback');
+      mf.style.display = 'block';
+      mf.textContent = '地图组件加载失败（离线？）——景点清单：' +
+        MARKERS.map(function (m) { return m.name; }).join('、') + '。';
+    }
+  }
+})();
+</script>
+</body>
+</html>

@@ -326,7 +326,7 @@ class TestPlanner(unittest.TestCase):
 
 class TestTripApi(unittest.TestCase):
     def test_trip_validation(self):
-        """/api/trip 参数校验：空城市/非法天数拒绝，不实际起任务。"""
+        """/api/trip 参数校验：空城市/非法天数/非法预算/非法消费偏好拒绝，不实际起任务。"""
         from fastapi.testclient import TestClient
 
         from api_server import app
@@ -335,6 +335,169 @@ class TestTripApi(unittest.TestCase):
         self.assertEqual(c.post("/api/trip", json={"city": "  "}).status_code, 400)
         self.assertEqual(c.post("/api/trip", json={"city": "大同", "days": 0}).status_code, 400)
         self.assertEqual(c.post("/api/trip", json={"city": "大同", "days": 8}).status_code, 400)
+        self.assertEqual(c.post("/api/trip", json={"city": "大同", "budget": -5}).status_code, 400)
+        self.assertEqual(
+            c.post("/api/trip", json={"city": "大同", "preference_mode": "豪华优先"}).status_code, 400)
+
+
+class TestCandidates(unittest.TestCase):
+    def test_marketing_regex(self):
+        """营销号文案识别：强营销信号命中，普通分享不误伤。"""
+        from pipeline.candidates import is_marketing
+
+        self.assertTrue(is_marketing("点击左下角领优惠券，团购只要 99"))
+        self.assertTrue(is_marketing("探店合作，粉丝福利来了"))
+        self.assertFalse(is_marketing("今天去了云冈石窟，大佛太震撞了"))
+        self.assertFalse(is_marketing(""))
+
+    def test_verify_fallback(self):
+        """交叉验证兜底：LLM 无输出时，有正面证据且营销号不过半则 keep。"""
+        import pipeline.candidates as pc
+
+        orig = pc.chat_json
+        pc.chat_json = lambda *a, **k: {}  # 模拟 LLM 无输出
+        try:
+            cands = [
+                {"name": "甲", "category": "景点", "reason": ""},
+                {"name": "乙", "category": "美食", "reason": ""},
+                {"name": "丙", "category": "景点", "reason": ""},
+            ]
+            stats = {
+                "甲": {"videos": 5, "marketing_hits": 0, "positive": 3, "negative": 1, "sample_quotes": []},
+                "乙": {"videos": 4, "marketing_hits": 4, "positive": 1, "negative": 0, "sample_quotes": []},
+                "丙": {"videos": 0, "marketing_hits": 0, "positive": 0, "negative": 0, "sample_quotes": []},
+            }
+            results = {r["name"]: r for r in pc.verify_candidates(cands, stats)}
+            self.assertEqual(results["甲"]["verdict"], "keep")   # 正面证据充足
+            self.assertEqual(results["乙"]["verdict"], "drop")   # 营销号占比 100%
+            self.assertEqual(results["丙"]["verdict"], "drop")   # 无任何证据
+        finally:
+            pc.chat_json = orig
+
+    def test_generate_quota_trim(self):
+        """候选生成：类别配额与总量上限裁剪生效。"""
+        import pipeline.candidates as pc
+
+        orig = pc.chat_json
+        # 模拟 LLM 返回超量候选：景点 15 个 + 美食 8 个
+        pc.chat_json = lambda *a, **k: {"candidates": (
+            [{"name": f"景{i}", "category": "景点", "reason": ""} for i in range(15)]
+            + [{"name": f"食{i}", "category": "美食", "reason": ""} for i in range(8)]
+        )}
+        try:
+            picked = pc.generate_candidates("大同", 2, "")
+            cats = [c["category"] for c in picked]
+            self.assertLessEqual(cats.count("景点"), pc.CATEGORY_QUOTA["景点"])
+            self.assertLessEqual(cats.count("美食"), pc.CATEGORY_QUOTA["美食"])
+            self.assertLessEqual(len(picked), pc.TOTAL_CANDIDATES_MAX)
+        finally:
+            pc.chat_json = orig
+
+
+class TestHeatAndPitfall(unittest.TestCase):
+    def _items(self):
+        from datetime import datetime, timedelta
+        from types import SimpleNamespace
+
+        fresh = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+        return [
+            SimpleNamespace(like_count=20000, comments=["a"] * 40, publish_time=fresh),
+            SimpleNamespace(like_count=8000, comments=["b"] * 30, publish_time=fresh),
+            SimpleNamespace(like_count=100, comments=["c"], publish_time="2020-01-01"),
+            SimpleNamespace(like_count=None, comments=[], publish_time="乱码"),
+        ]
+
+    def test_heat_index(self):
+        """热度指数：0~1 区间，新鲜度/互动计入；空列表不崩。"""
+        from pipeline.heat import heat_index
+
+        h = heat_index(self._items())
+        self.assertTrue(0 < h["score"] <= 1)
+        self.assertEqual(h["videos"], 4)
+        self.assertEqual(h["likes"], 28100)
+        self.assertEqual(h["comments"], 71)
+        self.assertEqual(h["fresh_ratio"], 0.5)
+        self.assertEqual(heat_index([])["score"], 0.0)
+
+    def test_pitfall_digest(self):
+        """避坑专题：只收避雷立场，多源一致排前，上限截断。"""
+        from pipeline.heat import DIGEST_MAX, pitfall_digest
+
+        pts = [
+            {"claim": "单源坑", "stance": "避雷", "confidence": "单源", "quote": "q1", "source": "u1"},
+            {"claim": "多源坑", "stance": "避雷", "confidence": "多源一致", "quote": "", "source": ""},
+            {"claim": "推荐项", "stance": "推荐", "confidence": "多源一致"},
+        ] + [
+            {"claim": f"坑{i}", "stance": "避雷", "confidence": "单源"} for i in range(20)
+        ]
+        rows = pitfall_digest(pts)
+        self.assertEqual(len(rows), DIGEST_MAX)
+        self.assertEqual(rows[0]["claim"], "多源坑")
+        self.assertTrue(all(r["claim"] != "推荐项" for r in rows))
+
+
+class TestBudgetAndHtml(unittest.TestCase):
+    def _profiles(self):
+        return {
+            "云冈石窟": {
+                "duration_hours": 2.5, "best_time_slot": "上午",
+                "highlights": ["大佛"], "avoid": ["两万步"], "food": [],
+                "photo_spots": [], "tips": [],
+                "cost_items": [{"item": "门票", "type": "门票", "amount": 120.0}],
+            },
+            "华严寺": {
+                "duration_hours": 1.5, "best_time_slot": "下午",
+                "highlights": [], "avoid": [], "food": ["凤临阁人均 80"],
+                "photo_spots": [], "tips": [],
+                "cost_items": [{"item": "门票", "type": "门票", "amount": 50.0},
+                               {"item": "午餐", "type": "餐饮人均", "amount": 80.0}],
+            },
+        }
+
+    def _plan(self):
+        return {"summary_note": "", "days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "云冈石窟", "duration": "约2.5小时", "transport": "",
+             "cost": 120, "reasons": "", "notes": "", "food": "", "pitfall_quotes": ["走到勝"]},
+            {"slot": "下午", "spot": "华严寺", "duration": "", "transport": "",
+             "cost": 50, "reasons": "", "notes": "", "food": "", "pitfall_quotes": []},
+        ]}]}
+
+    def test_budget_summary(self):
+        """预算明细：门票去重求和、结余/超支判定、弹性 10%。"""
+        from pipeline.planner import build_budget_summary
+
+        b = build_budget_summary(self._profiles(), self._plan(), days=2, budget=1500)
+        self.assertEqual(b["tickets"], 170.0)          # 120 + 50
+        self.assertEqual(b["food"], 80 * 2 * 2)        # 人均×2正餐×2天
+        self.assertEqual(b["total_budget"], 1500.0)
+        self.assertEqual(b["status"], "结余")
+        self.assertAlmostEqual(b["total"], (b["tickets"] + b["food"] + b["transport"]) * 1.1)
+        # 紧预算触发超支建议
+        b2 = build_budget_summary(self._profiles(), self._plan(), days=7, budget=100)
+        self.assertEqual(b2["status"], "超支")
+        self.assertIn("超出预算", b2["note"])
+
+    def test_render_trip_html(self):
+        """HTML 渲染：关键区块（预算图/地图/避坑/热度/免责声明）与离线降级脚本都在。"""
+        from pipeline.planner import build_budget_summary, render_trip_html
+
+        profiles, plan = self._profiles(), self._plan()
+        b = build_budget_summary(profiles, plan, days=1, budget=None)
+        html = render_trip_html(
+            "大同", 1, "大同古城内", plan, profiles,
+            {"云冈石窟": ["https://www.douyin.com/video/1"], "华严寺": []},
+            geo_on=True, locs={"云冈石窟": "113.05,40.04", "华严寺": "bad", "酒店": "113.2,40.1"},
+            budget_summary=b,
+            pitfall=[{"claim": "两万步勝退", "quote": "走到腳断", "source": "u", "confidence": "多源一致"}],
+            heat=[{"spot": "云冈石窟", "score": 0.82, "trend": "近期热度上升",
+                   "videos": 5, "likes": 28100, "comments": 71}],
+        )
+        for expect in ("《大同》1 天行程规划", "budget-chart", "echarts", "leaflet",
+                       "两万步勝退", "走到腳断", "近期热度上升", "信息溯源",
+                       "仅供参考", '"lng": 113.05'):
+            self.assertIn(expect, html)
+        # 非法坐标被丢弃，合法坐标进 markers（酒店也在）
+        self.assertNotIn("bad", html)
 
 
 class TestMcpAndOpenapi(unittest.TestCase):
