@@ -33,7 +33,9 @@ EXTRACT_SYSTEM = """你是旅游攻略信息抽取助手，负责从单条抖音
 8. 若输入标注了"发布较旧"，其中的时效敏感信息照提取但照常标注，不要擅自丢弃；
 9. 标记了（作者回复）的评论是视频作者本人的回应，可信度高于普通评论；
    它与普通评论就同一事实说法矛盾时，优先采信作者回复；
-10. 输出严格 JSON：{"points": [{"topic": "门票|交通|避雷|打卡|美食|住宿|路线|其他", "claim": "一句话要点", "stance": "推荐|避雷|中性", "time_sensitive": true/false, "source": "视频url"}]}
+10. 每条要点附 quote：最能支撑该要点的一条评论原文（逐字摘录不改写，不超过 80 字）；
+    依据来自视频文案/口播或无合适评论时，quote 为空字符串；
+11. 输出严格 JSON：{"points": [{"topic": "门票|交通|避雷|打卡|美食|住宿|路线|其他", "claim": "一句话要点", "stance": "推荐|避雷|中性", "time_sensitive": true/false, "quote": "评论原文或空", "source": "视频url"}]}
 没有可抽取的信息时返回 {"points": []}"""
 
 # 代码层兜底：疑问句（带不带问号都要拦）/ 常见低价值话术
@@ -95,12 +97,18 @@ def extract_points(item: VideoItem) -> list[dict]:
         if not claim or _low_value(claim):
             continue
         stance = str(p.get("stance", "中性")).strip()
+        # 评论原文引用：匿名化已由去标识化闸口保证（无昵称等个人信息），此处只做截断兜底；
+        # 防幻觉兜底：引用必须真实出现在输入评论中，否则丢弃（LLM 编造的引用绝不下传）
+        quote = str(p.get("quote") or "").strip()[:80]
+        if quote and not any(quote[:15] in c.text for c in item.comments):
+            quote = ""
         points.append(
             {
                 "topic": str(p.get("topic", "其他")),
                 "claim": claim,
                 "stance": stance if stance in _ALLOWED_STANCES else "中性",
                 "time_sensitive": bool(p.get("time_sensitive", False)),
+                "quote": quote,
                 "source": str(p.get("source") or item.url),
             }
         )
