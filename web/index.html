@@ -95,12 +95,18 @@
       </div>
       <div class="opts">
         <input type="text" id="prefs" placeholder="偏好（可选）：如 带老人、喜欢历史、想拍日落" style="flex:1;min-width:240px;padding:9px 12px;border:1px solid #cfd8de;border-radius:6px;">
+        <input type="number" id="budget" placeholder="总预算（元，可选）" min="0" style="width:150px;padding:9px 12px;border:1px solid #cfd8de;border-radius:6px;">
+        <select id="prefMode" style="padding:9px 10px;border:1px solid #cfd8de;border-radius:6px;background:#fff;">
+          <option value="均衡">均衡</option>
+          <option value="省钱优先">省钱优先</option>
+          <option value="体验优先">体验优先</option>
+        </select>
       </div>
       <div class="opts">
-        <input type="text" id="spots" placeholder="指定景点（可选，顿号/逗号分隔）；留空则自动圈定" style="flex:1;min-width:240px;padding:9px 12px;border:1px solid #cfd8de;border-radius:6px;">
+        <input type="text" id="spots" placeholder="指定景点（可选，顿号/逗号分隔）；留空则自动圈定并经抖音验证筛选" style="flex:1;min-width:240px;padding:9px 12px;border:1px solid #cfd8de;border-radius:6px;">
         <button id="tripBtn" onclick="goTrip()">生成行程规划</button>
       </div>
-      <div class="opts">7 天内调研过的景点自动命中缓存；未命中的逐个调研（约 5 分钟/个），全程可取消。</div>
+      <div class="opts">7 天内调研过的景点自动命中缓存；未命中的逐个调研（约 5 分钟/个），全程可取消。输出含预算明细、避坑专题、热度榜与 HTML 可视化。</div>
     </div>
   </div>
 
@@ -115,6 +121,7 @@
   <div id="result" class="card hidden">
     <div class="row" style="justify-content: space-between; margin-bottom: 8px;">
       <div class="stats" id="stats" style="margin-bottom: 0;"></div>
+      <a id="dlHtml" class="mini-btn hidden" style="text-decoration: none;" href="#" target="_blank">打开 HTML 可视化</a>
       <a id="dl" class="mini-btn" style="text-decoration: none;" download>下载 Markdown</a>
     </div>
     <article id="report"></article>
@@ -201,12 +208,23 @@ async function poll(id) {
   const r = job.result, s = r.stats;
   $('result').classList.remove('hidden');
   $('dl').href = '/api/reports/download?name=' + encodeURIComponent(r.report_name);
-  $('stats').innerHTML =
-    `<span>关键词 <b>${job.keyword}</b></span><span>视频 <b>${s.videos}</b> 条</span>` +
-    `<span>评论 <b>${s.comments}</b> 条</span><span>要点 <b>${s.points}</b> 条</span>` +
-    `<span>耗时 <b>${s.elapsed}</b> 秒</span>` +
-    (r.cache_hit ? '<span>⚡ 知识库命中，免采集</span>' : '<span>🆕 本次全新采集</span>') +
-    `<span>文件：${r.report_name}</span>`;
+  if (r.html_name) {
+    $('dlHtml').classList.remove('hidden');
+    $('dlHtml').href = '/api/reports/download?name=' + encodeURIComponent(r.html_name);
+  } else {
+    $('dlHtml').classList.add('hidden');
+  }
+  $('stats').innerHTML = job.kind === 'trip'
+    ? `<span>行程 <b>${job.keyword}</b></span><span>景点 <b>${s.spots}</b> 个</span>` +
+      `<span>要点 <b>${s.points}</b> 条</span><span>耗时 <b>${s.elapsed}</b> 秒</span>` +
+      (r.budget_summary && r.budget_summary.total_budget
+        ? `<span>预算 <b>${Math.round(r.budget_summary.total_budget)}</b> 元 · ${r.budget_summary.status}</span>` : '') +
+      `<span>文件：${r.report_name}</span>`
+    : `<span>关键词 <b>${job.keyword}</b></span><span>视频 <b>${s.videos}</b> 条</span>` +
+      `<span>评论 <b>${s.comments}</b> 条</span><span>要点 <b>${s.points}</b> 条</span>` +
+      `<span>耗时 <b>${s.elapsed}</b> 秒</span>` +
+      (r.cache_hit ? '<span>⚡ 知识库命中，免采集</span>' : '<span>🆕 本次全新采集</span>') +
+      `<span>文件：${r.report_name}</span>`;
   $('report').innerHTML = renderMd(r.markdown);
   window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
   loadHistory();
@@ -218,6 +236,7 @@ async function goTrip() {
   if (!city) { $('city').focus(); return; }
   if (!days || days < 1 || days > 7) { alert('天数需在 1~7 之间'); return; }
   const spots = $('spots').value.trim();
+  const budget = parseFloat($('budget').value);
   $('tripBtn').disabled = true;
   $('cancelBtn').disabled = false;
   $('result').classList.add('hidden');
@@ -235,6 +254,8 @@ async function goTrip() {
         hotel: $('hotel').value.trim(),
         spots: spots ? spots.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : null,
         preferences: $('prefs').value.trim(),
+        budget: !isNaN(budget) && budget > 0 ? budget : null,
+        preference_mode: $('prefMode').value,
       }),
     });
     if (!resp.ok) throw new Error((await resp.json()).detail || '请求失败');

@@ -48,11 +48,13 @@ Content-Type: application/json
 POST /api/trip
 Content-Type: application/json
 
-{"city": "大同", "days": 3, "hotel": "大同古城内", "spots": null, "preferences": ""}
+{"city": "大同", "days": 3, "hotel": "大同古城内", "spots": null, "preferences": "", "budget": 1500, "preference_mode": "均衡"}
 ```
 
-- `spots` 传数组可指定景点；缺省时系统自动圈定（上限 天数×3）；
+- `spots` 传数组可指定景点；缺省时系统自动圈定 15~20 个候选并经抖音验证筛选（保留 8~12 个）；
+- `budget`（可选）总预算（元，不含大交通），传入后输出预算明细与超支预警；`preference_mode`：省钱优先 / 体验优先 / 均衡；
 - 行程任务耗时更长：未调研过的景点约 5 分钟/个，7 天内调研过的自动命中缓存；
+- 结果额外含 `budget_summary`（预算明细）、`pitfall_digest`（避坑专题，附评论原文）、`heat_rank`（热度榜）与 `html_name`（可视化页面，可用下载接口取）；
 - 后续轮询、取消、结果处理与攻略任务完全一致（同一个 /api/jobs/{id}）。
 
 通用参数（攻略任务）：

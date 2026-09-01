@@ -1,5 +1,7 @@
 """行程规划任务编排：圈定景点 -> 逐点调研 -> 景点档案 -> 通行矩阵 -> 规划生成 -> 渲染。
 
+P0 升级：混合候选验证（大模型圈定 -> 抖音验证采集 -> 交叉验证筛选）、
+营销号过滤、热度榜、避坑专题（附评论原文引用）、预算控制、HTML 可视化输出。
 复用 research 的任务框架（JOBS/取消/终态落库/历史查询）与采集管道；
 行程任务与攻略任务共享 _CRAWL_LOCK（全局只允许一个浏览器采集）。
 为控制总时长，行程内的逐点调研用 fast 档且关闭缺口补全与 ASR。
@@ -12,13 +14,22 @@ from datetime import datetime
 
 from config import KB_TTL_DAYS, REPORT_DIR
 from core import geo, knowledge
+from pipeline.candidates import (
+    VERIFY_MAX,
+    generate_candidates,
+    is_marketing,
+    verify_candidates,
+)
 from pipeline.extract import extract_points
+from pipeline.heat import heat_index, pitfall_digest
 from pipeline.planner import (
+    build_budget_summary,
     build_spot_profile,
     candidate_spots,
     empty_profile,
     plan_itinerary,
     render_trip,
+    render_trip_html,
 )
 from service.research import (
     JOBS,
@@ -30,14 +41,15 @@ from service.research import (
     save_raw,
 )
 
-TRIP_SPOT_LIMIT = 5      # 逐点调研按 fast 档
-TRIP_SPOT_COMMENTS = 30
-MAX_SPOTS_PER_DAY = 3    # 候选景点上限 = 天数 × 3
+TRIP_SPOT_LIMIT = 5      # 逐点调研按 fast 档（候选验证采集同样适用，成本闸）
+TRIP_SPOT_COMMENTS = 100
+MAX_SPOTS_PER_DAY = 3    # 候选景点上限 = 天数 × 3（简单路径）
 MIN_USABLE_SPOTS = 2     # 低于此数的可用调研结果无法排行程
 
 
 def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
-               preferences: str = "") -> str:
+               preferences: str = "", budget: float | None = None,
+               preference_mode: str = "均衡") -> str:
     job_id = uuid.uuid4().hex[:12]
     with _LOCK:
         JOBS[job_id] = {
@@ -55,14 +67,15 @@ def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
         }
     threading.Thread(
         target=_run_trip,
-        args=(job_id, city, days, hotel, spots, preferences),
+        args=(job_id, city, days, hotel, spots, preferences, budget, preference_mode),
         daemon=True,
     ).start()
     return job_id
 
 
 def _run_trip(job_id: str, city: str, days: int, hotel: str,
-              user_spots: list[str] | None, preferences: str) -> None:
+              user_spots: list[str] | None, preferences: str,
+              budget: float | None = None, preference_mode: str = "均衡") -> None:
     job = JOBS[job_id]
     started = time.time()
 
@@ -82,28 +95,100 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             log(f"任务档案落库失败（不影响结果）：{e}")
 
     try:
-        # 1) 圈定候选：用户指定优先，否则 LLM 圈定（上限 天数×3）
+        # 1) 圈定候选：用户指定 > 混合候选验证（未指定清单时）> 简单圈定兜底
         job["stage"] = "圈定景点"
+        categories: dict[str, str] = {}
+        pre: dict[str, tuple[list, list[dict]]] | None = None
         if user_spots:
             spots = [s.strip() for s in user_spots if s.strip()][:days * MAX_SPOTS_PER_DAY]
             log(f"使用用户指定景点清单：{'、'.join(spots)}")
         else:
-            max_n = days * MAX_SPOTS_PER_DAY
-            log(f"自动圈定候选景点（上限 {max_n} 个）…")
-            spots = candidate_spots(city, days, max_n)
-            if not spots:
-                raise RuntimeError("候选景点圈定失败：请换更明确的城市名或直接指定景点清单")
-            log(f"候选景点：{'、'.join(spots)}")
+            spots = []
+            try:
+                cands = generate_candidates(city, days, preferences)
+                log(f"大模型圈定 {len(cands)} 个候选，开始逐个验证采集（上限 {VERIFY_MAX} 个）")
+                verify_cands = cands[:VERIFY_MAX]
+                vstats: dict[str, dict] = {}
+                researched: dict[str, tuple[list, list[dict]]] = {}
+                for ci, cand in enumerate(verify_cands, 1):
+                    if _cancelled():
+                        raise Cancelled()
+                    name = cand["name"]
+                    record = knowledge.find_fresh(name, KB_TTL_DAYS)
+                    if record:
+                        log(f"  验证[{ci}/{len(verify_cands)}] {name}：缓存命中")
+                        items = load_items_from_raw(record["raw_path"])
+                    else:
+                        log(f"  验证[{ci}/{len(verify_cands)}] {name}：现场采集")
+                        items = _crawl(name, TRIP_SPOT_LIMIT, TRIP_SPOT_COMMENTS, False, job_id, log)
+                        if items:
+                            raw_path = save_raw(name, items)
+                            knowledge.record_crawl(
+                                name, raw_path, len(items), sum(len(x.comments) for x in items)
+                            )
+                    # 验证统计：营销号占比（文案正则）+ 预提取立场计数 + 评论摘录样本
+                    mkt = sum(1 for it in items if is_marketing(it.description)) if items else 0
+                    pts: list[dict] = []
+                    if items:
+                        with ThreadPoolExecutor(max_workers=3) as pool:
+                            for fut in as_completed({pool.submit(extract_points, it): it for it in items}):
+                                try:
+                                    pts.extend(fut.result())
+                                except Exception:
+                                    pass
+                    pos = sum(1 for p in pts if p.get("stance") == "推荐")
+                    neg = sum(1 for p in pts if p.get("stance") == "避雷")
+                    vstats[name] = {
+                        "videos": len(items), "marketing_hits": mkt,
+                        "positive": pos, "negative": neg,
+                        "sample_quotes": [p.get("quote") for p in pts if p.get("quote")][:3],
+                    }
+                    researched[name] = (items, pts)
+                    categories[name] = cand["category"]
+                results = verify_candidates(verify_cands, vstats)
+                kept = [r["name"] for r in results if r["verdict"] == "keep" and r["name"] in researched]
+                dropped = [r["name"] for r in results if r["verdict"] == "drop"]
+                if dropped:
+                    log(f"交叉验证淘汰 {len(dropped)} 个：{'、'.join(dropped[:6])}")
+                # 景点优先（行程骨架），其次按评审顺序；调研结果为空的剔除在后续环节自然发生
+                kept.sort(key=lambda n: 0 if categories.get(n) == "景点" else 1)
+                pre = {n: researched[n] for n in kept}
+                log(f"保留 {len(kept)} 个优质候选：{'、'.join(kept)}")
+            except Cancelled:
+                raise
+            except Exception as e:
+                log(f"混合候选验证失败（{e}），降级为简单圈定")
+                pre = None
+            if pre:
+                spots = list(pre.keys())
+            else:
+                max_n = days * MAX_SPOTS_PER_DAY
+                log(f"自动圈定候选景点（上限 {max_n} 个）…")
+                spots = candidate_spots(city, days, max_n)
+                if not spots:
+                    raise RuntimeError("候选景点圈定失败：请换更明确的城市名或直接指定景点清单")
+                log(f"候选景点：{'、'.join(spots)}")
         if _cancelled():
             raise Cancelled()
 
-        # 2) 逐点调研：缓存命中走快路；未命中按 fast 档采集（受全局采集锁排队保护）
+        # 2) 逐点调研：混合候选路径直接复用验证采集结果（避免重复 LLM 提取）；
+        #    其余景点走缓存快路 / fast 档采集（受全局采集锁排队保护）
         job["stage"] = "调研景点"
         spot_points: dict[str, list[dict]] = {}
         spot_sources: dict[str, list[str]] = {}
+        spot_items: dict[str, list] = {}
+        if pre:
+            for n, (items, pts) in pre.items():
+                if pts:
+                    spot_points[n] = pts
+                    spot_sources[n] = [it.url for it in items]
+                    spot_items[n] = items
         for i, spot in enumerate(spots, 1):
             if _cancelled():
                 raise Cancelled()
+            if spot in spot_points:
+                log(f"[{i}/{len(spots)}] {spot}：复用验证采集结果（{len(spot_points[spot])} 条要点）")
+                continue
             record = knowledge.find_fresh(spot, KB_TTL_DAYS)
             if record:
                 log(f"[{i}/{len(spots)}] {spot}：知识库命中，免采集")
@@ -134,6 +219,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 continue
             spot_points[spot] = pts
             spot_sources[spot] = [it.url for it in items]
+            spot_items[spot] = items
             log(f"[{i}/{len(spots)}] {spot}：提取 {len(pts)} 条要点")
         if len(spot_points) < MIN_USABLE_SPOTS:
             raise RuntimeError(
@@ -159,8 +245,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         # 4) 通行矩阵：高德真实耗时；无 Key 降级（功能可用，顺路精度弱）
         job["stage"] = "计算路线"
         travel_lines: list[str] = []
+        locs: dict[str, str] = {}
         if geo.available():
-            locs: dict[str, str] = {}
             if hotel:
                 h = geo.geocode_poi(hotel, city)
                 if h:
@@ -192,23 +278,58 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if _cancelled():
             raise Cancelled()
 
-        # 5) 规划生成 + 6) 渲染落盘
+        # 5) 规划生成（预算约束）+ 数据分析（预算明细 / 避坑专题 / 热度榜）
         job["stage"] = "生成规划"
-        plan = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences)
+        plan = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
+                              budget, preference_mode)
         if not plan["days"]:
             raise RuntimeError("规划生成失败：未产出有效行程，请重试或减少天数/景点")
 
+        budget_summary = build_budget_summary(profiles, plan, days, budget)
+        all_points = [p for pts in spot_points.values() for p in pts]
+        pitfall = pitfall_digest(all_points)
+        heat_rows: list[dict] = []
+        for s, items in spot_items.items():
+            if items:
+                h = heat_index(items)
+                h["spot"] = s
+                heat_rows.append(h)
+        heat_rows.sort(key=lambda r: r["score"], reverse=True)
+        log(f"预算明细：预估 {budget_summary['total']:.0f} 元"
+            + (f"（用户预算 {budget_summary['total_budget']:.0f}，{budget_summary['status']}）" if budget else "（未设预算）")
+            + f"；避坑 {len(pitfall)} 条；热度榜 {len(heat_rows)} 个")
+        if _cancelled():
+            raise Cancelled()
+
+        # 6) 渲染落盘：Markdown + HTML 可视化双输出（共享同一时间戳文件名）
         job["stage"] = "渲染路书"
-        md = render_trip(city, days, hotel, plan, profiles, spot_sources, geo.available())
-        report_path = REPORT_DIR / f"行程_{city}_{datetime.now():%Y%m%d_%H%M%S}.md"
+        ts = datetime.now()
+        md = render_trip(city, days, hotel, plan, profiles, spot_sources, geo.available(),
+                         budget_summary=budget_summary, pitfall=pitfall, heat=heat_rows)
+        report_path = REPORT_DIR / f"行程_{city}_{ts:%Y%m%d_%H%M%S}.md"
         report_path.write_text(md, encoding="utf-8")
-        log(f"行程已保存：{report_path.name}")
+        html_path = report_path.with_suffix(".html")
+        try:
+            html_path.write_text(
+                render_trip_html(city, days, hotel, plan, profiles, spot_sources,
+                                 geo.available(), locs=locs, budget_summary=budget_summary,
+                                 pitfall=pitfall, heat=heat_rows),
+                encoding="utf-8",
+            )
+            log(f"行程已保存：{report_path.name}（含 HTML 可视化版 {html_path.name}）")
+        except Exception as e:
+            html_path = None
+            log(f"HTML 渲染失败（不影响 Markdown 结果）：{e}")
 
         job["result"] = {
             "report_path": str(report_path),
             "report_name": report_path.name,
+            "html_name": html_path.name if html_path else None,
             "markdown": md,
             "cache_hit": False,
+            "budget_summary": budget_summary,
+            "pitfall_digest": pitfall,
+            "heat_rank": heat_rows,
             "stats": {
                 "spots": len(spot_points),
                 "days": days,

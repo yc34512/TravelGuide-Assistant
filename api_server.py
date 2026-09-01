@@ -4,7 +4,7 @@
     GET  /                     网页界面
     GET  /api/health           健康检查 + 知识库概览
     POST /api/research         发起攻略研究任务 {keyword, mode, force} -> {job_id}
-    POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?} -> {job_id}
+    POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?, budget?, preference_mode?} -> {job_id}
     GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
     POST /api/jobs/{id}/cancel 取消运行中的任务（攻略/行程通用）
     GET  /api/jobs/history     历史任务摘要（持久化档案）
@@ -30,7 +30,7 @@ app = FastAPI(
         "典型调用链：POST /api/research 发起 -> 每 20 秒 GET /api/jobs/{id} 轮询 "
         "-> status=done 时取 result.markdown 获得带来源引用的完整报告。"
     ),
-    version="1.1.0",
+    version="1.2.0",
 )
 
 _WEB_DIR = Path(__file__).parent / "web"
@@ -46,8 +46,10 @@ class TripIn(BaseModel):
     city: str
     days: int = 2
     hotel: str = ""
-    spots: list[str] | None = None  # 指定景点清单；缺省时自动圈定
+    spots: list[str] | None = None  # 指定景点清单；缺省时自动圈定（混合候选验证）
     preferences: str = ""
+    budget: float | None = None  # 总预算（元，不含大交通）；缺省不做预算控制
+    preference_mode: str = "均衡"  # 省钱优先 / 体验优先 / 均衡
 
 
 @app.get("/", include_in_schema=False)
@@ -69,15 +71,21 @@ def start_research(body: ResearchIn):
     return {"job_id": job_id}
 
 
-@app.post("/api/trip", summary="发起行程规划任务（自动圈定景点/调研/排行程）")
+@app.post("/api/trip", summary="发起行程规划任务（候选验证/调研/预算控制/排行程）")
 def start_trip_api(body: TripIn):
     city = body.city.strip()
     if not city:
         raise HTTPException(status_code=400, detail="城市不能为空")
     if not 1 <= body.days <= 7:
         raise HTTPException(status_code=400, detail="天数需在 1~7 之间")
+    if body.budget is not None and not 0 < body.budget <= 10_000_000:
+        raise HTTPException(status_code=400, detail="预算需在 0~1000 万元之间")
+    mode = body.preference_mode.strip() or "均衡"
+    if mode not in ("省钱优先", "体验优先", "均衡"):
+        raise HTTPException(status_code=400, detail="消费偏好仅支持：省钱优先 / 体验优先 / 均衡")
     job_id = trip.start_trip(
-        city, body.days, body.hotel.strip(), body.spots, body.preferences.strip()
+        city, body.days, body.hotel.strip(), body.spots, body.preferences.strip(),
+        budget=body.budget, preference_mode=mode,
     )
     return {"job_id": job_id}
 
@@ -113,10 +121,11 @@ def report_history():
     return {"reports": knowledge.list_history()}
 
 
-@app.get("/api/reports/download", summary="下载报告 Markdown（防目录穿越）")
+@app.get("/api/reports/download", summary="下载报告（Markdown/HTML，防目录穿越）")
 def download_report(name: str):
-    """按文件名下载报告。路径先 resolve 再校验父目录，防止 ../ 目录穿越。"""
+    """按文件名下载报告（.md 或行程可视化 .html）。路径先 resolve 再校验父目录，防止 ../ 目录穿越。"""
     path = (REPORT_DIR / name).resolve()
-    if path.parent != REPORT_DIR.resolve() or path.suffix != ".md" or not path.exists():
+    if path.parent != REPORT_DIR.resolve() or path.suffix not in (".md", ".html") or not path.exists():
         raise HTTPException(status_code=404, detail="报告不存在")
-    return FileResponse(path, filename=path.name, media_type="text/markdown")
+    media = "text/html" if path.suffix == ".html" else "text/markdown"
+    return FileResponse(path, filename=path.name, media_type=media)

@@ -24,6 +24,28 @@
 
 响应：`{"job_id": "a1b2c3d4e5f6"}`
 
+## POST /api/trip
+
+发起行程规划任务（混合候选验证 → 逐点调研 → 预算控制 → 排线）。
+
+请求体：
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `city` | string | 必填 | 目的地城市 |
+| `days` | int | 2 | 出行天数 1~7 |
+| `hotel` | string | "" | 酒店/住宿位置（用于排线） |
+| `spots` | string[] | null | 指定景点清单；缺省时自动圈定 15~20 个候选并经抖音验证筛选 |
+| `preferences` | string | "" | 用户偏好（如"带老人"） |
+| `budget` | number | null | 总预算（元，不含大交通），传入后输出预算明细与超支预警 |
+| `preference_mode` | string | 均衡 | 省钱优先 / 体验优先 / 均衡 |
+
+响应：`{"job_id": "..."}`；轮询同 `/api/jobs/{job_id}`（`stage` 依次为：圈定景点/调研景点/构建档案/计算路线/生成规划/渲染路书）。
+行程任务的 `result` 额外含：`budget_summary`（门票/餐饮/交通/弹性分项与结余/超支判定）、
+`pitfall_digest`（避坑专题，每条含评论原文 `quote` 与来源 `source`）、`heat_rank`（热度榜）、
+`html_name`（HTML 可视化报告文件名，用下载接口取）。
+耗时：未调研过的景点约 5 分钟/个，调研过的秒级命中缓存。
+
 ## GET /api/jobs/{job_id}
 
 任务状态。顶层字段：
@@ -72,7 +94,7 @@
 
 ## GET /api/reports/download?name=文件名
 
-下载指定报告（`text/markdown`）。仅接受 `data/reports/` 内的 `.md` 文件，路径穿越返回 404。
+下载指定报告（`text/markdown` 或 `text/html`）。仅接受 `data/reports/` 内的 `.md` / `.html` 文件，路径穿越返回 404。
 
 ## 典型耗时参考
 
