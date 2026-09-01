@@ -90,6 +90,7 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 ├── api_server.py        # FastAPI：网页 + 任务接口（含取消/历史/下载）
 ├── run_cli.py           # 双击运行.bat 的交互入口（含 API Key 配置向导）
 ├── report_from_raw.py   # 从已采集 JSON 重新生成报告（不重爬）
+├── mcp_server.py        # MCP 服务器：把本项目暴露为标准工具（任意 MCP 客户端可用）
 ├── config.py            # 频控/限量/LLM/知识库配置（.env 可覆盖）
 ├── tests_offline.py     # 离线自测脚本（不调 LLM 不开浏览器）：python tests_offline.py
 ├── .qoder/skills/       # AI 代理技能：教 Qoder 代理通过 API 驱动本项目
@@ -145,6 +146,42 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 仓库内置了 Qoder 代理技能 `.qoder/skills/travel-guide-research/`：在 Qoder 中打开本项目后，
 直接对 AI 说"查一下西湖的攻略"，代理会自动启动服务、发起采集、轮询进度并交付报告，
 还能基于报告继续做行程规划。非 Qoder 用户可把它当作一份完整的 API 调用文档读。
+
+## 接入其他 AI 智能体（OpenAI 兼容 / MCP）
+
+本项目不止服务 Qoder：任何支持工具调用的智能体都能接入，三条路任选：
+
+**1. OpenAPI 导入（Dify / Coze / GPTs Actions / n8n / LangChain）**
+
+服务启动后，OpenAPI 规范自动生成：
+- 交互式文档：`http://127.0.0.1:8000/docs`
+- 规范 JSON：`http://127.0.0.1:8000/openapi.json`（直接粘进各平台的 API 导入入口）
+- 调用链：`POST /api/research` → 每 20 秒轮询 `GET /api/jobs/{id}` → `result.markdown` 即报告
+
+**2. MCP 接入（Claude Desktop / Cursor / Cherry Studio / Cline 等）**
+
+仓库自带 `mcp_server.py`（stdio 传输，6 个工具：服务探测/发起任务/查进度/取消/历史报告/读报告）。客户端配置：
+
+```json
+{
+  "mcpServers": {
+    "travel-guide": {
+      "command": "python",
+      "args": ["C:/路径/到项目/mcp_server.py"]
+    }
+  }
+}
+```
+
+目标服务地址可用环境变量 `TG_SERVER_URL` 覆盖（默认 `http://127.0.0.1:8000`）。
+
+**3. 通用系统提示词（任何支持自定义提示词的智能体）**
+
+> 你可以调用旅游攻略助手 HTTP API（基址 http://127.0.0.1:8000）：
+> 用 POST /api/research（body: {"keyword": "景点", "mode": "standard"}）发起任务，
+> 每 20 秒 GET /api/jobs/{job_id} 轮询，status 为 done 时取 result.markdown 作为报告；
+> 报告含置信度分级（多源一致/单源/存分歧）与来源链接，转述时不得丢弃来源；
+> error 含"登录态"提示用户扫码，含"选择器失效"提示维护 crawler/douyin.py 的 SEL_* 常量。
 
 ## 开发与自测
 

@@ -242,5 +242,33 @@ class TestApi(unittest.TestCase):
             )
 
 
+class TestMcpAndOpenapi(unittest.TestCase):
+    def test_mcp_tools_registered(self):
+        """MCP 服务器注册了全套 6 个工具（不拉起服务，只验证注册表）。"""
+        import asyncio
+
+        import mcp_server
+
+        tools = asyncio.run(mcp_server.mcp.list_tools())
+        names = {t.name for t in tools}
+        self.assertEqual(
+            names,
+            {"check_service", "start_research", "get_job_status",
+             "cancel_research", "list_reports", "get_report_content"},
+        )
+
+    def test_openapi_schema(self):
+        """OpenAPI 规范含全部 API 端点（供 Dify/Coze/GPTs 等平台导入）。"""
+        from api_server import app
+
+        spec = app.openapi()
+        paths = set(spec["paths"].keys())
+        for p in ("/api/health", "/api/research", "/api/jobs/{job_id}",
+                  "/api/jobs/{job_id}/cancel", "/api/jobs/history",
+                  "/api/reports", "/api/reports/download"):
+            self.assertIn(p, paths)
+        self.assertNotIn("/", paths)  # 网页首页不进 OpenAPI（非 API 端点）
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

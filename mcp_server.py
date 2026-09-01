@@ -1,0 +1,128 @@
+"""MCP 服务器：把旅游攻略助手暴露为标准工具，供任意 MCP 兼容智能体调用。
+
+适用客户端：Claude Desktop / Cursor / Cherry Studio / Cline / Qoder 等。
+以 stdio 方式接入，客户端配置示例：
+
+    {
+      "mcpServers": {
+        "travel-guide": {
+          "command": "python",
+          "args": ["C:/路径/到项目/mcp_server.py"]
+        }
+      }
+    }
+
+目标服务地址用环境变量 TG_SERVER_URL 覆盖（默认 http://127.0.0.1:8000）。
+本进程只做"翻译"：HTTP 调不通时返回友好的排障指引，而不是抛栈。
+"""
+import os
+
+import httpx
+from mcp.server.fastmcp import FastMCP
+
+BASE_URL = os.getenv("TG_SERVER_URL", "http://127.0.0.1:8000")
+
+mcp = FastMCP("travel-guide-assistant")
+
+_START_HINT = (
+    "服务未启动或不可达。请先启动旅游攻略助手服务：在项目目录执行 "
+    "python run_server.py（Windows 可双击 运行服务.bat），等待 3 秒后重试。"
+)
+
+
+async def _get(path: str, params: dict | None = None):
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30) as c:
+        r = await c.get(path, params=params)
+        r.raise_for_status()
+        return r.json()
+
+
+async def _post(path: str, body: dict | None = None):
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30) as c:
+        r = await c.post(path, json=body or {})
+        r.raise_for_status()
+        return r.json()
+
+
+def _conn_err(e: Exception) -> dict:
+    return {"ok": False, "error": _START_HINT, "detail": str(e)}
+
+
+@mcp.tool()
+async def check_service() -> dict:
+    """检查旅游攻略助手服务是否在线，返回知识库概览（景点数/报告数）。"""
+    try:
+        return await _get("/api/health")
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
+async def start_research(keyword: str, mode: str = "standard", force: bool = False) -> dict:
+    """发起景点攻略研究任务。
+
+    keyword: 景点关键词，如"西湖"。
+    mode: fast(约3分钟/5视频) | standard(约6分钟/8视频) | deep(约15~25分钟/10视频+口播转写)。
+    force: true 跳过知识库缓存强制重新采集；默认 false（7天内重复查询约30秒命中缓存）。
+    返回 job_id 与预估耗时；任务在后台运行，用 get_job_status 轮询。
+    """
+    try:
+        data = await _post("/api/research", {"keyword": keyword, "mode": mode, "force": force})
+        eta = {"fast": "约3分钟", "standard": "约6分钟", "deep": "约15~25分钟"}.get(mode, "约6分钟")
+        return {"ok": True, "job_id": data["job_id"], "estimated": eta,
+                "hint": "任务后台运行，请每20秒调用 get_job_status 轮询，不要同步等待。"}
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
+async def get_job_status(job_id: str) -> dict:
+    """查询任务进度。返回 status：running(继续轮询) / done(成功,结果在 result.markdown) /
+    error(失败,原因在 error) / cancelled(已取消)。日志只保留末尾 8 行以节省上下文。"""
+    try:
+        job = await _get(f"/api/jobs/{job_id}")
+        job["log"] = (job.get("log") or [])[-8:]
+        return job
+    except httpx.HTTPStatusError as e:
+        return {"ok": False, "error": f"任务不存在或已清理（{e.response.status_code}）"}
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
+async def cancel_research(job_id: str) -> dict:
+    """取消运行中的任务（当前步骤结束后生效，浏览器资源自动释放）。非运行态任务会返回失败说明。"""
+    try:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=30) as c:
+            r = await c.post(f"/api/jobs/{job_id}/cancel")
+            if r.status_code == 200:
+                return {"ok": True, "hint": "取消请求已受理，稍后轮询到 cancelled 即生效。"}
+            return {"ok": False, "error": r.json().get("detail", str(r.status_code))}
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
+async def list_reports() -> dict:
+    """列出历史攻略报告（关键词、采集时间、视频/评论数、报告文件名）。"""
+    try:
+        return await _get("/api/reports")
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
+async def get_report_content(report_name: str) -> dict:
+    """读取指定历史报告的完整 Markdown 内容。report_name 用 list_reports 返回的 report_path 字段。"""
+    try:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=30) as c:
+            r = await c.get("/api/reports/download", params={"name": report_name})
+            if r.status_code != 200:
+                return {"ok": False, "error": "报告不存在或已被删除"}
+            return {"ok": True, "markdown": r.text}
+    except Exception as e:
+        return _conn_err(e)
+
+
+if __name__ == "__main__":
+    mcp.run()  # stdio 传输：由 MCP 客户端以子进程方式拉起

@@ -20,7 +20,17 @@ from config import KB_TTL_DAYS, REPORT_DIR
 from core import knowledge
 from service import research
 
-app = FastAPI(title="旅游攻略助手", description="抖音 UGC 采集 + AI 攻略整合，来源可溯")
+app = FastAPI(
+    title="旅游攻略助手",
+    description=(
+        "抖音 UGC 采集 + AI 攻略整合，来源可溯。\n\n"
+        "面向 AI 智能体/自动化平台：本服务全部接口均为无状态 HTTP JSON，"
+        "可直接按 OpenAPI 规范导入 Dify / Coze / GPTs Actions / n8n / LangChain 等。\n"
+        "典型调用链：POST /api/research 发起 -> 每 20 秒 GET /api/jobs/{id} 轮询 "
+        "-> status=done 时取 result.markdown 获得带来源引用的完整报告。"
+    ),
+    version="1.1.0",
+)
 
 _WEB_DIR = Path(__file__).parent / "web"
 
@@ -31,17 +41,17 @@ class ResearchIn(BaseModel):
     force: bool = False
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def index():
     return FileResponse(_WEB_DIR / "index.html")
 
 
-@app.get("/api/health")
+@app.get("/api/health", summary="健康检查 + 知识库概览")
 def health():
     return {"status": "ok", "kb": knowledge.stats(), "kb_ttl_days": KB_TTL_DAYS}
 
 
-@app.post("/api/research")
+@app.post("/api/research", summary="发起攻略研究任务")
 def start_research(body: ResearchIn):
     keyword = body.keyword.strip()
     if not keyword:
@@ -50,14 +60,14 @@ def start_research(body: ResearchIn):
     return {"job_id": job_id}
 
 
-@app.get("/api/jobs/history")
+@app.get("/api/jobs/history", summary="历史任务摘要（重启后仍可查）")
 def jobs_history():
     """历史任务摘要（服务重启后仍可查看）。注意：必须定义在 /api/jobs/{job_id} 之前，
     否则会被路径参数路由截胡。"""
     return {"jobs": knowledge.list_jobs()}
 
 
-@app.get("/api/jobs/{job_id}")
+@app.get("/api/jobs/{job_id}", summary="查询任务状态/进度/结果")
 def job_status(job_id: str):
     job = research.get_job(job_id)
     if not job:
@@ -65,7 +75,7 @@ def job_status(job_id: str):
     return job
 
 
-@app.post("/api/jobs/{job_id}/cancel")
+@app.post("/api/jobs/{job_id}/cancel", summary="取消运行中的任务")
 def cancel_job(job_id: str):
     """取消运行中的任务。已在终态或不存在时返回 409。"""
     if research.get_job(job_id) is None:
@@ -75,13 +85,13 @@ def cancel_job(job_id: str):
     return {"ok": True}
 
 
-@app.get("/api/reports")
+@app.get("/api/reports", summary="历史报告列表")
 def report_history():
     """历史报告列表（知识库登记且文件仍存在的）。"""
     return {"reports": knowledge.list_history()}
 
 
-@app.get("/api/reports/download")
+@app.get("/api/reports/download", summary="下载报告 Markdown（防目录穿越）")
 def download_report(name: str):
     """按文件名下载报告。路径先 resolve 再校验父目录，防止 ../ 目录穿越。"""
     path = (REPORT_DIR / name).resolve()
