@@ -56,6 +56,17 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
    "duration": "约X小时", "transport": "从上一地点至此的方式与耗时", "cost": 数字,
    "reasons": "...", "notes": "...", "food": "", "pitfall_quotes": ["评论原文"]}]}]}"""
 
+DIGEST_SYSTEM = """你是评价分析专家。给定某景点的编号信息要点（含立场标注与部分评论原文引用），
+压缩成一份"真实评价摘要"，供游客出发前一分钟读完。
+
+规则：
+1. 只用给定要点中的信息，禁止编造；某字段无对应内容就给空字符串/空数组；
+2. verdict：一句话总评（不超过 25 字），客观概括口碑情况（如"口碑两极：景观震撼但体力劝退"）；
+3. positive：好评摘要（不超过 60 字），压缩"推荐"立场的要点，保留具体事实；
+4. negative：差评摘要（不超过 60 字），压缩"避雷"立场的要点，保留具体事实；
+5. quotes：从要点自带的评论原文引用中挑最有代表性的 2 条（逐字照抄不改写）；
+6. 输出严格 JSON：{"verdict": "...", "positive": "...", "negative": "...", "quotes": ["..."]}"""
+
 
 def candidate_spots(city: str, days: int, max_n: int) -> list[str]:
     """让 LLM 圈定城市候选景点（去重、限量）。"""
@@ -131,6 +142,38 @@ def build_spot_profile(spot: str, points: list[dict]) -> dict:
     )
     data = chat_json(PROFILE_SYSTEM, f"景点：{spot}\n信息要点：\n{numbered or '(无)'}")
     return _normalize_profile(data)
+
+
+def empty_digest() -> dict:
+    return {"verdict": "", "positive": "", "negative": "", "quotes": []}
+
+
+def _normalize_digest(data: dict, quote_pool: list[str]) -> dict:
+    """摘要防御性规范化：引文防幻觉校验（必须真实出自输入要点自带的原文）。纯函数可测。"""
+    raw_quotes = [str(q).strip()[:80] for q in (data.get("quotes") or []) if str(q).strip()]
+    quotes = [
+        q for q in raw_quotes
+        if any(q[:15] in p or p[:15] in q for p in quote_pool)
+    ][:2]
+    return {
+        "verdict": str(data.get("verdict") or "").strip()[:60],
+        "positive": str(data.get("positive") or "").strip()[:120],
+        "negative": str(data.get("negative") or "").strip()[:120],
+        "quotes": quotes,
+    }
+
+
+def build_review_digest(spot: str, points: list[dict]) -> dict:
+    """把景点的推荐/避雷/中性要点压缩成真实评价摘要（单次 LLM 调用）。
+    返回 {"verdict", "positive", "negative", "quotes"}；调用方失败时降级为空摘要。"""
+    quote_pool = [p["quote"] for p in points if p.get("quote")]
+    numbered = "\n".join(
+        f"[{i + 1}] ({p.get('stance', '中性')}) {p['claim']}"
+        + (f"（评论原文：{p['quote']}）" if p.get("quote") else "")
+        for i, p in enumerate(points)
+    )
+    data = chat_json(DIGEST_SYSTEM, f"景点：{spot}\n信息要点：\n{numbered or '(无)'}")
+    return _normalize_digest(data, quote_pool)
 
 
 def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
@@ -246,7 +289,7 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
 def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str, dict],
                 spot_sources: dict[str, list[str]], geo_on: bool,
                 budget_summary: dict | None = None, pitfall: list[dict] | None = None,
-                heat: list[dict] | None = None) -> str:
+                heat: list[dict] | None = None, digests: dict[str, dict] | None = None) -> str:
     """把行程 JSON 渲染成 Markdown 路书（逐日卡片 + 预算 + 避坑专题 + 热度榜 + 景点详情 + 来源链接）。"""
     total_slots = sum(len(d["slots"]) for d in plan["days"])
     lines = [
@@ -326,6 +369,15 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
             lines.append(f"- 打卡点：{'；'.join(p['photo_spots'])}")
         if p["tips"]:
             lines.append(f"- 贴士：{'；'.join(p['tips'])}")
+        dg = (digests or {}).get(name) or {}
+        if dg.get("verdict"):
+            lines.append(f"- 真实评价摘要：{dg['verdict']}")
+            if dg.get("positive"):
+                lines.append(f"  - 好评：{dg['positive']}")
+            if dg.get("negative"):
+                lines.append(f"  - 差评：{dg['negative']}")
+            for q in dg.get("quotes", []):
+                lines.append(f"  > 评论摘录：\"{q}\"")
         urls = spot_sources.get(name) or []
         if urls:
             links = " ".join(f"[来源{idx + 1}]({u})" for idx, u in enumerate(urls[:6]))
@@ -339,7 +391,8 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
 def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dict[str, dict],
                      spot_sources: dict[str, list[str]], geo_on: bool,
                      locs: dict[str, str] | None = None, budget_summary: dict | None = None,
-                     pitfall: list[dict] | None = None, heat: list[dict] | None = None) -> str:
+                     pitfall: list[dict] | None = None, heat: list[dict] | None = None,
+                     digests: dict[str, dict] | None = None) -> str:
     """渲染 HTML 可视化路书（Jinja2 模板 + ECharts/Leaflet CDN，离线时模板内置文本版降级）。"""
     env = Environment(
         loader=FileSystemLoader(_TEMPLATE_DIR),
@@ -357,6 +410,7 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
         city=city, days=days, hotel=hotel, plan=plan, profiles=profiles,
         spot_sources=spot_sources, geo_on=geo_on, markers=markers,
         budget_summary=budget_summary, pitfall=pitfall or [], heat=heat or [],
+        digests=digests or {},
         generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
         total_slots=sum(len(d["slots"]) for d in plan["days"]),
     )

@@ -24,8 +24,10 @@ from pipeline.extract import extract_points
 from pipeline.heat import heat_index, pitfall_digest
 from pipeline.planner import (
     build_budget_summary,
+    build_review_digest,
     build_spot_profile,
     candidate_spots,
+    empty_digest,
     empty_profile,
     plan_itinerary,
     render_trip,
@@ -170,6 +172,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 log(f"候选景点：{'、'.join(spots)}")
         if _cancelled():
             raise Cancelled()
+        # 城市景点关联登记入知识库：供热度刷榜优先复用，免去重新圈定
+        knowledge.register_city_spots(city, spots)
 
         # 2) 逐点调研：混合候选路径直接复用验证采集结果（避免重复 LLM 提取）；
         #    其余景点走缓存快路 / fast 档采集（受全局采集锁排队保护）
@@ -227,18 +231,29 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 "（可稍后重试或在请求中直接指定景点清单）"
             )
 
-        # 3) 景点档案：每个景点蒸馏一份结构化档案（3 路并发）
+        # 3) 景点档案 + 真实评价摘要：每个景点两份蒸馏（同池 3 路并发）
         job["stage"] = "构建档案"
         profiles: dict[str, dict] = {}
+        digests: dict[str, dict] = {}
         with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {pool.submit(build_spot_profile, s, pts): s for s, pts in spot_points.items()}
+            futures = {}
+            for s, pts in spot_points.items():
+                futures[pool.submit(build_spot_profile, s, pts)] = ("profile", s)
+                futures[pool.submit(build_review_digest, s, pts)] = ("digest", s)
             for fut in as_completed(futures):
-                s = futures[fut]
+                kind, s = futures[fut]
                 try:
-                    profiles[s] = fut.result()
+                    if kind == "profile":
+                        profiles[s] = fut.result()
+                    else:
+                        digests[s] = fut.result()
                 except Exception as e:
-                    log(f"{s}：档案构建失败（{e}），使用空档案兜底")
-                    profiles[s] = empty_profile()
+                    if kind == "profile":
+                        log(f"{s}：档案构建失败（{e}），使用空档案兜底")
+                        profiles[s] = empty_profile()
+                    else:
+                        log(f"{s}：评价摘要失败（{e}），跳过")
+                        digests[s] = empty_digest()
         if _cancelled():
             raise Cancelled()
 
@@ -305,7 +320,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         job["stage"] = "渲染路书"
         ts = datetime.now()
         md = render_trip(city, days, hotel, plan, profiles, spot_sources, geo.available(),
-                         budget_summary=budget_summary, pitfall=pitfall, heat=heat_rows)
+                         budget_summary=budget_summary, pitfall=pitfall, heat=heat_rows,
+                         digests=digests)
         report_path = REPORT_DIR / f"行程_{city}_{ts:%Y%m%d_%H%M%S}.md"
         report_path.write_text(md, encoding="utf-8")
         html_path = report_path.with_suffix(".html")
@@ -313,7 +329,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             html_path.write_text(
                 render_trip_html(city, days, hotel, plan, profiles, spot_sources,
                                  geo.available(), locs=locs, budget_summary=budget_summary,
-                                 pitfall=pitfall, heat=heat_rows),
+                                 pitfall=pitfall, heat=heat_rows, digests=digests),
                 encoding="utf-8",
             )
             log(f"行程已保存：{report_path.name}（含 HTML 可视化版 {html_path.name}）")

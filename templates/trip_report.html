@@ -47,6 +47,8 @@
   .card h3 { font-size: 15px; margin-bottom: 6px; }
   .card .src { font-size: 12px; }
   .card .src a { color: var(--green); text-decoration: none; margin-right: 8px; }
+  .digest-box { background: #f8faf9; border-radius: 8px; padding: 8px 12px; margin-top: 8px; font-size: 13px; }
+  .digest-box blockquote { margin: 4px 0 0; padding: 3px 10px; background: #fff; border-radius: 6px; color: var(--muted); font-size: 12px; }
   .tag { display: inline-block; font-size: 12px; border-radius: 4px; padding: 0 8px; margin-right: 6px; background: #eaf4f0; color: var(--green); }
   footer { font-size: 12px; color: var(--muted); text-align: center; padding: 10px 20px; }
   .note-bar { font-size: 13px; background: #fef9e7; border-radius: 8px; padding: 8px 12px; margin-top: 10px; }
@@ -163,6 +165,15 @@
       {% if p.food %}<p>🍜 美食：{{ p.food|join('；') }}</p>{% endif %}
       {% if p.photo_spots %}<p>📷 打卡：{{ p.photo_spots|join('；') }}</p>{% endif %}
       {% if p.tips %}<p>💡 贴士：{{ p.tips|join('；') }}</p>{% endif %}
+      {% set dg = digests.get(name) or {} %}
+      {% if dg.verdict %}
+      <div class="digest-box">
+        <p><b>📝 真实评价摘要</b>：{{ dg.verdict }}</p>
+        {% if dg.positive %}<p>👍 {{ dg.positive }}</p>{% endif %}
+        {% if dg.negative %}<p class="risk-high">👎 {{ dg.negative }}</p>{% endif %}
+        {% for q in dg.quotes %}<blockquote>“{{ q }}”</blockquote>{% endfor %}
+      </div>
+      {% endif %}
       {% set urls = spot_sources.get(name, []) %}
       {% if urls %}
       <p class="src">信息溯源：{% for u in urls[:6] %}<a href="{{ u }}" target="_blank" rel="noopener">来源{{ loop.index }} ↗</a>{% endfor %}</p>
