@@ -44,3 +44,7 @@ SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 # 每条视频增加约 30~90 秒；转写文本随原始 JSON 存入知识库，缓存命中时零成本复用
 ASR_ENABLED = os.getenv("ASR_ENABLED", "false").lower() == "true"
 ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "small")
+
+# —— 高德地图（行程规划师用：POI 定位 + 通行时间，"顺路"排线的真保障）——
+# 个人开发者免费额度每日 5000 次；留空则行程规划降级为纯 LLM 按区域排线（可用但精度弱）
+AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
