@@ -92,6 +92,7 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 ├── report_from_raw.py   # 从已采集 JSON 重新生成报告（不重爬）
 ├── config.py            # 频控/限量/LLM/知识库配置（.env 可覆盖）
 ├── tests_offline.py     # 离线自测脚本（不调 LLM 不开浏览器）：python tests_offline.py
+├── .qoder/skills/       # AI 代理技能：教 Qoder 代理通过 API 驱动本项目
 ├── core/
 │   ├── models.py        # VideoItem / Comment / InfoPoint 统一数据模型
 │   ├── credentials.py   # API Key 安全存取（系统凭据管理器）+ 配置向导
@@ -138,6 +139,12 @@ python main.py 武功山攻略 --limit 15  # 自定义采集量
 | 服务重启后看不到进行中的任务 | 终态任务已落库：网页历史报告卡片仍可浏览/下载；运行中的任务重启后视为中断，需重新发起 |
 | 报告缺"门票/交通"章节 | 系统会自动定向补采一轮；仍缺失说明抖音上确实没有相关素材 |
 | 装依赖很慢/失败 | 用国内镜像：`pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple` |
+
+## AI Agent Skill（附赠）
+
+仓库内置了 Qoder 代理技能 `.qoder/skills/travel-guide-research/`：在 Qoder 中打开本项目后，
+直接对 AI 说"查一下西湖的攻略"，代理会自动启动服务、发起采集、轮询进度并交付报告，
+还能基于报告继续做行程规划。非 Qoder 用户可把它当作一份完整的 API 调用文档读。
 
 ## 开发与自测
 
