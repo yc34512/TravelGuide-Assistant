@@ -1,5 +1,7 @@
 # TravelGuide Assistant（旅游攻略助手）
 
+[![Offline Tests](https://github.com/YC34512/TravelGuide-Assistant/actions/workflows/test.yml/badge.svg)](https://github.com/YC34512/TravelGuide-Assistant/actions/workflows/test.yml)
+
 输入一个景点关键词 → 自动采集抖音上相关视频的文案、口播（可转写）与高赞评论 → AI 交叉提炼碎片化攻略信息，并对每条信息做**可取/不可取的立场评价** → 生成一份**带来源引用与置信度分级**的旅游攻略报告（Markdown）。
 
 第一阶段竖切：**仅抖音**。小红书接入预留了适配器接口，二期再加。
@@ -146,6 +148,8 @@ python tests_offline.py
 ```
 
 覆盖：关键词归一化、速览清单、立场冲突兜底、验证降级、评论过滤、时效判断、任务落库与取消、API 防目录穿越、搜索择优排序、缺口检测、作者回复识别。
+
+仓库已配置 GitHub Actions：每次 push / PR 自动执行语法检查与全部离线测试（见顶部徽章）。
 
 ## 已知限制（第一阶段刻意不做）
 
