@@ -4,7 +4,9 @@
     GET  /                     网页界面
     GET  /api/health           健康检查 + 知识库概览
     POST /api/research         发起研究任务 {keyword, mode, force} -> {job_id}
-    GET  /api/jobs/{id}        轮询任务状态/进度/结果
+    GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
+    POST /api/jobs/{id}/cancel 取消运行中的任务
+    GET  /api/jobs/history     历史任务摘要（持久化档案）
     GET  /api/reports          历史报告列表
     GET  /api/reports/download 下载指定报告文件（防目录穿越）
 """
@@ -48,12 +50,29 @@ def start_research(body: ResearchIn):
     return {"job_id": job_id}
 
 
+@app.get("/api/jobs/history")
+def jobs_history():
+    """历史任务摘要（服务重启后仍可查看）。注意：必须定义在 /api/jobs/{job_id} 之前，
+    否则会被路径参数路由截胡。"""
+    return {"jobs": knowledge.list_jobs()}
+
+
 @app.get("/api/jobs/{job_id}")
 def job_status(job_id: str):
     job = research.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
     return job
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    """取消运行中的任务。已在终态或不存在时返回 409。"""
+    if research.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not research.cancel_job(job_id):
+        raise HTTPException(status_code=409, detail="任务不在运行中，无法取消")
+    return {"ok": True}
 
 
 @app.get("/api/reports")

@@ -50,6 +50,8 @@
   .mini-btn { background: #fff; border: 1px solid #1f7a5c; color: #1f7a5c; font-size: 13px;
               padding: 5px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
   .mini-btn:hover { background: #eef6f2; }
+  button.mini-btn.danger { border-color: #c0392b; color: #c0392b; }
+  button.mini-btn.danger:hover { background: #fdf1ef; }
   .card h3 { margin: 0 0 10px; font-size: 15px; color: #22303c; }
   .hidden { display: none; }
   footer { text-align: center; color: #93a3ae; font-size: 12px; padding: 14px; }
@@ -78,7 +80,10 @@
   </div>
 
   <div id="progress" class="card hidden">
-    <div class="stage" id="stage"></div>
+    <div class="row" style="justify-content: space-between;">
+      <div class="stage" id="stage"></div>
+      <button id="cancelBtn" class="mini-btn" onclick="cancelJob()">取消任务</button>
+    </div>
     <pre class="log" id="log"></pre>
   </div>
 
@@ -98,6 +103,7 @@
 <footer>报告由 AI 汇总抖音公开内容生成，仅供参考；价格/政策等时效信息出发前请务必官方核实。</footer>
 <script>
 const $ = id => document.getElementById(id);
+let currentJobId = null;  // 当前正在轮询的任务，供取消按钮使用
 
 function renderMd(md) {
   return window.marked ? marked.parse(md) : '<pre style="white-space:pre-wrap">' + md + '</pre>';
@@ -107,6 +113,8 @@ async function go() {
   const kw = $('kw').value.trim();
   if (!kw) { $('kw').focus(); return; }
   $('btn').disabled = true;
+  // 含义：将“取消任务”按钮的 disabled 属性设为 false，即启用该按钮，允许用户在任务运行期间点击取消以中断采集。
+  $('cancelBtn').disabled = false;
   $('result').classList.add('hidden');
   $('progress').classList.remove('hidden');
   $('stage').className = 'stage';
@@ -124,6 +132,7 @@ async function go() {
     });
     if (!resp.ok) throw new Error((await resp.json()).detail || '请求失败');
     const { job_id } = await resp.json();
+    currentJobId = job_id;
     poll(job_id);
   } catch (e) {
     $('stage').className = 'stage err';
@@ -142,6 +151,12 @@ async function poll(id) {
   $('log').scrollTop = $('log').scrollHeight;
   if (job.status === 'running') { setTimeout(() => poll(id), 2000); return; }
   $('btn').disabled = false;
+  currentJobId = null;
+  if (job.status === 'cancelled') {
+    $('stage').className = 'stage err';
+    $('stage').textContent = '任务已取消（浏览器与采集资源已释放）';
+    return;
+  }
   if (job.status === 'error') {
     $('stage').className = 'stage err';
     $('stage').textContent = '任务失败：' + job.error;
@@ -160,6 +175,19 @@ async function poll(id) {
   $('report').innerHTML = renderMd(r.markdown);
   window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
   loadHistory();
+}
+
+async function cancelJob() {
+  if (!currentJobId) return;
+  $('cancelBtn').disabled = true;
+  try {
+    const resp = await fetch(`/api/jobs/${currentJobId}/cancel`, { method: 'POST' });
+    if (!resp.ok) throw new Error((await resp.json()).detail || '取消失败');
+    $('stage').innerHTML = '<span class="spin"></span>正在取消（当前步骤结束后生效）…';
+  } catch (e) {
+    alert('取消失败：' + e.message);
+    $('cancelBtn').disabled = false;
+  }
 }
 
 async function loadHistory() {

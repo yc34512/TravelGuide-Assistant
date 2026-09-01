@@ -2,10 +2,13 @@
 
 - 同一景点在保鲜期内再次查询 -> 直接复用已采集数据，免重爬、免重复消耗；
 - 报告生成后回填记录，形成"采集 -> 报告"的完整档案；
-- 超过保鲜期（KB_TTL_DAYS，默认 7 天）视为过期，触发重新采集。
+- 超过保鲜期（KB_TTL_DAYS，默认 7 天）视为过期，触发重新采集；
+- 任务档案（jobs 表）：已完成/失败任务的终态落库，服务重启后历史不丢。
+  运行中的任务只在内存（进程退出即视为中断）。
 
 选 SQLite 而非 PostgreSQL：单机单用户场景零部署成本，将来上云再平滑迁移。
 """
+import json
 import re
 import sqlite3
 from datetime import datetime, timedelta
@@ -44,6 +47,21 @@ def _conn() -> sqlite3.Connection:
             crawled_at TEXT NOT NULL,
             report_path TEXT,
             reported_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            keyword TEXT NOT NULL,
+            mode TEXT,
+            status TEXT NOT NULL,
+            stage TEXT,
+            result_json TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            finished_at TEXT
         )
         """
     )
@@ -127,3 +145,71 @@ def list_history(limit: int = 20) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+# —— 任务档案：只持久化终态（完成/失败/取消），运行中任务仅存内存 ——
+
+def record_job(job: dict) -> None:
+    """任务到达终态时落库（UPSERT）：重启后历史任务仍可查询。"""
+    result_json = json.dumps(job.get("result"), ensure_ascii=False) if job.get("result") else None
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, keyword, mode, status, stage, result_json, error, created_at, finished_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET"
+            " status=excluded.status, stage=excluded.stage, result_json=excluded.result_json,"
+            " error=excluded.error, finished_at=excluded.finished_at",
+            (
+                job["id"],
+                job.get("keyword", ""),
+                job.get("mode", ""),
+                job.get("status", ""),
+                job.get("stage", ""),
+                result_json,
+                job.get("error"),
+                job.get("created_at", datetime.now().isoformat(timespec="seconds")),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+
+
+def load_job(job_id: str) -> dict | None:
+    """从库里还原一个终态任务（供内存未命中时查询）。"""
+    with _conn() as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "keyword": row["keyword"],
+        "mode": row["mode"],
+        "status": row["status"],
+        "stage": row["stage"],
+        "log": [],  # 日志不持久化，重启后只保留结论
+        "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        "error": row["error"],
+        "cache_hit": (json.loads(row["result_json"]).get("cache_hit")
+                      if row["result_json"] else False),
+        "finished_at": row["finished_at"],
+    }
+
+
+def list_jobs(limit: int = 20) -> list[dict]:
+    """最近的终态任务摘要（供网页展示历史任务）。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, keyword, mode, status, error, finished_at FROM jobs"
+            " ORDER BY finished_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "keyword": r["keyword"],
+            "mode": r["mode"],
+            "status": r["status"],
+            "error": r["error"],
+            "finished_at": r["finished_at"],
+        }
+        for r in rows
+    ]
