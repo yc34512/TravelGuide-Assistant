@@ -19,6 +19,8 @@ EXTRACT_SYSTEM = """你是旅游攻略信息抽取助手，负责从单条抖音
 规则：
 1. 只使用输入文本中出现的信息，禁止用你自己的知识补充或推断；
 2. 广告嫌疑内容（推销、导流、团购、探店合作话术）一律忽略；
+   历史背景、文化典故、学术科普、新闻事件等与出行无关的内容也不提取（如"某石窟开凿于北魏"
+   "抗战期间某学者来考察过"）——攻略只要对游客有用的实用信息；
 3. 疑问句不是信息：评论里的提问（"是不是要门票""多少钱""怎么走""人多吗"）一律不提取，
    只有陈述性的经验/事实/建议才提取；
 4. 视频标题式口号与引导话术没有信息量（"一定要收藏""看这一条就够了""关注我""点赞"），
@@ -28,6 +30,8 @@ EXTRACT_SYSTEM = """你是旅游攻略信息抽取助手，负责从单条抖音
 7. 每条要点必须标注 stance（立场）：
    - "推荐"：内容把这件事说成值得做的（正面经验、好评、强烈推荐、高赞认可的做法）；
    - "避雷"：内容把这件事说成不值得/有坑的（踩坑吐槽、劝退、排队太久、不值、宰客）；
+     注意：避雷必须是针对游客的可执行提醒/建议；对历史事件、历史人物或第三方的
+     负面叙述（如"当年被日本人盗走过文物"）不算避雷；
    - "中性"：客观事实/信息陈述，没有明显褒贬（开放时间、交通方式、位置等）；
    立场必须来自原文表述，禁止根据你自己的常识推断；
 8. 若输入标注了"发布较旧"，其中的时效敏感信息照提取但照常标注，不要擅自丢弃；
@@ -60,6 +64,26 @@ def _low_value(claim: str) -> bool:
 
 
 _ALLOWED_STANCES = {"推荐", "避雷", "中性"}
+
+# 历史科普类内容特征（年份区间/朝代/考古文物类词汇）：本身允许作为背景资料保留，
+# 但若被 LLM 误标成"避雷"则强制降为中性——避坑必须是可执行的出行提醒，
+# 不能是历史叙事（如"抗战期间日本学者盗走石刻"）。
+_HISTORY_RE = re.compile(
+    r"\d{3,4}\s*[–—\-~至到]\s*\d{3,4}\s*年|公元|北魏|辽代|金代|唐代|宋代|元代|明代|清代|民国|"
+    r"抗战|考古|文物|开凿于|始建(于|年代)|盗走|流失海外|历史(事实|背景|记载|事件)"
+)
+# 可执行的警示词：带这些词的"避雷"是真的在提醒游客，不降级。
+_ACTION_HINT_RE = re.compile(
+    r"别|不要|千万别|注意|小心|慎|排队|宰|坑|闭馆|闭园|停开|停运|限行|预约不上|"
+    r"避(开|免)|绕路|多收|加钱|不退|坑人|別"
+)
+
+
+def _sanitize_stance(claim: str, stance: str) -> str:
+    """立场兜底：纯历史科普内容被误标"避雷"时降为中性。纯函数，独立可测。"""
+    if stance == "避雷" and _HISTORY_RE.search(claim) and not _ACTION_HINT_RE.search(claim):
+        return "中性"
+    return stance
 
 
 def _is_stale(publish_time: str | None) -> bool:
@@ -97,6 +121,9 @@ def extract_points(item: VideoItem) -> list[dict]:
         if not claim or _low_value(claim):
             continue
         stance = str(p.get("stance", "中性")).strip()
+        stance = stance if stance in _ALLOWED_STANCES else "中性"
+        # 历史叙事永远不该是"避雷"：代码层兜底防 LLM 误标（提示词已约束，双防线）
+        stance = _sanitize_stance(claim, stance)
         # 评论原文引用：匿名化已由去标识化闸口保证（无昵称等个人信息），此处只做截断兜底；
         # 防幻觉兜底：引用必须真实出现在输入评论中，否则丢弃（LLM 编造的引用绝不下传）
         quote = str(p.get("quote") or "").strip()[:80]
@@ -106,7 +133,7 @@ def extract_points(item: VideoItem) -> list[dict]:
             {
                 "topic": str(p.get("topic", "其他")),
                 "claim": claim,
-                "stance": stance if stance in _ALLOWED_STANCES else "中性",
+                "stance": stance,
                 "time_sensitive": bool(p.get("time_sensitive", False)),
                 "quote": quote,
                 "source": str(p.get("source") or item.url),

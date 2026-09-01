@@ -224,6 +224,22 @@ class TestExtract(unittest.TestCase):
         self.assertFalse(_is_stale(None))
         self.assertFalse(_is_stale("无效日期"))
 
+    def test_sanitize_stance(self):
+        """历史叙事被误标"避雷"时降为中性；带警示词的真避坑与推荐不受影响。"""
+        from pipeline.extract import _sanitize_stance
+
+        # 纯历史叙事：降级（这是用户报的 case）
+        self.assertEqual(
+            _sanitize_stance("抗战期间（1937–1945年）日本学者曾 8 次考察并盗走部分石刻", "避雷"),
+            "中性",
+        )
+        self.assertEqual(_sanitize_stance("石窟开凿于北魏，距今 1500 年", "避雷"), "中性")
+        # 带可执行警示词的"避雷"：不降级（是真提醒）
+        self.assertEqual(_sanitize_stance("明代壁画区注意别开闪光灯", "避雷"), "避雷")
+        self.assertEqual(_sanitize_stance("闭馆前半小时停止入园，别卡点", "避雷"), "避雷")
+        # 推荐立场不受影响（历史亮点照常进亮点清单）
+        self.assertEqual(_sanitize_stance("金代彩塑被誉为美学巅峰", "推荐"), "推荐")
+
 
 class TestServicePrimitives(unittest.TestCase):
     def test_cancel_primitives(self):
