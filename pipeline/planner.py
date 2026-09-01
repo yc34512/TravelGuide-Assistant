@@ -44,7 +44,9 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
 3. 尊重景点的 best_time_slot，尽量把景点排在它最佳的时段；
 4. 景点档案中的 avoid 与 tips 必须完整写进该景点的 notes，不得省略；
 5. 给出了通行时间数据的路段，transport 必须引用真实数据（如"公交约40分钟"）；没给出的写"建议查地图"；
-6. 每天的晚上时段若景点档案有 food 信息，把美食建议写进 food 字段；
+6. 每天的午餐与晚餐各从给定餐厅候选中选一家推荐，写进当天对应时段的 food 字段
+   （午餐→下午时段，晚餐→晚上时段），格式："店名：推荐菜（人均X元）"；
+   同一家餐厅全程最多推荐一次；没给餐厅候选或当天时段没排点位时写空字符串；
 7. spot 只能从给定景点名单中选择；每个景点全程只出现一次；
 8. reasons 一句话说明为什么值得去（来自档案 highlights）；
 9. cost：该点位预估花费（元，数字）：门票类花费按档案 cost_items 计入；免费或未知写 0；
@@ -216,8 +218,10 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
 
 def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
                    travel_lines: list[str], preferences: str,
-                   budget: float | None = None, preference_mode: str = "均衡") -> dict:
-    """一次 LLM 调用生成行程 JSON，随后做防御性规范化。传入预算时启用预算约束规则。"""
+                   budget: float | None = None, preference_mode: str = "均衡",
+                   foods: dict[str, dict] | None = None) -> dict:
+    """一次 LLM 调用生成行程 JSON，随后做防御性规范化。传入预算时启用预算约束规则；
+    传入 foods（餐厅档案）时启用每日午/晚餐推荐规则。"""
     profile_lines = []
     for name, p in profiles.items():
         dur = f"约{p['duration_hours']}小时" if p["duration_hours"] else "时长未知"
@@ -240,6 +244,16 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         f"景点档案：\n" + "\n".join(profile_lines) + "\n\n"
         f"通行时间数据（高德实测）：\n" + ("\n".join(travel_lines) if travel_lines else "（无，请按区域常识排线）")
     )
+    if foods:
+        food_lines = []
+        for name, p in foods.items():
+            costs = "；".join(f"{c['item']}{c['amount']:.0f}元" for c in p.get("cost_items", [])) or "人均未知"
+            food_lines.append(
+                f"【{name}】{costs}\n"
+                f"  招牌/推荐: {'; '.join(p['highlights']) or '无'}\n"
+                f"  避雷: {'; '.join(p['avoid']) or '无'}"
+            )
+        user += "\n\n餐厅候选（每日午餐/晚餐从中推荐，每家最多推荐一次）：\n" + "\n".join(food_lines)
     data = chat_json(PLAN_SYSTEM, user)
     return _normalize_plan(data, set(profiles.keys()), days)
 
@@ -287,13 +301,15 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
 
 
 def build_overview(days: int, plan: dict, profiles: dict[str, dict],
-                   budget_summary: dict | None, pitfall: list[dict] | None) -> dict:
-    """行程概览卡数据：天数/景点数/总预算与日均/亮点与避坑数量。纯函数可测。"""
+                   budget_summary: dict | None, pitfall: list[dict] | None,
+                   foods: dict[str, dict] | None = None) -> dict:
+    """行程概览卡数据：天数/景点与餐厅数/总预算与日均/亮点与避坑数量。纯函数可测。"""
     total_slots = sum(len(d.get("slots", [])) for d in plan.get("days", []))
     total = budget_summary["total"] if budget_summary else None
     return {
         "days": days,
         "spots": len(profiles),
+        "foods": len(foods or {}),
         "slots": total_slots,
         "total_cost": total,
         "daily_cost": round(total / days, 2) if (total and days) else None,
@@ -321,13 +337,19 @@ def budget_breakdown(profiles: dict[str, dict], budget_summary: dict | None,
     if not budget_summary:
         return []
     ticket_items = []
+    food_items = []
     for name, p in profiles.items():
         for c in p.get("cost_items", []):
             if c["type"] == "门票":
                 ticket_items.append(f"{name} {c['item']} {c['amount']:.0f} 元")
+            elif c["type"] == "餐饮人均":
+                food_items.append(f"{name} 人均 {c['amount']:.0f} 元")
+    food_detail = f"人均 {budget_summary['food_avg']:.0f} 元 × 2 正餐 × {days} 天"
+    if food_items:
+        food_detail += "（调研到的餐厅人均：" + "；".join(food_items) + "）"
     return [
         {"item": "门票", "detail": "；".join(ticket_items) or "无门票数据", "amount": budget_summary["tickets"]},
-        {"item": "餐饮", "detail": f"人均 {budget_summary['food_avg']:.0f} 元 × 2 正餐 × {days} 天", "amount": budget_summary["food"]},
+        {"item": "餐饮", "detail": food_detail, "amount": budget_summary["food"]},
         {"item": "市内交通", "detail": "估算（每行程点约 15 元）", "amount": budget_summary["transport"]},
         {"item": "弹性预留", "detail": "前几项小计的 10%", "amount": budget_summary["flex"]},
     ]
@@ -336,7 +358,9 @@ def budget_breakdown(profiles: dict[str, dict], budget_summary: dict | None,
 def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str, dict],
                 spot_sources: dict[str, list[str]], geo_on: bool,
                 budget_summary: dict | None = None, pitfall: list[dict] | None = None,
-                heat: list[dict] | None = None, digests: dict[str, dict] | None = None) -> str:
+                heat: list[dict] | None = None, digests: dict[str, dict] | None = None,
+                foods: dict[str, dict] | None = None,
+                food_sources: dict[str, list[str]] | None = None) -> str:
     """把行程 JSON 渲染成 Markdown 路书（逐日卡片 + 预算 + 避坑专题 + 热度榜 + 景点详情 + 来源链接）。"""
     total_slots = sum(len(d["slots"]) for d in plan["days"])
     lines = [
@@ -344,14 +368,17 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
         "",
         f"> 生成时间：{datetime.now():%Y-%m-%d %H:%M}",
         f"> 住宿：{hotel or '未指定'}",
-        f"> 数据来源：{len(profiles)} 个景点的抖音实地调研 · 共 {total_slots} 个行程点",
+        f"> 数据来源：{len(profiles)} 个景点" + (f" + {len(foods)} 家餐厅" if foods else "")
+        + f"的抖音实地调研 · 共 {total_slots} 个行程点",
         f"> 路线依据：{'高德地图实测通行时间' if geo_on else 'LLM 区域推断（未配置高德 Key，顺路精度有限）'}",
         "",
     ]
     # 行程概览卡：总天数/总预算与日均/亮点与避坑数量，一眼看全貌
-    ov = build_overview(days, plan, profiles, budget_summary, pitfall)
-    lines += ["## 行程概览", "",
-              f"- 总天数 **{ov['days']} 天** ｜ 景点 **{ov['spots']} 个** ｜ 行程点 **{ov['slots']} 个**"]
+    ov = build_overview(days, plan, profiles, budget_summary, pitfall, foods)
+    spot_line = f"- 总天数 **{ov['days']} 天** ｜ 景点 **{ov['spots']} 个** ｜ 行程点 **{ov['slots']} 个**"
+    if ov["foods"]:
+        spot_line += f" ｜ 推荐餐厅 **{ov['foods']} 家**"
+    lines += ["## 行程概览", "", spot_line]
     if ov["total_cost"] is not None:
         cost_line = (f"- 总预算估算 **约 {ov['total_cost']:.0f} 元** ｜ 每日预算 **约 {ov['daily_cost']:.0f} 元/天**"
                      + (f"（用户预算 {budget_summary['total_budget']:.0f} 元 · {budget_summary['status']}）"
@@ -434,9 +461,37 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
             links = " ".join(f"[来源{idx + 1}]({u})" for idx, u in enumerate(urls[:6]))
             lines.append(f"- 信息溯源：{links}")
         lines.append("")
+    if foods:
+        lines.append("## 餐厅详情卡（含避坑分析）")
+        lines.append("")
+        for name, p in foods.items():
+            lines.append(f"### 🍜 {name}")
+            costs = "；".join(f"{c['item']} {c['amount']:.0f} 元" for c in p.get("cost_items", []))
+            if costs:
+                lines.append(f"- 参考花费：{costs}")
+            if p["highlights"]:
+                lines.append(f"- 招牌/推荐：{'；'.join(p['highlights'])}")
+            if p["avoid"]:
+                lines.append(f"- 别踩坑：{'；'.join(p['avoid'])}")
+            if p["tips"]:
+                lines.append(f"- 贴士：{'；'.join(p['tips'])}")
+            dg = (digests or {}).get(name) or {}
+            if dg.get("verdict"):
+                lines.append(f"- 真实评价摘要：{dg['verdict']}")
+                if dg.get("positive"):
+                    lines.append(f"  - 好评：{dg['positive']}")
+                if dg.get("negative"):
+                    lines.append(f"  - 差评：{dg['negative']}")
+                for q in dg.get("quotes", []):
+                    lines.append(f"  > 评论摘录：\"{q}\"")
+            urls = (food_sources or {}).get(name) or []
+            if urls:
+                links = " ".join(f"[来源{idx + 1}]({u})" for idx, u in enumerate(urls[:6]))
+                lines.append(f"- 信息溯源：{links}")
+            lines.append("")
     if budget_summary:
         lines += ["## 预算明细", "", "| 项目 | 说明 | 金额 |", "|---|---|---|"]
-        for row in budget_breakdown(profiles, budget_summary, days):
+        for row in budget_breakdown({**profiles, **(foods or {})}, budget_summary, days):
             lines.append(f"| {row['item']} | {row['detail']} | {row['amount']:.0f} 元 |")
         lines.append(f"| **预估总计** | 门票+餐饮+交通+弹性 | **{budget_summary['total']:.0f} 元** |")
         if budget_summary["total_budget"]:
@@ -451,7 +506,9 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
                      spot_sources: dict[str, list[str]], geo_on: bool,
                      locs: dict[str, str] | None = None, budget_summary: dict | None = None,
                      pitfall: list[dict] | None = None, heat: list[dict] | None = None,
-                     digests: dict[str, dict] | None = None) -> str:
+                     digests: dict[str, dict] | None = None,
+                     foods: dict[str, dict] | None = None,
+                     food_sources: dict[str, list[str]] | None = None) -> str:
     """渲染 HTML 可视化路书（Jinja2 模板 + ECharts/Leaflet CDN，离线时模板内置文本版降级）。"""
     env = Environment(
         loader=FileSystemLoader(_TEMPLATE_DIR),
@@ -470,9 +527,11 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
         spot_sources=spot_sources, geo_on=geo_on, markers=markers,
         budget_summary=budget_summary, pitfall=pitfall or [], heat=heat or [],
         digests=digests or {},
-        overview=build_overview(days, plan, profiles, budget_summary, pitfall),
+        foods=foods or {},
+        food_sources=food_sources or {},
+        overview=build_overview(days, plan, profiles, budget_summary, pitfall, foods),
         day_costs=day_subtotals(plan, budget_summary),
-        breakdown=budget_breakdown(profiles, budget_summary, days),
+        breakdown=budget_breakdown({**profiles, **(foods or {})}, budget_summary, days),
         generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
         total_slots=sum(len(d["slots"]) for d in plan["days"]),
     )

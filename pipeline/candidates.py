@@ -32,6 +32,12 @@ GEN_SYSTEM = """你是旅行候选圈定专家。为指定城市生成值得实�
 4. 结合用户偏好与天数调整侧重（如天数短则砍购物/体验）；
 5. 输出严格 JSON：{"candidates": [{"name": "...", "category": "景点|美食|体验|购物", "reason": "一句话理由"}]}"""
 
+FOOD_SYSTEM = """你是本地美食向导。列出该城市最值得去的餐厅/特色小吃店（游客真实会去、有讨论热度的）。
+规则：
+1. 具体到店名或招牌小吃名（如"凤临阁""东方削面""浑源凉粉"），不要泛泛的"当地美食"；
+2. 覆盖本地代表性特色（特色小吃/老字号/人气馆子），不重复；
+3. 输出严格 JSON：{"foods": ["..."]}"""
+
 VERIFY_SYSTEM = """你是信息核查专家。输入是候选清单及各自的抖音验证统计（正面/负面证据、营销号占比、评论摘录），
 判断每个候选是否值得排进行程。
 
@@ -48,6 +54,19 @@ VERIFY_SYSTEM = """你是信息核查专家。输入是候选清单及各自的�
 def is_marketing(text: str) -> bool:
     """视频文案是否命中营销话术（纯函数，独立可测）。"""
     return bool(MARKETING_RE.search(text or ""))
+
+
+def candidate_foods(city: str, max_n: int) -> list[str]:
+    """圈定城市美食候选（店名/小吃名）：指定景点路径与热度刷榜用。联网能力随候选链生效。"""
+    data = chat_json(FOOD_SYSTEM, f"城市：{city}\n数量上限：{max_n}", web_search=LLM_WEB_SEARCH)
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in data.get("foods") or []:
+        s = str(x).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out[:max_n]
 
 
 def _normalize_candidate(x: dict) -> dict | None:

@@ -319,20 +319,29 @@ function trendTag(t) {
   return '<span class="trend-flat">➖ ' + (t || '平稳') + '</span>';
 }
 
+function heatTable(rows) {
+  return '<table class="heat-tbl">' +
+    '<tr><th>#</th><th>名称</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>更新时间</th></tr>' +
+    rows.map((h, i) =>
+      `<tr><td>${i + 1}</td><td>${h.spot}</td><td>${trendTag(h.trend)}</td>` +
+      `<td>${h.score.toFixed(2)}</td><td>${Math.round(h.fresh7 * 100)}%</td>` +
+      `<td>${h.likes}</td><td>${h.videos}</td><td>${(h.updated_at || '').replace('T', ' ')}</td></tr>`
+    ).join('') + '</table>';
+}
+
 function renderHeat(r) {
   $('result').classList.remove('hidden');
   $('dl').classList.add('hidden');
   $('dlHtml').classList.add('hidden');
   $('stats').innerHTML = `<span>城市 <b>${r.city}</b></span>` +
-    (r.ranking.length ? `<span>景点 <b>${r.ranking.length}</b> 个</span>` : '');
-  if (!r.ranking.length) { $('report').innerHTML = `<p>${r.hint || '暂无数据'}</p>`; syncOutput(); return; }
-  $('report').innerHTML = '<table class="heat-tbl">' +
-    '<tr><th>#</th><th>景点</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>更新时间</th></tr>' +
-    r.ranking.map((h, i) =>
-      `<tr><td>${i + 1}</td><td>${h.spot}</td><td>${trendTag(h.trend)}</td>` +
-      `<td>${h.score.toFixed(2)}</td><td>${Math.round(h.fresh7 * 100)}%</td>` +
-      `<td>${h.likes}</td><td>${h.videos}</td><td>${(h.updated_at || '').replace('T', ' ')}</td></tr>`
-    ).join('') + '</table>';
+    (r.ranking.length ? `<span>景点 <b>${r.ranking.length}</b> 个</span>` : '') +
+    ((r.food_ranking || []).length ? `<span>美食 <b>${r.food_ranking.length}</b> 个</span>` : '');
+  const hasFood = (r.food_ranking || []).length > 0;
+  if (!r.ranking.length && !hasFood) { $('report').innerHTML = `<p>${r.hint || '暂无数据'}</p>`; syncOutput(); return; }
+  let html = '';
+  if (r.ranking.length) html += '<h3>🏞️ 景点热度榜</h3>' + heatTable(r.ranking);
+  if (hasFood) html += '<h3 style="margin-top:14px;">🍜 美食热度榜</h3>' + heatTable(r.food_ranking);
+  $('report').innerHTML = html;
   syncOutput();
 }
 

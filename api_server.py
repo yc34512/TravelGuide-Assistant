@@ -68,14 +68,18 @@ def heat_refresh(body: HeatRefreshIn):
     return {"job_id": job_id}
 
 
-@app.get("/api/heat/{city}", summary="查询城市实时热度榜")
+@app.get("/api/heat/{city}", summary="查询城市实时热度榜（景点榜 + 美食榜）")
 def city_heat(city: str):
-    """返回该城最新热度快照榜（按热度降序，含趋势标签）；无数据返回空列表与引导提示。"""
-    ranking = knowledge.load_heat_snapshots(city.strip())
+    """返回该城最新热度快照：景点榜与美食榜并列（各自按热度降序，含趋势标签）；
+    无数据返回空列表与引导提示。"""
+    rows = knowledge.load_heat_snapshots(city.strip())
+    ranking = [r for r in rows if r.get("kind") != "美食"]
+    food_ranking = [r for r in rows if r.get("kind") == "美食"]
     return {
         "city": city.strip(),
         "ranking": ranking,
-        "hint": "" if ranking else "暂无该城热度数据：先点“刷新榜单”跑一轮刷榜任务（约 3~5 分钟）",
+        "food_ranking": food_ranking,
+        "hint": "" if rows else "暂无该城热度数据：先点“刷新榜单”跑一轮刷榜任务（约 3~5 分钟）",
     }
 
 

@@ -11,12 +11,14 @@ import uuid
 from datetime import datetime
 
 from core import knowledge
+from pipeline.candidates import candidate_foods
 from pipeline.heat import heat_index, time_windows, trend_of
 from pipeline.planner import candidate_spots
 from service.research import JOBS, _CRAWL_LOCK, _LOCK, Cancelled, dump_debug
 
 HEAT_SPOT_LIMIT = 6       # 每次刷榜的景点数硬上限（成本闸）
 HEAT_VIDEOS_PER_SPOT = 4  # 每个景点采的元数据视频数
+HEAT_FOOD_LIMIT = 2       # 美食榜并列：每次刷榜额外采的美食/餐厅数（成本闸）
 
 
 def start_heat_refresh(city: str) -> str:
@@ -70,8 +72,19 @@ def _run_heat(job_id: str, city: str) -> None:
                 raise RuntimeError("景点圈定失败：请换更明确的城市名")
             log(f"自动圈定 {len(spots)} 个景点：{'、'.join(spots)}")
         knowledge.register_city_spots(city, spots)
+        # 美食榜并列：额外圈定少量代表性美食/餐厅（失败不阻断景点榜）
+        foods: list[str] = []
+        try:
+            foods = candidate_foods(city, HEAT_FOOD_LIMIT)
+            if foods:
+                log(f"美食榜刷榜对象：{'、'.join(foods)}")
+        except Exception as e:
+            log(f"美食候选圈定失败（{e}），本轮只刷景点榜")
+        kinds = {s: "景点" for s in spots}
+        kinds.update({f: "美食" for f in foods})
+        targets = list(spots) + list(foods)
 
-        # 2) 元数据模式采集：单个浏览器会话跑完全部景点（不采评论）
+        # 2) 元数据模式采集：单个浏览器会话跑完全部对象（不采评论）
         job["stage"] = "采集热度数据"
         collected: dict[str, list] = {}
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -87,10 +100,10 @@ def _run_heat(job_id: str, city: str) -> None:
             try:
                 if not ensure_login(page):
                     raise RuntimeError("未检测到抖音登录态：请在弹出的浏览器中用采集小号扫码后重试")
-                for si, spot in enumerate(spots, 1):
+                for si, spot in enumerate(targets, 1):
                     if _cancelled():
                         raise Cancelled()
-                    log(f"[{si}/{len(spots)}] 搜索：{spot}")
+                    log(f"[{si}/{len(targets)}] 搜索：{spot}（{kinds[spot]}）")
                     try:
                         found = crawler._search_one(spot, HEAT_VIDEOS_PER_SPOT)
                     except Exception as e:
@@ -120,7 +133,7 @@ def _run_heat(job_id: str, city: str) -> None:
                 except Exception:
                     pass
 
-        # 3) 热度画像 + 趋势判定 + 快照落库
+        # 3) 热度画像 + 趋势判定 + 快照落库（景点榜与美食榜并列存储）
         job["stage"] = "更新榜单"
         if not collected:
             raise RuntimeError("未采集到任何热度数据（可能登录态失效或景点过冷）")
@@ -132,14 +145,16 @@ def _run_heat(job_id: str, city: str) -> None:
                 "score": h["score"], "fresh7": w["fresh7"], "fresh60": w["fresh60"],
                 "old60": w["old60"], "likes": h["likes"], "videos": h["videos"],
                 "trend": trend,
-            })
+            }, kind=kinds.get(spot, "景点"))
             log(f"{spot}：热度 {h['score']:.2f} · {trend}"
                 f"（近7天 {w['fresh7']:.0%} / 60天以上 {w['old60']:.0%}）")
 
         ranking = knowledge.load_heat_snapshots(city)
         job["result"] = {
             "city": city,
-            "ranking": ranking,
+            # 与 /api/heat/{city} 同结构：景点榜与美食榜并列，网页轮询收口直接渲染
+            "ranking": [r for r in ranking if r.get("kind") != "美食"],
+            "food_ranking": [r for r in ranking if r.get("kind") == "美食"],
             "cache_hit": False,
             "stats": {
                 "spots": len(collected),

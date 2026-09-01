@@ -66,7 +66,7 @@
     <div class="meta">
       <span>生成于 {{ generated }}</span>
       <span>住宿：{{ hotel or '未指定' }}</span>
-      <span>{{ profiles|length }} 个景点实地调研 · {{ total_slots }} 个行程点</span>
+      <span>{{ profiles|length }} 个景点{% if foods %} + {{ foods|length }} 家餐厅{% endif %}实地调研 · {{ total_slots }} 个行程点</span>
       <span>{{ '路线依据：高德实测通行时间' if geo_on else '路线依据：区域推断（未配置地图）' }}</span>
     </div>
   </header>
@@ -76,6 +76,9 @@
     <div class="ov-grid">
       <div class="ov-item"><div class="ov-num">{{ overview.days }} 天</div><div class="ov-lab">总天数</div></div>
       <div class="ov-item"><div class="ov-num">{{ overview.spots }} 个</div><div class="ov-lab">景点</div></div>
+      {% if overview.foods %}
+      <div class="ov-item"><div class="ov-num">{{ overview.foods }} 家</div><div class="ov-lab">推荐餐厅</div></div>
+      {% endif %}
       {% if overview.total_cost is not none %}
       <div class="ov-item"><div class="ov-num">{{ '%.0f'|format(overview.total_cost) }} 元</div><div class="ov-lab">总预算估算</div></div>
       <div class="ov-item"><div class="ov-num">{{ '%.0f'|format(overview.daily_cost) }} 元/天</div><div class="ov-lab">每日预算</div></div>
@@ -124,7 +127,7 @@
     {% if budget_summary and day_costs and outer_idx < day_costs|length %}
     {% set sc = day_costs[outer_idx] %}
     <div class="day-subtotal">💰 当日花费小计：<b>约 {{ '%.0f'|format(sc.total) }} 元</b>
-      （点位 {{ '%.0f'|format(sc.spots) }} + 餐饮 {{ sc.food }} + 市内交通 {{ sc.transport }}，弹性预留不分摊）</div>
+      （点位 {{ '%.0f'|format(sc.spots) }} + 餐饮 {{ '%.0f'|format(sc.food) }} + 市内交通 {{ '%.0f'|format(sc.transport) }}，弹性预留不分摊）</div>
     {% endif %}
   </section>
   {% endfor %}
@@ -189,6 +192,34 @@
     </div>
     {% endfor %}
   </section>
+
+  {% if foods %}
+  <section>
+    <h2>餐厅详情卡（含避坑分析）</h2>
+    {% for name, p in foods.items() %}
+    <div class="card">
+      <h3>🍜 {{ name }}</h3>
+      <p>{% for c in p.cost_items %}<span class="tag">{{ c.item }} {{ '%.0f'|format(c.amount) }} 元</span>{% endfor %}</p>
+      {% if p.highlights %}<p>✨ 招牌/推荐：{{ p.highlights|join('；') }}</p>{% endif %}
+      {% if p.avoid %}<p class="risk-high">❌ 别踩坑：{{ p.avoid|join('；') }}</p>{% endif %}
+      {% if p.tips %}<p>💡 贴士：{{ p.tips|join('；') }}</p>{% endif %}
+      {% set dg = digests.get(name) or {} %}
+      {% if dg.verdict %}
+      <div class="digest-box">
+        <p><b>📝 真实评价摘要</b>：{{ dg.verdict }}</p>
+        {% if dg.positive %}<p>👍 {{ dg.positive }}</p>{% endif %}
+        {% if dg.negative %}<p class="risk-high">👎 {{ dg.negative }}</p>{% endif %}
+        {% for q in dg.quotes %}<blockquote>“{{ q }}”</blockquote>{% endfor %}
+      </div>
+      {% endif %}
+      {% set furls = food_sources.get(name, []) %}
+      {% if furls %}
+      <p class="src">信息溯源：{% for u in furls[:6] %}<a href="{{ u }}" target="_blank" rel="noopener">来源{{ loop.index }} ↗</a>{% endfor %}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   {% if breakdown %}
   <section>

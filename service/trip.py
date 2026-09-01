@@ -16,6 +16,7 @@ from config import KB_TTL_DAYS, REPORT_DIR
 from core import geo, knowledge
 from pipeline.candidates import (
     VERIFY_MAX,
+    candidate_foods,
     generate_candidates,
     is_marketing,
     verify_candidates,
@@ -47,6 +48,7 @@ TRIP_SPOT_LIMIT = 5      # 逐点调研按 fast 档（候选验证采集同样�
 TRIP_SPOT_COMMENTS = 100
 MAX_SPOTS_PER_DAY = 3    # 候选景点上限 = 天数 × 3（简单路径）
 MIN_USABLE_SPOTS = 2     # 低于此数的可用调研结果无法排行程
+TRIP_FOOD_LIMIT = 3      # 餐厅调研数上限（午/晚餐推荐用，成本闸）
 
 
 def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
@@ -104,6 +106,14 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if user_spots:
             spots = [s.strip() for s in user_spots if s.strip()][:days * MAX_SPOTS_PER_DAY]
             log(f"使用用户指定景点清单：{'、'.join(spots)}")
+            food_names: list[str] = []
+            try:
+                food_names = candidate_foods(city, TRIP_FOOD_LIMIT)
+                if food_names:
+                    log(f"美食候选：{'、'.join(food_names)}（将单独调研供午/晚餐推荐）")
+            except Exception as e:
+                log(f"美食候选圈定失败（{e}），行程不含餐厅推荐")
+            food_pre: dict[str, tuple[list, list[dict]]] = {}
         else:
             spots = []
             try:
@@ -152,10 +162,12 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 dropped = [r["name"] for r in results if r["verdict"] == "drop"]
                 if dropped:
                     log(f"交叉验证淘汰 {len(dropped)} 个：{'、'.join(dropped[:6])}")
-                # 景点优先（行程骨架），其次按评审顺序；调研结果为空的剔除在后续环节自然发生
+                # 景点优先（行程骨架）；美食候选分流去餐厅调研线（不进景点排序）
                 kept.sort(key=lambda n: 0 if categories.get(n) == "景点" else 1)
-                pre = {n: researched[n] for n in kept}
-                log(f"保留 {len(kept)} 个优质候选：{'、'.join(kept)}")
+                pre = {n: researched[n] for n in kept if categories.get(n) != "美食"}
+                food_names = [n for n in kept if categories.get(n) == "美食"][:TRIP_FOOD_LIMIT]
+                food_pre = {n: researched[n] for n in food_names}
+                log(f"保留 {len(kept)} 个优质候选（景点/体验 {len(pre)} + 餐厅 {len(food_pre)}）：{'、'.join(kept)}")
             except Cancelled:
                 raise
             except Exception as e:
@@ -164,6 +176,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             if pre:
                 spots = list(pre.keys())
             else:
+                food_names = []
+                food_pre = {}
                 max_n = days * MAX_SPOTS_PER_DAY
                 log(f"自动圈定候选景点（上限 {max_n} 个）…")
                 spots = candidate_spots(city, days, max_n)
@@ -175,82 +189,103 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         # 城市景点关联登记入知识库：供热度刷榜优先复用，免去重新圈定
         knowledge.register_city_spots(city, spots)
 
-        # 2) 逐点调研：混合候选路径直接复用验证采集结果（避免重复 LLM 提取）；
-        #    其余景点走缓存快路 / fast 档采集（受全局采集锁排队保护）
+        # 2) 逐点调研：景点与餐厅同一套调研管道（缓存快路 / fast 档采集，受全局采集锁排队保护）；
+        #    混合候选路径直接复用验证采集结果（避免重复 LLM 提取）
         job["stage"] = "调研景点"
-        spot_points: dict[str, list[dict]] = {}
-        spot_sources: dict[str, list[str]] = {}
-        spot_items: dict[str, list] = {}
-        if pre:
-            for n, (items, pts) in pre.items():
-                if pts:
-                    spot_points[n] = pts
-                    spot_sources[n] = [it.url for it in items]
-                    spot_items[n] = items
-        for i, spot in enumerate(spots, 1):
-            if _cancelled():
-                raise Cancelled()
-            if spot in spot_points:
-                log(f"[{i}/{len(spots)}] {spot}：复用验证采集结果（{len(spot_points[spot])} 条要点）")
-                continue
-            record = knowledge.find_fresh(spot, KB_TTL_DAYS)
-            if record:
-                log(f"[{i}/{len(spots)}] {spot}：知识库命中，免采集")
-                items = load_items_from_raw(record["raw_path"])
-            else:
-                log(f"[{i}/{len(spots)}] {spot}：未命中，开始采集（fast 档）")
-                items = _crawl(spot, TRIP_SPOT_LIMIT, TRIP_SPOT_COMMENTS, False, job_id, log)
-                if items:
-                    raw_path = save_raw(spot, items)
-                    knowledge.record_crawl(
-                        spot, raw_path, len(items), sum(len(x.comments) for x in items)
-                    )
-            if not items:
-                log(f"[{i}/{len(spots)}] {spot}：未采集到内容，跳过")
-                continue
-            pts: list[dict] = []
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                futures = {pool.submit(extract_points, it): it for it in items}
-                for fut in as_completed(futures):
-                    if _cancelled():
-                        raise Cancelled()
-                    try:
-                        pts.extend(fut.result())
-                    except Exception as e:
-                        log(f"  要点提取失败：{e}")
-            if not pts:
-                log(f"[{i}/{len(spots)}] {spot}：未提取到要点，跳过")
-                continue
-            spot_points[spot] = pts
-            spot_sources[spot] = [it.url for it in items]
-            spot_items[spot] = items
-            log(f"[{i}/{len(spots)}] {spot}：提取 {len(pts)} 条要点")
+
+        def _research(names: list[str], pre_seeded: dict, label: str):
+            """通用调研：复用验证结果 -> 缓存快路 -> 现场采集 -> 要点提取。"""
+            points: dict[str, list[dict]] = {}
+            sources: dict[str, list[str]] = {}
+            items_by: dict[str, list] = {}
+            for n, (its, pts0) in pre_seeded.items():
+                if pts0:
+                    points[n] = pts0
+                    sources[n] = [it.url for it in its]
+                    items_by[n] = its
+            for i, name in enumerate(names, 1):
+                if _cancelled():
+                    raise Cancelled()
+                if name in points:
+                    log(f"[{label}{i}/{len(names)}] {name}：复用验证采集结果（{len(points[name])} 条要点）")
+                    continue
+                record = knowledge.find_fresh(name, KB_TTL_DAYS)
+                if record:
+                    log(f"[{label}{i}/{len(names)}] {name}：知识库命中，免采集")
+                    items = load_items_from_raw(record["raw_path"])
+                else:
+                    log(f"[{label}{i}/{len(names)}] {name}：未命中，开始采集（fast 档）")
+                    items = _crawl(name, TRIP_SPOT_LIMIT, TRIP_SPOT_COMMENTS, False, job_id, log)
+                    if items:
+                        raw_path = save_raw(name, items)
+                        knowledge.record_crawl(
+                            name, raw_path, len(items), sum(len(x.comments) for x in items)
+                        )
+                if not items:
+                    log(f"[{label}{i}/{len(names)}] {name}：未采集到内容，跳过")
+                    continue
+                pts: list[dict] = []
+                with ThreadPoolExecutor(max_workers=3) as pool:
+                    futures = {pool.submit(extract_points, it): it for it in items}
+                    for fut in as_completed(futures):
+                        if _cancelled():
+                            raise Cancelled()
+                        try:
+                            pts.extend(fut.result())
+                        except Exception as e:
+                            log(f"  要点提取失败：{e}")
+                if not pts:
+                    log(f"[{label}{i}/{len(names)}] {name}：未提取到要点，跳过")
+                    continue
+                points[name] = pts
+                sources[name] = [it.url for it in items]
+                items_by[name] = items
+                log(f"[{label}{i}/{len(names)}] {name}：提取 {len(pts)} 条要点")
+            return points, sources, items_by
+
+        spot_points, spot_sources, spot_items = _research(spots, pre or {}, "景点 ")
         if len(spot_points) < MIN_USABLE_SPOTS:
             raise RuntimeError(
                 f"可用调研结果的景点不足 {MIN_USABLE_SPOTS} 个，无法排行程"
                 "（可稍后重试或在请求中直接指定景点清单）"
             )
+        food_points, food_sources, food_items = _research(food_names, food_pre, "餐厅 ")
+        if food_points:
+            log(f"餐厅调研完成：{len(food_points)}/{len(food_names)} 家可用于午/晚餐推荐")
+        else:
+            log("无可用餐厅调研结果，行程不含餐厅推荐")
+        all_items_for_heat = {**spot_items, **food_items}
 
-        # 3) 景点档案 + 真实评价摘要：每个景点两份蒸馏（同池 3 路并发）
+        # 3) 档案 + 真实评价摘要：景点与餐厅同等待遇（同池 3 路并发）
         job["stage"] = "构建档案"
         profiles: dict[str, dict] = {}
+        food_profiles: dict[str, dict] = {}
         digests: dict[str, dict] = {}
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {}
             for s, pts in spot_points.items():
                 futures[pool.submit(build_spot_profile, s, pts)] = ("profile", s)
                 futures[pool.submit(build_review_digest, s, pts)] = ("digest", s)
+            for s, pts in food_points.items():
+                futures[pool.submit(build_spot_profile, s, pts)] = ("food_profile", s)
+                futures[pool.submit(build_review_digest, s, pts)] = ("digest", s)
             for fut in as_completed(futures):
                 kind, s = futures[fut]
                 try:
+                    res = fut.result()
                     if kind == "profile":
-                        profiles[s] = fut.result()
+                        profiles[s] = res
+                    elif kind == "food_profile":
+                        food_profiles[s] = res
                     else:
-                        digests[s] = fut.result()
+                        digests[s] = res
                 except Exception as e:
                     if kind == "profile":
                         log(f"{s}：档案构建失败（{e}），使用空档案兜底")
                         profiles[s] = empty_profile()
+                    elif kind == "food_profile":
+                        log(f"{s}：餐厅档案失败（{e}），使用空档案兜底")
+                        food_profiles[s] = empty_profile()
                     else:
                         log(f"{s}：评价摘要失败（{e}），跳过")
                         digests[s] = empty_digest()
@@ -293,18 +328,21 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if _cancelled():
             raise Cancelled()
 
-        # 5) 规划生成（预算约束）+ 数据分析（预算明细 / 避坑专题 / 热度榜）
+        # 5) 规划生成（预算约束 + 每日午/晚餐餐厅推荐）+ 数据分析（预算/避坑/热度）
         job["stage"] = "生成规划"
         plan = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
-                              budget, preference_mode)
+                              budget, preference_mode, foods=food_profiles or None)
         if not plan["days"]:
             raise RuntimeError("规划生成失败：未产出有效行程，请重试或减少天数/景点")
 
-        budget_summary = build_budget_summary(profiles, plan, days, budget)
-        all_points = [p for pts in spot_points.values() for p in pts]
+        # 预算：餐厅档案的"餐饮人均"一并计入人均基准（门票类餐厅通常没有）
+        budget_summary = build_budget_summary({**profiles, **food_profiles}, plan, days, budget)
+        # 避坑：景点与餐厅的避雷要点同榜（每条附评论原文）
+        all_points = [p for pts in spot_points.values() for p in pts] \
+            + [p for pts in food_points.values() for p in pts]
         pitfall = pitfall_digest(all_points)
         heat_rows: list[dict] = []
-        for s, items in spot_items.items():
+        for s, items in all_items_for_heat.items():
             if items:
                 h = heat_index(items)
                 h["spot"] = s
@@ -321,21 +359,23 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         ts = datetime.now()
         md = render_trip(city, days, hotel, plan, profiles, spot_sources, geo.available(),
                          budget_summary=budget_summary, pitfall=pitfall, heat=heat_rows,
-                         digests=digests)
+                         digests=digests, foods=food_profiles or None,
+                         food_sources=food_sources or None)
         report_path = REPORT_DIR / f"行程_{city}_{ts:%Y%m%d_%H%M%S}.md"
         report_path.write_text(md, encoding="utf-8")
         # 行程报告无采集档案，单独登记进报告表，网页历史列表才不会遗漏
         knowledge.register_report(
             f"行程·{city}{days}天", str(report_path),
-            video_count=sum(len(v) for v in spot_items.values()),
-            comment_count=sum(len(it.comments) for items in spot_items.values() for it in items),
+            video_count=sum(len(v) for v in all_items_for_heat.values()),
+            comment_count=sum(len(it.comments) for items in all_items_for_heat.values() for it in items),
         )
         html_path = report_path.with_suffix(".html")
         try:
             html_path.write_text(
                 render_trip_html(city, days, hotel, plan, profiles, spot_sources,
                                  geo.available(), locs=locs, budget_summary=budget_summary,
-                                 pitfall=pitfall, heat=heat_rows, digests=digests),
+                                 pitfall=pitfall, heat=heat_rows, digests=digests,
+                                 foods=food_profiles or None, food_sources=food_sources or None),
                 encoding="utf-8",
             )
             log(f"行程已保存：{report_path.name}（含 HTML 可视化版 {html_path.name}）")
@@ -354,8 +394,10 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             "heat_rank": heat_rows,
             "stats": {
                 "spots": len(spot_points),
+                "foods": len(food_points),
                 "days": days,
-                "points": sum(len(v) for v in spot_points.values()),
+                "points": sum(len(v) for v in spot_points.values())
+                + sum(len(v) for v in food_points.values()),
                 "elapsed": round(time.time() - started, 1),
             },
         }

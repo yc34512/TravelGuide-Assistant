@@ -75,7 +75,8 @@ def _conn() -> sqlite3.Connection:
         )
         """
     )
-    # 热度快照：每城每景点一行（UPSERT），刷榜任务的产出，榜单页直接读
+    # 热度快照：每城每对象一行（UPSERT），刷榜任务的产出，榜单页直接读；
+    # kind 区分景点榜与美食榜（并列展示）
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS heat_snapshots (
@@ -88,11 +89,16 @@ def _conn() -> sqlite3.Connection:
             likes INTEGER DEFAULT 0,
             videos INTEGER DEFAULT 0,
             trend TEXT DEFAULT '平稳',
+            kind TEXT DEFAULT '景点',
             updated_at TEXT NOT NULL,
             PRIMARY KEY (city, spot)
         )
         """
     )
+    try:  # 旧库迁移：早期版本无 kind 列，补上；新库创建时已含，此句报错被吞
+        conn.execute("ALTER TABLE heat_snapshots ADD COLUMN kind TEXT DEFAULT '景点'")
+    except sqlite3.OperationalError:
+        pass
     # 报告登记表：行程等"无采集档案"的报告也在此登记，历史列表不遗漏。
     # 攻略报告仍随 spot_cache 登记（与采集缓存绑定），两处合并不重复。
     conn.execute(
@@ -308,27 +314,27 @@ def list_city_spots(city: str) -> list[str]:
     return [r["spot"] for r in rows]
 
 
-def upsert_heat_snapshot(city: str, spot: str, snap: dict) -> None:
-    """写入/更新某城某景点的热度快照（每城每景点一行）。"""
+def upsert_heat_snapshot(city: str, spot: str, snap: dict, kind: str = "景点") -> None:
+    """写入/更新某城某景点（或餐厅）的热度快照（每城每对象一行）。"""
     with _conn() as conn:
         conn.execute(
             "INSERT INTO heat_snapshots (city, spot, score, fresh7, fresh60, old60,"
-            " likes, videos, trend, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " likes, videos, trend, kind, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(city, spot) DO UPDATE SET"
             " score=excluded.score, fresh7=excluded.fresh7, fresh60=excluded.fresh60,"
             " old60=excluded.old60, likes=excluded.likes, videos=excluded.videos,"
-            " trend=excluded.trend, updated_at=excluded.updated_at",
+            " trend=excluded.trend, kind=excluded.kind, updated_at=excluded.updated_at",
             (city.strip(), spot.strip(), snap["score"], snap["fresh7"], snap["fresh60"],
-             snap["old60"], snap["likes"], snap["videos"], snap["trend"],
+             snap["old60"], snap["likes"], snap["videos"], snap["trend"], kind,
              datetime.now().isoformat(timespec="seconds")),
         )
 
 
 def load_heat_snapshots(city: str) -> list[dict]:
-    """某城的最新热度榜（按综合分降序）；无快照返回空列表。"""
+    """某城的最新热度榜（按综合分降序，含 kind 供景点/美食分榜）；无快照返回空列表。"""
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT spot, score, fresh7, fresh60, old60, likes, videos, trend, updated_at"
+            "SELECT spot, score, fresh7, fresh60, old60, likes, videos, trend, kind, updated_at"
             " FROM heat_snapshots WHERE city = ? ORDER BY score DESC",
             (city.strip(),),
         ).fetchall()
@@ -336,7 +342,8 @@ def load_heat_snapshots(city: str) -> list[dict]:
         {
             "spot": r["spot"], "score": r["score"], "trend": r["trend"],
             "fresh7": r["fresh7"], "fresh60": r["fresh60"], "old60": r["old60"],
-            "likes": r["likes"], "videos": r["videos"], "updated_at": r["updated_at"],
+            "likes": r["likes"], "videos": r["videos"],
+            "kind": r["kind"] or "景点", "updated_at": r["updated_at"],
         }
         for r in rows
     ]
