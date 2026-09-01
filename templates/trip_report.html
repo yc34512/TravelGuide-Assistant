@@ -52,6 +52,11 @@
   .tag { display: inline-block; font-size: 12px; border-radius: 4px; padding: 0 8px; margin-right: 6px; background: #eaf4f0; color: var(--green); }
   footer { font-size: 12px; color: var(--muted); text-align: center; padding: 10px 20px; }
   .note-bar { font-size: 13px; background: #fef9e7; border-radius: 8px; padding: 8px 12px; margin-top: 10px; }
+  .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .ov-item { background: #f4f8f6; border-radius: 10px; padding: 12px 8px; text-align: center; }
+  .ov-num { font-size: 18px; font-weight: 700; color: var(--green); }
+  .ov-lab { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .day-subtotal { font-size: 13px; background: #f4f8f6; border-radius: 6px; padding: 6px 12px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -66,29 +71,26 @@
     </div>
   </header>
 
+  <section>
+    <h2>行程概览</h2>
+    <div class="ov-grid">
+      <div class="ov-item"><div class="ov-num">{{ overview.days }} 天</div><div class="ov-lab">总天数</div></div>
+      <div class="ov-item"><div class="ov-num">{{ overview.spots }} 个</div><div class="ov-lab">景点</div></div>
+      {% if overview.total_cost is not none %}
+      <div class="ov-item"><div class="ov-num">{{ '%.0f'|format(overview.total_cost) }} 元</div><div class="ov-lab">总预算估算</div></div>
+      <div class="ov-item"><div class="ov-num">{{ '%.0f'|format(overview.daily_cost) }} 元/天</div><div class="ov-lab">每日预算</div></div>
+      {% endif %}
+      <div class="ov-item"><div class="ov-num">{{ overview.highlights }} 条</div><div class="ov-lab">亮点</div></div>
+      <div class="ov-item"><div class="ov-num">{{ overview.pitfalls }} 条</div><div class="ov-lab">避坑提示</div></div>
+    </div>
+    {% if plan.summary_note %}<div class="note-bar">规划说明：{{ plan.summary_note }}</div>{% endif %}
+  </section>
+
   {% if budget_summary %}
   <section>
-    <h2>预算明细</h2>
-    <div class="grid2">
-      <div>
-        <div id="budget-chart"></div>
-        <div id="budget-fallback" class="fallback"></div>
-      </div>
-      <div>
-        <table>
-          <tr><th>项目</th><th>金额</th></tr>
-          <tr><td>门票（多源去重）</td><td>{{ '%.0f'|format(budget_summary.tickets) }} 元</td></tr>
-          <tr><td>餐饮（人均 {{ '%.0f'|format(budget_summary.food_avg) }} × 2 正餐 × {{ days }} 天）</td><td>{{ '%.0f'|format(budget_summary.food) }} 元</td></tr>
-          <tr><td>市内交通（估算）</td><td>{{ '%.0f'|format(budget_summary.transport) }} 元</td></tr>
-          <tr><td>弹性 10%</td><td>{{ '%.0f'|format(budget_summary.flex) }} 元</td></tr>
-          <tr><td><b>预估总花费</b></td><td><b>{{ '%.0f'|format(budget_summary.total) }} 元</b></td></tr>
-        </table>
-        {% if budget_summary.total_budget %}
-        <div class="note-bar">用户预算 {{ '%.0f'|format(budget_summary.total_budget) }} 元 · <b>{{ budget_summary.status }}</b>：{{ budget_summary.note }}</div>
-        {% endif %}
-        {% if plan.summary_note %}<div class="note-bar">规划说明：{{ plan.summary_note }}</div>{% endif %}
-      </div>
-    </div>
+    <h2>预算分布</h2>
+    <div id="budget-chart"></div>
+    <div id="budget-fallback" class="fallback"></div>
   </section>
   {% endif %}
 
@@ -103,6 +105,7 @@
   {% for d in plan.days %}
   <section>
     <h2>第 {{ d.day }} 天</h2>
+    {% set outer_idx = loop.index0 %}
     {% for s in d.slots %}
     <div class="slot {{ 'pitfall' if s.pitfall_quotes else '' }}">
       <div class="slot-head">
@@ -118,6 +121,11 @@
       {% if s.food %}<p>🍜 {{ s.food }}</p>{% endif %}
     </div>
     {% endfor %}
+    {% if budget_summary and day_costs and outer_idx < day_costs|length %}
+    {% set sc = day_costs[outer_idx] %}
+    <div class="day-subtotal">💰 当日花费小计：<b>约 {{ '%.0f'|format(sc.total) }} 元</b>
+      （点位 {{ '%.0f'|format(sc.spots) }} + 餐饮 {{ sc.food }} + 市内交通 {{ sc.transport }}，弹性预留不分摊）</div>
+    {% endif %}
   </section>
   {% endfor %}
 
@@ -181,6 +189,22 @@
     </div>
     {% endfor %}
   </section>
+
+  {% if breakdown %}
+  <section>
+    <h2>预算明细</h2>
+    <table>
+      <tr><th>项目</th><th>说明</th><th>金额</th></tr>
+      {% for row in breakdown %}
+      <tr><td>{{ row.item }}</td><td>{{ row.detail }}</td><td>{{ '%.0f'|format(row.amount) }} 元</td></tr>
+      {% endfor %}
+      <tr><td><b>预估总计</b></td><td>门票+餐饮+交通+弹性</td><td><b>{{ '%.0f'|format(budget_summary.total) }} 元</b></td></tr>
+      {% if budget_summary.total_budget %}
+      <tr><td>用户预算</td><td>{{ budget_summary.note }}</td><td>{{ '%.0f'|format(budget_summary.total_budget) }} 元</td></tr>
+      {% endif %}
+    </table>
+  </section>
+  {% endif %}
 
   <footer>
     本行程由 AI 基于抖音公开内容与地图数据生成，仅供参考；开放时间、票价、班次等时效信息出发前请务必通过官方渠道核实。<br>

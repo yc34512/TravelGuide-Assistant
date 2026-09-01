@@ -501,7 +501,7 @@ class TestBudgetAndHtml(unittest.TestCase):
         self.assertIn("超出预算", b2["note"])
 
     def test_render_trip_html(self):
-        """HTML 渲染：关键区块（预算图/地图/避坑/热度/免责声明）与离线降级脚本都在。"""
+        """HTML 渲染：关键区块（概览卡/预算图/地图/避坑/热度/免责声明）与离线降级脚本都在。"""
         from pipeline.planner import build_budget_summary, render_trip_html
 
         profiles, plan = self._profiles(), self._plan()
@@ -515,12 +515,50 @@ class TestBudgetAndHtml(unittest.TestCase):
             heat=[{"spot": "云冈石窟", "score": 0.82, "trend": "近期热度上升",
                    "videos": 5, "likes": 28100, "comments": 71}],
         )
-        for expect in ("《大同》1 天行程规划", "budget-chart", "echarts", "leaflet",
+        for expect in ("《大同》1 天行程规划", "行程概览", "budget-chart", "echarts", "leaflet",
                        "两万步勝退", "走到腳断", "近期热度上升", "信息溯源",
-                       "仅供参考", '"lng": 113.05'):
+                       "仅供参考", '"lng": 113.05', "当日花费小计", "预算明细"):
             self.assertIn(expect, html)
         # 非法坐标被丢弃，合法坐标进 markers（酒店也在）
         self.assertNotIn("bad", html)
+
+    def test_overview_subtotals_breakdown(self):
+        """概览卡/每日小计/预算明细三个纯函数，及 Markdown 渲染新板块。"""
+        from pipeline.planner import (
+            budget_breakdown,
+            build_budget_summary,
+            build_overview,
+            day_subtotals,
+            render_trip,
+        )
+
+        profiles, plan = self._profiles(), self._plan()
+        b = build_budget_summary(profiles, plan, days=2, budget=1500)
+        ov = build_overview(2, plan, profiles, b, pitfall=[{"claim": "x"}])
+        self.assertEqual(ov["days"], 2)
+        self.assertEqual(ov["spots"], 2)
+        self.assertEqual(ov["slots"], 2)
+        self.assertEqual(ov["total_cost"], b["total"])
+        self.assertEqual(ov["daily_cost"], round(b["total"] / 2, 2))
+        self.assertEqual(ov["pitfalls"], 1)
+        # 每日小计：点位花费 + 餐饮/交通日均摊（弹性不分摊）
+        sc = day_subtotals(plan, b)
+        self.assertEqual(len(sc), 1)
+        self.assertEqual(sc[0]["spots"], 170)             # 120 + 50
+        self.assertEqual(sc[0]["food"], round(b["food"] / 1))
+        self.assertEqual(sc[0]["total"], sc[0]["spots"] + sc[0]["food"] + sc[0]["transport"])
+        # 明细行：门票逐点列明，四行固定结构；无预算时空列表
+        rows = budget_breakdown(profiles, b, days=2)
+        self.assertEqual([r["item"] for r in rows], ["门票", "餐饮", "市内交通", "弹性预留"])
+        self.assertIn("云冈石窟", rows[0]["detail"])
+        self.assertEqual(budget_breakdown(profiles, None, 2), [])
+        # Markdown 渲染：概览/小计/末尾明细表都在，旧顶部简表已去掉不重复
+        md = render_trip("大同", 2, "酒店", {"summary_note": "", "days": [plan["days"][0], plan["days"][0]]},
+                         profiles, {}, geo_on=False, budget_summary=b)
+        for expect in ("## 行程概览", "每日预算", "当日花费小计", "## 预算明细",
+                       "| **预估总计**", "用户预算"):
+            self.assertIn(expect, md)
+        self.assertEqual(md.count("## 预算明细"), 1)  # 不重复
 
 
 class TestMcpAndOpenapi(unittest.TestCase):

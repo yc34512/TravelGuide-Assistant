@@ -286,6 +286,53 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
     return out
 
 
+def build_overview(days: int, plan: dict, profiles: dict[str, dict],
+                   budget_summary: dict | None, pitfall: list[dict] | None) -> dict:
+    """行程概览卡数据：天数/景点数/总预算与日均/亮点与避坑数量。纯函数可测。"""
+    total_slots = sum(len(d.get("slots", [])) for d in plan.get("days", []))
+    total = budget_summary["total"] if budget_summary else None
+    return {
+        "days": days,
+        "spots": len(profiles),
+        "slots": total_slots,
+        "total_cost": total,
+        "daily_cost": round(total / days, 2) if (total and days) else None,
+        "highlights": sum(len(p.get("highlights", [])) for p in profiles.values()),
+        "pitfalls": len(pitfall or []),
+    }
+
+
+def day_subtotals(plan: dict, budget_summary: dict | None) -> list[dict]:
+    """每日花费小计：点位花费 + 餐饮/交通按天摊（弹性不分摊，留在总计里）。纯函数可测。"""
+    n_days = len(plan.get("days", [])) or 1
+    food_d = round(budget_summary["food"] / n_days) if budget_summary else 0
+    trans_d = round(budget_summary["transport"] / n_days) if budget_summary else 0
+    out = []
+    for d in plan.get("days", []):
+        spot_sum = round(sum(s.get("cost") or 0 for s in d.get("slots", [])))
+        out.append({"day": d.get("day"), "spots": spot_sum, "food": food_d,
+                    "transport": trans_d, "total": spot_sum + food_d + trans_d})
+    return out
+
+
+def budget_breakdown(profiles: dict[str, dict], budget_summary: dict | None,
+                     days: int) -> list[dict]:
+    """预算明细行：门票逐点列明 / 餐饮 / 交通 / 弹性。纯函数可测。"""
+    if not budget_summary:
+        return []
+    ticket_items = []
+    for name, p in profiles.items():
+        for c in p.get("cost_items", []):
+            if c["type"] == "门票":
+                ticket_items.append(f"{name} {c['item']} {c['amount']:.0f} 元")
+    return [
+        {"item": "门票", "detail": "；".join(ticket_items) or "无门票数据", "amount": budget_summary["tickets"]},
+        {"item": "餐饮", "detail": f"人均 {budget_summary['food_avg']:.0f} 元 × 2 正餐 × {days} 天", "amount": budget_summary["food"]},
+        {"item": "市内交通", "detail": "估算（每行程点约 15 元）", "amount": budget_summary["transport"]},
+        {"item": "弹性预留", "detail": "前几项小计的 10%", "amount": budget_summary["flex"]},
+    ]
+
+
 def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str, dict],
                 spot_sources: dict[str, list[str]], geo_on: bool,
                 budget_summary: dict | None = None, pitfall: list[dict] | None = None,
@@ -301,20 +348,19 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
         f"> 路线依据：{'高德地图实测通行时间' if geo_on else 'LLM 区域推断（未配置高德 Key，顺路精度有限）'}",
         "",
     ]
-    if budget_summary:
-        b = budget_summary
-        lines += [
-            "## 预算明细",
-            "",
-            f"- 门票：{b['tickets']:.0f} 元｜餐饮：{b['food']:.0f} 元（人均约 {b['food_avg']:.0f} × 2 正餐 × {days} 天）｜"
-            f"市内交通（估算）：{b['transport']:.0f} 元｜弹性 10%：{b['flex']:.0f} 元",
-            f"- **预估总花费：{b['total']:.0f} 元" + (f"（用户预算 {b['total_budget']:.0f} 元，{b['status']}）" if b['total_budget'] else "**"),
-        ]
-        if b["note"]:
-            lines.append(f"- {b['note']}")
-        if plan.get("summary_note"):
-            lines.append(f"- 规划说明：{plan['summary_note']}")
-        lines.append("")
+    # 行程概览卡：总天数/总预算与日均/亮点与避坑数量，一眼看全貌
+    ov = build_overview(days, plan, profiles, budget_summary, pitfall)
+    lines += ["## 行程概览", "",
+              f"- 总天数 **{ov['days']} 天** ｜ 景点 **{ov['spots']} 个** ｜ 行程点 **{ov['slots']} 个**"]
+    if ov["total_cost"] is not None:
+        cost_line = (f"- 总预算估算 **约 {ov['total_cost']:.0f} 元** ｜ 每日预算 **约 {ov['daily_cost']:.0f} 元/天**"
+                     + (f"（用户预算 {budget_summary['total_budget']:.0f} 元 · {budget_summary['status']}）"
+                        if budget_summary["total_budget"] else ""))
+        lines.append(cost_line)
+    lines += [f"- 亮点 **{ov['highlights']} 条** ｜ 避坑提示 **{ov['pitfalls']} 条**", ""]
+    day_costs = day_subtotals(plan, budget_summary)
+    if plan.get("summary_note"):
+        lines += [f"- 规划说明：{plan['summary_note']}", ""]
     if pitfall:
         lines += ["## 避坑专题（附评论原文）", ""]
         for i, row in enumerate(pitfall, 1):
@@ -324,7 +370,7 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
             if row["source"]:
                 lines.append(f"   > 来源：{row['source']}")
         lines.append("")
-    for d in plan["days"]:
+    for idx, d in enumerate(plan["days"]):
         lines.append(f"## 第 {d['day']} 天")
         lines.append("")
         for s in d["slots"]:
@@ -343,6 +389,11 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
                 lines.append(f"  > 避坑引用：\"{q}\"")
             if s["food"]:
                 lines.append(f"- 美食：{s['food']}")
+            lines.append("")
+        if budget_summary and idx < len(day_costs):
+            sc = day_costs[idx]
+            lines.append(f"> 当日花费小计：**约 {sc['total']:.0f} 元**"
+                         f"（点位花费 {sc['spots']:.0f} + 餐饮 {sc['food']:.0f} + 市内交通 {sc['transport']:.0f}，弹性预留不分摊）")
             lines.append("")
     if heat:
         lines += ["## 热度榜（近 90 天抖音数据）", ""]
@@ -383,6 +434,14 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
             links = " ".join(f"[来源{idx + 1}]({u})" for idx, u in enumerate(urls[:6]))
             lines.append(f"- 信息溯源：{links}")
         lines.append("")
+    if budget_summary:
+        lines += ["## 预算明细", "", "| 项目 | 说明 | 金额 |", "|---|---|---|"]
+        for row in budget_breakdown(profiles, budget_summary, days):
+            lines.append(f"| {row['item']} | {row['detail']} | {row['amount']:.0f} 元 |")
+        lines.append(f"| **预估总计** | 门票+餐饮+交通+弹性 | **{budget_summary['total']:.0f} 元** |")
+        if budget_summary["total_budget"]:
+            lines.append(f"| 用户预算 | {budget_summary['note']} | {budget_summary['total_budget']:.0f} 元 |")
+        lines.append("")
     lines.append("> 本行程由 AI 基于抖音公开内容与地图数据生成，仅供参考；")
     lines.append("> 开放时间、票价、班次等时效信息出发前请务必通过官方渠道核实。")
     return "\n".join(lines)
@@ -411,6 +470,9 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
         spot_sources=spot_sources, geo_on=geo_on, markers=markers,
         budget_summary=budget_summary, pitfall=pitfall or [], heat=heat or [],
         digests=digests or {},
+        overview=build_overview(days, plan, profiles, budget_summary, pitfall),
+        day_costs=day_subtotals(plan, budget_summary),
+        breakdown=budget_breakdown(profiles, budget_summary, days),
         generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
         total_slots=sum(len(d["slots"]) for d in plan["days"]),
     )
