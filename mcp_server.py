@@ -103,6 +103,29 @@ async def plan_trip(city: str, days: int = 2, hotel: str = "",
 
 
 @mcp.tool()
+async def get_city_heat(city: str) -> dict:
+    """查询城市实时热度榜（本周最火/正在降温）。
+    数据来自最近一轮刷榜；若返回空榜单，可先调 refresh_city_heat 采集刷新。
+    """
+    try:
+        return await _get(f"/api/heat/{city}")
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
+async def refresh_city_heat(city: str) -> dict:
+    """发起城市热度刷榜任务：对热门景点做元数据轻量采集（只取点赞与发布时间，不采评论），
+    约 3~5 分钟。用 get_job_status 轮询，完成后再调 get_city_heat 看榜单。"""
+    try:
+        data = await _post("/api/heat/refresh", {"city": city})
+        return {"ok": True, "job_id": data["job_id"],
+                "hint": "刷榜任务后台运行，请每 20 秒调用 get_job_status 轮询。"}
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
 async def get_job_status(job_id: str) -> dict:
     """查询任务进度。返回 status：running(继续轮询) / done(成功,结果在 result.markdown) /
     error(失败,原因在 error) / cancelled(已取消)。日志只保留末尾 8 行以节省上下文。"""

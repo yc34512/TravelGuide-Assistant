@@ -512,7 +512,8 @@ class TestMcpAndOpenapi(unittest.TestCase):
         self.assertEqual(
             names,
             {"check_service", "start_research", "plan_trip", "get_job_status",
-             "cancel_research", "list_reports", "get_report_content"},
+             "cancel_research", "list_reports", "get_report_content",
+             "get_city_heat", "refresh_city_heat"},
         )
 
     def test_openapi_schema(self):
@@ -523,9 +524,149 @@ class TestMcpAndOpenapi(unittest.TestCase):
         paths = set(spec["paths"].keys())
         for p in ("/api/health", "/api/research", "/api/trip", "/api/jobs/{job_id}",
                   "/api/jobs/{job_id}/cancel", "/api/jobs/history",
-                  "/api/reports", "/api/reports/download"):
+                  "/api/reports", "/api/reports/download",
+                  "/api/heat/refresh", "/api/heat/{city}"):
             self.assertIn(p, paths)
         self.assertNotIn("/", paths)  # 网页首页不进 OpenAPI（非 API 端点）
+
+
+class TestWebSearchFallback(unittest.TestCase):
+    def test_web_search_degrade(self):
+        """联网参数不兼容时：去参自动重试成功，降级标记置位后后续调用不再携带。"""
+        from types import SimpleNamespace
+
+        import core.llm as llm
+
+        class ParamErr(Exception):
+            pass
+
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = []
+
+            def create(self, **kw):
+                self.calls.append(kw)
+                if "enable_search" in (kw.get("extra_body") or {}):
+                    raise ParamErr("invalid_request_error: unsupported parameter enable_search")
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": 1}'))])
+
+        class FakeClient:
+            api_key = "x"
+            base_url = "y"
+
+            def __init__(self):
+                self.chat = SimpleNamespace(completions=FakeCompletions())
+
+        fake = FakeClient()
+        orig_cam, orig_flag = llm._client_and_model, llm._WEB_SEARCH_UNSUPPORTED
+        llm._client_and_model = lambda: (fake, "m")
+        llm._WEB_SEARCH_UNSUPPORTED = False
+        try:
+            out = llm.chat_json("s", "u", retries=2, web_search=True)
+            self.assertEqual(out, {"ok": 1})
+            self.assertTrue(llm._WEB_SEARCH_UNSUPPORTED)  # 降级标记置位
+            self.assertEqual(len(fake.chat.completions.calls), 2)
+            self.assertIn("enable_search", fake.chat.completions.calls[0]["extra_body"])
+            self.assertNotIn("enable_search", fake.chat.completions.calls[1]["extra_body"])
+            # 后续调用不再尝试联网参数（不重复碰壁）
+            llm.chat_json("s", "u", retries=1, web_search=True)
+            self.assertNotIn("enable_search", fake.chat.completions.calls[2]["extra_body"])
+        finally:
+            llm._client_and_model, llm._WEB_SEARCH_UNSUPPORTED = orig_cam, orig_flag
+
+    def test_extra_body_keys(self):
+        """联网参数同时携带两系兼容键；未开启时只有思考控制。"""
+        from core.llm import _extra_body
+
+        body = _extra_body(False, True)
+        self.assertTrue(body["enable_search"])
+        self.assertEqual(body["search"], {"enable": True})
+        self.assertEqual(_extra_body(False, False), {"enable_thinking": False})
+
+
+class TestHeatTrend(unittest.TestCase):
+    def test_time_windows(self):
+        """三时间窗占比：新/中/旧正确分桶，发布时间缺失计入旧内容。"""
+        from datetime import datetime, timedelta
+        from types import SimpleNamespace
+
+        from pipeline.heat import time_windows
+
+        now = datetime.now()
+        items = [
+            SimpleNamespace(publish_time=(now - timedelta(days=2)).strftime("%Y-%m-%d")),
+            SimpleNamespace(publish_time=(now - timedelta(days=30)).strftime("%Y-%m-%d")),
+            SimpleNamespace(publish_time=(now - timedelta(days=200)).strftime("%Y-%m-%d")),
+            SimpleNamespace(publish_time=None),
+        ]
+        w = time_windows(items, now=now)
+        self.assertEqual(w, {"fresh7": 0.25, "fresh60": 0.25, "old60": 0.5})
+        self.assertEqual(time_windows([]), {"fresh7": 0.0, "fresh60": 0.0, "old60": 0.0})
+
+    def test_trend_of(self):
+        """三态判定：本周最火 / 正在降温 / 平稳。"""
+        from pipeline.heat import trend_of
+
+        self.assertEqual(trend_of(0.4, 0.1, 0.2), "本周最火")   # 新内容占比高
+        self.assertEqual(trend_of(0.0, 0.2, 0.7), "本周最火")   # 综合分高也算
+        self.assertEqual(trend_of(0.0, 0.8, 0.3), "正在降温")   # 旧内容主导且无新增
+        self.assertEqual(trend_of(0.2, 0.3, 0.4), "平稳")
+        self.assertEqual(trend_of(0.0, 0.8, 0.7), "本周最火")   # 热度高优先于降温判定
+
+
+class TestDigestAndHeatApi(unittest.TestCase):
+    def test_digest_quote_guard(self):
+        """评价摘要引文防幻觉：不在输入原文池中的引用被丢弃，最多保留 2 条。"""
+        from pipeline.planner import _normalize_digest
+
+        pool = ["真的很好玩就是人太多了", "门票 120 有点贵"]
+        out = _normalize_digest(
+            {"verdict": "口碑两极", "positive": "景观震撼",
+             "negative": "人太多", "quotes": [
+                 "真的很好玩就是人太多了，值得去",   # 与池内原文互含，保留
+                 "完全是编造的引用内容",             # 不在池中，丢弃
+                 "门票 120 有点贵"]},
+            pool,
+        )
+        self.assertEqual(out["verdict"], "口碑两极")
+        self.assertEqual(len(out["quotes"]), 2)
+        self.assertNotIn("完全是编造的引用内容", out["quotes"])
+
+    def test_heat_endpoints(self):
+        """/api/heat/* ：空城市拒绝 400；无快照城市返回空榜与引导提示。"""
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        c = TestClient(app)
+        self.assertEqual(c.post("/api/heat/refresh", json={"city": "  "}).status_code, 400)
+        r = c.get("/api/heat/不存在这种城市名")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["ranking"], [])
+        self.assertTrue(r.json()["hint"])
+
+    def test_heat_snapshot_roundtrip(self):
+        """热度快照 UPSERT 与城市关联登记（临时库）。"""
+        from core import knowledge
+
+        tmp = Path(tempfile.mkdtemp()) / "test_heat.db"
+        orig = knowledge._DB_PATH
+        knowledge._DB_PATH = tmp
+        try:
+            knowledge.register_city_spots("大同", ["云冈石窟", "华严寺", ""])
+            self.assertEqual(sorted(knowledge.list_city_spots("大同")), ["云冈石窟", "华严寺"])
+            self.assertEqual(knowledge.list_city_spots("未登记"), [])
+            snap = {"score": 0.5, "fresh7": 0.25, "fresh60": 0.5, "old60": 0.25,
+                    "likes": 100, "videos": 4, "trend": "平稳"}
+            knowledge.upsert_heat_snapshot("大同", "云冈石窟", snap)
+            knowledge.upsert_heat_snapshot("大同", "云冈石窟", {**snap, "score": 0.9, "trend": "本周最火"})
+            rows = knowledge.load_heat_snapshots("大同")
+            self.assertEqual(len(rows), 1)  # UPSERT 不重复
+            self.assertEqual(rows[0]["score"], 0.9)
+            self.assertEqual(rows[0]["trend"], "本周最火")
+        finally:
+            knowledge._DB_PATH = orig
 
 
 if __name__ == "__main__":
