@@ -5,6 +5,8 @@
     GET  /api/health           健康检查 + 知识库概览
     POST /api/research         发起攻略研究任务 {keyword, mode, force} -> {job_id}
     POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?, budget?, preference_mode?} -> {job_id}
+    POST /api/heat/refresh     发起城市热度刷榜任务 {city} -> {job_id}（元数据轻量采集）
+    GET  /api/heat/{city}      查询城市实时热度榜（本周最火/正在降温）
     GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
     POST /api/jobs/{id}/cancel 取消运行中的任务（攻略/行程通用）
     GET  /api/jobs/history     历史任务摘要（持久化档案）
@@ -19,7 +21,7 @@ from pydantic import BaseModel
 
 from config import KB_TTL_DAYS, REPORT_DIR
 from core import knowledge
-from service import research, trip
+from service import heatrefresh, research, trip
 
 app = FastAPI(
     title="旅游攻略助手",
@@ -50,6 +52,31 @@ class TripIn(BaseModel):
     preferences: str = ""
     budget: float | None = None  # 总预算（元，不含大交通）；缺省不做预算控制
     preference_mode: str = "均衡"  # 省钱优先 / 体验优先 / 均衡
+
+
+class HeatRefreshIn(BaseModel):
+    city: str
+
+
+@app.post("/api/heat/refresh", summary="发起城市热度刷榜（元数据轻量采集）")
+def heat_refresh(body: HeatRefreshIn):
+    """对城市热门景点做一轮元数据采集刷榜（本周最火/正在降温）；后台任务，用 /api/jobs/{id} 轮询。"""
+    city = body.city.strip()
+    if not city:
+        raise HTTPException(status_code=400, detail="城市不能为空")
+    job_id = heatrefresh.start_heat_refresh(city)
+    return {"job_id": job_id}
+
+
+@app.get("/api/heat/{city}", summary="查询城市实时热度榜")
+def city_heat(city: str):
+    """返回该城最新热度快照榜（按热度降序，含趋势标签）；无数据返回空列表与引导提示。"""
+    ranking = knowledge.load_heat_snapshots(city.strip())
+    return {
+        "city": city.strip(),
+        "ranking": ranking,
+        "hint": "" if ranking else "暂无该城热度数据：先点“刷新榜单”跑一轮刷榜任务（约 3~5 分钟）",
+    }
 
 
 @app.get("/", include_in_schema=False)

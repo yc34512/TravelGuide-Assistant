@@ -149,7 +149,9 @@ class DouyinCrawler:
 
     # ---- 单个视频页：文案 + 标签 + 点赞 + 发布时间 + (可选)口播转写 + 评论 ----
     def fetch_video(self, url: str, max_comments: int = MAX_COMMENTS_PER_VIDEO,
-                    with_asr: bool = False) -> VideoItem:
+                    with_asr: bool = False, collect_comments: bool = True) -> VideoItem:
+        """collect_comments=False 为元数据模式（热度刷榜用）：只取文案/点赞/发布时间，
+        跳过评论滚动与解析，单条耗时降为完整采集的约三分之一。"""
         self.limiter.wait()
         m = VIDEO_ID_RE.search(url)
         item = VideoItem(video_id=m.group(1) if m else url, url=url)
@@ -175,7 +177,7 @@ class DouyinCrawler:
             item.play_urls = self._capture_play_urls()
             self.page.listen.stop()
 
-        item.comments = self._fetch_comments(max_comments)
+        item.comments = self._fetch_comments(max_comments) if collect_comments else []
         return item
 
     def _capture_play_urls(self) -> list[str]:

@@ -14,6 +14,13 @@ from datetime import datetime, timedelta
 FRESH_DAYS = 90
 DIGEST_MAX = 12  # 避坑专题条数上限，多了没人看
 
+# 三态趋势判定阈值（初始常量，集中在此便于调参）：
+# 本周最火：近 7 天发布占比高，或综合热度足够强；正在降温：内容主要在 60 天前且近 7 天几乎无新增。
+HOT_FRESH7 = 0.3
+HOT_SCORE = 0.6
+COOL_OLD60 = 0.5
+COOL_FRESH7 = 0.1
+
 # 归一化锚点：抖音景点类视频的常见量级（超过即视为满分档）
 _LIKE_ANCHOR = 50000.0
 _DENSITY_ANCHOR = 50.0
@@ -74,3 +81,39 @@ def pitfall_digest(all_points: list[dict]) -> list[dict]:
     ]
     rows.sort(key=lambda r: order.get(r["confidence"], 3))
     return rows[:DIGEST_MAX]
+
+
+def time_windows(items: list, now: datetime | None = None) -> dict:
+    """发布时间三窗口占比（刷榜趋势判定的原料）：近 7 天 / 7~60 天 / 60 天以上。
+    发布时间缺失的视频计入 old60（保守：无法证明新鲜就当旧内容）。纯函数可测。"""
+    now = now or datetime.now()
+    cut7 = now - timedelta(days=7)
+    cut60 = now - timedelta(days=60)
+    n = len(items)
+    fresh7 = fresh60 = old60 = 0
+    for it in items:
+        try:
+            d = datetime.strptime((it.publish_time or "")[:10], "%Y-%m-%d")
+        except ValueError:
+            old60 += 1
+            continue
+        if d >= cut7:
+            fresh7 += 1
+        elif d >= cut60:
+            fresh60 += 1
+        else:
+            old60 += 1
+    return {
+        "fresh7": round(fresh7 / n, 2) if n else 0.0,
+        "fresh60": round(fresh60 / n, 2) if n else 0.0,
+        "old60": round(old60 / n, 2) if n else 0.0,
+    }
+
+
+def trend_of(fresh7: float, old60: float, score: float) -> str:
+    """三态趋势判定：本周最火 / 正在降温 / 平稳。纯函数可测。"""
+    if fresh7 >= HOT_FRESH7 or score >= HOT_SCORE:
+        return "本周最火"
+    if old60 >= COOL_OLD60 and fresh7 <= COOL_FRESH7:
+        return "正在降温"
+    return "平稳"

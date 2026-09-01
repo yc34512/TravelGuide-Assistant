@@ -65,6 +65,34 @@ def _conn() -> sqlite3.Connection:
         )
         """
     )
+    # 城市->景点关联（行程/刷榜任务登记，刷榜时优先复用，免去重新圈定）
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS heat_city (
+            city TEXT NOT NULL,
+            spot TEXT NOT NULL,
+            PRIMARY KEY (city, spot)
+        )
+        """
+    )
+    # 热度快照：每城每景点一行（UPSERT），刷榜任务的产出，榜单页直接读
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS heat_snapshots (
+            city TEXT NOT NULL,
+            spot TEXT NOT NULL,
+            score REAL NOT NULL,
+            fresh7 REAL DEFAULT 0,
+            fresh60 REAL DEFAULT 0,
+            old60 REAL DEFAULT 0,
+            likes INTEGER DEFAULT 0,
+            videos INTEGER DEFAULT 0,
+            trend TEXT DEFAULT '平稳',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (city, spot)
+        )
+        """
+    )
     return conn
 
 
@@ -210,6 +238,60 @@ def list_jobs(limit: int = 20) -> list[dict]:
             "status": r["status"],
             "error": r["error"],
             "finished_at": r["finished_at"],
+        }
+        for r in rows
+    ]
+
+
+# ---- 热度榜：城市景点关联 + 快照读写 ----
+
+def register_city_spots(city: str, spots: list[str]) -> None:
+    """登记城市->景点关联（行程/刷榜任务产出，供刷榜优先复用）。"""
+    rows = [(city.strip(), s.strip()) for s in spots if s.strip()]
+    if not rows:
+        return
+    with _conn() as conn:
+        conn.executemany("INSERT OR IGNORE INTO heat_city (city, spot) VALUES (?, ?)", rows)
+
+
+def list_city_spots(city: str) -> list[str]:
+    """已登记的城市景点清单（无则空列表）。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT spot FROM heat_city WHERE city = ?", (city.strip(),)
+        ).fetchall()
+    return [r["spot"] for r in rows]
+
+
+def upsert_heat_snapshot(city: str, spot: str, snap: dict) -> None:
+    """写入/更新某城某景点的热度快照（每城每景点一行）。"""
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO heat_snapshots (city, spot, score, fresh7, fresh60, old60,"
+            " likes, videos, trend, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(city, spot) DO UPDATE SET"
+            " score=excluded.score, fresh7=excluded.fresh7, fresh60=excluded.fresh60,"
+            " old60=excluded.old60, likes=excluded.likes, videos=excluded.videos,"
+            " trend=excluded.trend, updated_at=excluded.updated_at",
+            (city.strip(), spot.strip(), snap["score"], snap["fresh7"], snap["fresh60"],
+             snap["old60"], snap["likes"], snap["videos"], snap["trend"],
+             datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def load_heat_snapshots(city: str) -> list[dict]:
+    """某城的最新热度榜（按综合分降序）；无快照返回空列表。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT spot, score, fresh7, fresh60, old60, likes, videos, trend, updated_at"
+            " FROM heat_snapshots WHERE city = ? ORDER BY score DESC",
+            (city.strip(),),
+        ).fetchall()
+    return [
+        {
+            "spot": r["spot"], "score": r["score"], "trend": r["trend"],
+            "fresh7": r["fresh7"], "fresh60": r["fresh60"], "old60": r["old60"],
+            "likes": r["likes"], "videos": r["videos"], "updated_at": r["updated_at"],
         }
         for r in rows
     ]
