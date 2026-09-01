@@ -31,7 +31,9 @@ EXTRACT_SYSTEM = """你是旅游攻略信息抽取助手，负责从单条抖音
    - "中性"：客观事实/信息陈述，没有明显褒贬（开放时间、交通方式、位置等）；
    立场必须来自原文表述，禁止根据你自己的常识推断；
 8. 若输入标注了"发布较旧"，其中的时效敏感信息照提取但照常标注，不要擅自丢弃；
-9. 输出严格 JSON：{"points": [{"topic": "门票|交通|避雷|打卡|美食|住宿|路线|其他", "claim": "一句话要点", "stance": "推荐|避雷|中性", "time_sensitive": true/false, "source": "视频url"}]}
+9. 标记了（作者回复）的评论是视频作者本人的回应，可信度高于普通评论；
+   它与普通评论就同一事实说法矛盾时，优先采信作者回复；
+10. 输出严格 JSON：{"points": [{"topic": "门票|交通|避雷|打卡|美食|住宿|路线|其他", "claim": "一句话要点", "stance": "推荐|避雷|中性", "time_sensitive": true/false, "source": "视频url"}]}
 没有可抽取的信息时返回 {"points": []}"""
 
 # 代码层兜底：疑问句（带不带问号都要拦）/ 常见低价值话术
@@ -71,7 +73,8 @@ def _is_stale(publish_time: str | None) -> bool:
 
 def extract_points(item: VideoItem) -> list[dict]:
     comments_text = "\n".join(
-        f"- {c.text}（赞{c.like_count if c.like_count is not None else '?'}）"
+        f"- {c.text}（赞{c.like_count if c.like_count is not None else '?'}"
+        f"{'，作者回复' if c.is_author_reply else ''}）"
         for c in item.comments[:50]
     )
     like_str = f"{item.like_count}" if item.like_count is not None else "未知"

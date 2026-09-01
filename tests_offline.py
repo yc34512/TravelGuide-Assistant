@@ -81,6 +81,63 @@ class TestRender(unittest.TestCase):
         self.assertEqual(_quick_glance([]), "")
 
 
+class TestSmartSearch(unittest.TestCase):
+    def test_rank_candidates(self):
+        """点赞降序在前、无点赞垫后、按 video_id 去重、限量。"""
+        from crawler.douyin import rank_candidates
+
+        cands = [
+            {"video_id": "a", "url": "u_a", "like_count": 10},
+            {"video_id": "b", "url": "u_b", "like_count": None},
+            {"video_id": "c", "url": "u_c", "like_count": 500},
+            {"video_id": "a", "url": "u_a", "like_count": 10},  # 重复（多查询合并）
+            {"video_id": "d", "url": "u_d", "like_count": 0},   # 0 赞视同未计分？不：0 为假值垫后，行为一致
+            {"video_id": "e", "url": "u_e", "like_count": 30},
+        ]
+        self.assertEqual(rank_candidates(cands, 3), ["u_c", "u_e", "u_a"])
+        self.assertEqual(rank_candidates(cands, 100), ["u_c", "u_e", "u_a", "u_b", "u_d"])
+        self.assertEqual(rank_candidates([], 5), [])
+
+
+class TestGapFill(unittest.TestCase):
+    def test_missing_topics(self):
+        from service.research import missing_topics
+
+        full = [{"topic": "门票"}, {"topic": "交通"}, {"topic": "美食"}]
+        self.assertEqual(missing_topics(full), [])
+        self.assertEqual(missing_topics([{"topic": "美食"}]), ["门票", "交通"])
+        self.assertEqual(missing_topics([{"topic": "门票"}]), ["交通"])
+        self.assertEqual(missing_topics([{"topic": "交通"}, {"topic": "打卡"}]), ["门票"])
+        self.assertEqual(missing_topics([]), ["门票", "交通"])
+        # topic 缺失的要点不参与覆盖判定，不报错
+        self.assertEqual(missing_topics([{"claim": "x"}]), ["门票", "交通"])
+
+
+class TestSanitizeAuthor(unittest.TestCase):
+    def test_author_reply_detection(self):
+        from core.sanitize import parse_comment_block
+
+        normal = "昵称\n...\n门票免费的\n1天前·北京\n35\n分享\n回复"
+        text, like, is_author = parse_comment_block(normal)
+        self.assertEqual(text, "门票免费的")
+        self.assertEqual(like, 35)
+        self.assertFalse(is_author)
+
+        author = "某网友\n作者\n...\n谢谢大家支持\n2小时前·浙江\n3\n分享\n回复"
+        text, like, is_author = parse_comment_block(author)
+        self.assertEqual(text, "谢谢大家支持")
+        self.assertTrue(is_author)
+
+        # 宁漏不误标：正文里含"作者"二字但不是独立标记行，不认定作者回复
+        tricky = "昵称\n...\n作者是好人\n1天前\n5\n分享\n回复"
+        text, like, is_author = parse_comment_block(tricky)
+        self.assertEqual(text, "作者是好人")
+        self.assertFalse(is_author)
+
+        # 空块
+        self.assertEqual(parse_comment_block(""), ("", None, False))
+
+
 class TestVerify(unittest.TestCase):
     def test_stance_conflicts(self):
         from pipeline.verify import _stance_conflicts

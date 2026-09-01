@@ -37,12 +37,14 @@ def parse_count(text: str | None) -> int | None:
     return int(m.group(0)) if m else None
 
 
-def parse_comment_block(raw: str) -> tuple[str, int | None]:
-    """把评论区单个条目的整块 innerText 解析成 (纯评论文本, 点赞数)。
+def parse_comment_block(raw: str) -> tuple[str, int | None, bool]:
+    """把评论区单个条目的整块 innerText 解析成 (纯评论文本, 点赞数, 是否作者回复)。
 
     抖音条目结构固定形如：
-        昵称 \\n ... \\n 正文... \\n 时间·属地 \\n 点赞数 \\n 分享 \\n 回复 [\\n 展开N条回复]
+        昵称 \n ... \n 正文... \n 时间·属地 \n 点赞数 \n 分享 \n 回复 [\n 展开N条回复]
     （主评论下若内联了回复预览，则以多个 "..." 分段）
+    作者回复的昵称旁带"作者"徽标，在 innerText 中表现为独立的"作者"行。
+    检测从严：只认独立成行的精确匹配，宁漏不误标。
 
     以 "..." 为界切段，第 0 段是昵称——直接丢弃，个人信息不进入任何下游数据。
     若整个条目没有 "..." 分隔符，无法可靠区分昵称与正文时，按隐私优先原则
@@ -50,7 +52,9 @@ def parse_comment_block(raw: str) -> tuple[str, int | None]:
     """
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     if not lines:
-        return "", None
+        return "", None, False
+
+    is_author = any(l == "作者" for l in lines)
 
     if "..." in lines:
         rest = lines[lines.index("...") + 1:]
@@ -79,4 +83,4 @@ def parse_comment_block(raw: str) -> tuple[str, int | None]:
         else:
             break
 
-    return " ".join(seg).strip(), like
+    return " ".join(seg).strip(), like, is_author

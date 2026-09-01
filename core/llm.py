@@ -21,8 +21,17 @@ _BILLING_HINT = (
 
 
 def _is_billing(e: Exception) -> bool:
-    m = str(e)
-    return "Arrearage" in m or "overdue" in m.lower() or "欠费" in m
+    """
+    判断异常是否为欠费/余额不足等计费类错误。
+    
+    【解答你的疑问】：这不是“指针指向异常”。Python 中没有 C/C++ 那样的指针概念。
+    此处的实际逻辑是：将异常对象 `e` 转换为字符串，然后检查该字符串中是否包含
+    特定的欠费关键词（如 arrearage, overdue, 欠费等）。如果包含则返回 True，
+    表示这是一个计费/欠费类的异常。
+    """
+    # 统一转为小写，使关键词匹配不区分大小写，逻辑更一致且健壮
+    msg = str(e).lower()
+    return "arrearage" in msg or "overdue" in msg or "欠费" in msg or "insufficient" in msg
 
 
 def _raise_friendly(e: Exception) -> None:

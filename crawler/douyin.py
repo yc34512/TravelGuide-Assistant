@@ -24,6 +24,8 @@ _CREATE_TIME_RE = re.compile(r'"create_time"\s*:\s*(\d{10})')
 
 # —— 选择器集中管理（候选列表按顺序尝试，失效时改这里）——
 SEL_SEARCH_LINKS = 'css:a[href*="/video/"]'
+# 搜索结果卡片上的点赞数（尽力而为：解析失败退化为按原顺序采集，不阻断）
+SEL_SEARCH_LIKE = ['css:[class*="like-count"]', 'css:[class*="digg"]', 'css:[class*="like"]']
 SEL_VIDEO_DESC = [
     'css:[data-e2e="video-desc"]',
     'css:[data-e2e="detail-video-info"]',
@@ -62,18 +64,36 @@ def _find_items(container, selectors: list[str]):
     return []
 
 
+def rank_candidates(candidates: list[dict], limit: int) -> list[str]:
+    """择优排序：有点赞数的按点赞降序在前，无法解析的按发现顺序垫后；
+    按 video_id 去重，取前 limit 条 URL。纯函数，独立可测。"""
+    seen: set[str] = set()
+    uniq: list[dict] = []
+    for c in candidates:
+        if c["video_id"] not in seen:
+            seen.add(c["video_id"])
+            uniq.append(c)
+    scored = sorted(
+        (c for c in uniq if c.get("like_count")),
+        key=lambda c: c["like_count"],
+        reverse=True,
+    )
+    unscored = [c for c in uniq if not c.get("like_count")]
+    return [c["url"] for c in scored + unscored][:limit]
+
+
 class DouyinCrawler:
     def __init__(self, page: ChromiumPage, limiter: RateLimiter | None = None):
         self.page = page
         self.limiter = limiter or RateLimiter()
 
-    # ---- 搜索：返回视频 URL 列表 ----
-    def search(self, keyword: str, limit: int) -> list[str]:
+    # ---- 搜索：单次查询，返回候选列表（带尽力解析的点赞数）----
+    def _search_one(self, keyword: str, max_n: int) -> list[dict]:
         url = f"https://www.douyin.com/search/{quote(keyword)}?type=video"
         self.page.get(url)
         time.sleep(4)
 
-        found: list[str] = []
+        found: list[dict] = []
         seen: set[str] = set()
         for _ in range(MAX_SEARCH_SCROLLS):
             for link in self.page.eles(SEL_SEARCH_LINKS):
@@ -81,12 +101,51 @@ class DouyinCrawler:
                 m = VIDEO_ID_RE.search(href)
                 if m and m.group(1) not in seen:
                     seen.add(m.group(1))
-                    found.append(f"https://www.douyin.com/video/{m.group(1)}")
-                    if len(found) >= limit:
+                    found.append(
+                        {
+                            "video_id": m.group(1),
+                            "url": f"https://www.douyin.com/video/{m.group(1)}",
+                            "like_count": self._card_like_count(link),
+                        }
+                    )
+                    if len(found) >= max_n:
                         return found
             self.page.scroll.to_bottom()
             time.sleep(random.uniform(2.5, 4.0))
         return found
+
+    def _card_like_count(self, link) -> int | None:
+        """尽力解析搜索结果卡片点赞数：任何异常/未命中都返回 None（
+        排序退化为按发现顺序），不阻断采集。"""
+        try:
+            for sel in SEL_SEARCH_LIKE:
+                try:
+                    ele = link.ele(sel, timeout=0.2)
+                except Exception:
+                    ele = None
+                if ele:
+                    n = parse_count(ele.text)
+                    if n is not None:
+                        return n
+            # 兜底：卡片文本末尾的独立计数（如 "1.2万"）
+            m = re.search(r"([\d.]+\s*万?)\s*$", (link.text or "").strip())
+            if m:
+                return parse_count(m.group(1))
+        except Exception:
+            pass
+        return None
+
+    # ---- 搜索 + 择优：多角度查询合并候选池，按点赞排序后取前 limit 条 ----
+    def search_and_rank(self, keyword: str, limit: int) -> list[str]:
+        """先搜原词（候选池 2 倍），再补一轮"避雷"角度查询扩充避雷类素材；
+        两条查询间走频控，扩展查询失败静默跳过。"""
+        pool = self._search_one(keyword, limit * 2)
+        try:
+            self.limiter.wait()
+            pool.extend(self._search_one(f"{keyword} 避雷", limit))
+        except Exception:
+            pass
+        return rank_candidates(pool, limit)
 
     # ---- 单个视频页：文案 + 标签 + 点赞 + 发布时间 + (可选)口播转写 + 评论 ----
     def fetch_video(self, url: str, max_comments: int = MAX_COMMENTS_PER_VIDEO,
@@ -169,10 +228,12 @@ class DouyinCrawler:
         stale_rounds = 0
         while len(collected) < max_n and stale_rounds < 5:
             for node in _find_items(container, SEL_COMMENT_ITEM):
-                text, like = parse_comment_block(node.text)
+                text, like, is_author = parse_comment_block(node.text)
                 if not text or text in collected:
                     continue
-                collected[text] = clean_comment({"text": text[:500], "like_count": like})
+                collected[text] = clean_comment(
+                    {"text": text[:500], "like_count": like, "is_author_reply": is_author}
+                )
                 if len(collected) >= max_n:
                     break
 
@@ -181,9 +242,13 @@ class DouyinCrawler:
             time.sleep(random.uniform(1.5, 2.5))
             stale_rounds = stale_rounds + 1 if len(collected) == before else 0
 
-        # 点赞排序 + 低质过滤：高赞评论更可能含真实经验；不足保底数时放宽，保证条数
+        # 点赞排序 + 低质过滤：高赞评论更可能含真实经验；作者回复（博主亲自下场，
+        # 常含权威澄清）豁免点赞门槛；不足保底数时放宽，保证条数
         ranked = sorted(collected.values(), key=lambda c: c.like_count or 0, reverse=True)
-        keep = [c for c in ranked if (c.like_count or 0) >= MIN_COMMENT_LIKES]
+        keep = [
+            c for c in ranked
+            if c.is_author_reply or (c.like_count or 0) >= MIN_COMMENT_LIKES
+        ]
         if len(keep) < MIN_COMMENTS_KEEP:
             keep = ranked
         return keep[:max_n]

@@ -63,8 +63,8 @@ def main():
             console.print("[red]等待超时：未检测到登录态。请重跑本命令，并在窗口中用小号完成扫码。[/red]")
             sys.exit(1)
 
-        console.print(f"[cyan]1/3[/cyan] 搜索关键词：{args.keyword}")
-        urls = crawler.search(args.keyword, args.limit)
+        console.print(f"[cyan]1/3[/cyan] 搜索关键词：{args.keyword}（多角度查询 + 按点赞择优）")
+        urls = crawler.search_and_rank(args.keyword, args.limit)
         console.print(f"    搜到 {len(urls)} 条视频")
         if not urls:
             console.print(
@@ -118,6 +118,7 @@ def main():
         from pipeline.render import render_report
         from pipeline.report import synthesize_report
         from pipeline.verify import annotate_confidence
+        from service.research import _fill_gaps
 
         # 并行提取：LLM 调用相互独立，3 路并发把墙钟时间压到约 1/3
         import time as _time
@@ -140,6 +141,20 @@ def main():
         if not all_points:
             console.print("[yellow]没有提取到任何要点，跳过报告生成。[/yellow]")
             return
+
+        # 信息缺口补全：门票/交通等核心主题完全缺失时定向补采（最多 2 次查询 × 3 视频）
+        before = len(items)
+        items, all_points = _fill_gaps(
+            args.keyword, items, all_points, args.comments, None,
+            lambda msg: console.print(f"    {msg}"),
+        )
+        if len(items) > before:
+            # 补采获得了新内容：覆盖原始 JSON，保持"采集成果完整落盘"
+            raw_path.write_text(
+                json.dumps([it.to_dict() for it in items], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            console.print(f"    原始数据已更新（含补采）：{raw_path}")
 
         t0 = _time.time()
         console.print("    多源交叉验证与置信度标注…")

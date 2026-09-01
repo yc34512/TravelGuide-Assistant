@@ -1,4 +1,4 @@
-"""研究任务编排：知识库判定 -> (采集 | 复用缓存) -> 提取 -> 验证 -> 报告。
+"""研究任务编排：知识库判定 -> (采集 | 复用缓存) -> 提取 -> 缺口补全 -> 验证 -> 报告。
 
 对外提供 start_job / get_job / cancel_job 三个原语：任务在后台线程执行，
 进度写入 JOBS 字典，由 API 层轮询；终态（完成/失败/取消）同步落库，
@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from config import KB_TTL_DAYS, RAW_DIR, REPORT_DIR
+from config import DEBUG_DIR, KB_TTL_DAYS, RAW_DIR, REPORT_DIR
 from core import knowledge
 from core.models import Comment, VideoItem
 
@@ -22,10 +22,23 @@ _LOCK = threading.Lock()        # JOBS 字典读写保护
 _CRAWL_LOCK = threading.Lock()  # 浏览器采集全局唯一：同一时刻只允许一个采集任务
 FETCH_RETRIES = 2               # 单条视频采集失败自动重试次数（偶发网络/渲染抖动）
 
+# —— 信息缺口补全（合规硬上限：最多 2 次补充搜索，每次最多 3 条视频）——
+CORE_TOPICS = ("门票", "交通")  # 攻略核心主题：完全缺失时触发定向补采
+MAX_GAP_SEARCHES = 2
+GAP_VIDEOS_PER_SEARCH = 3
+
 
 class Cancelled(RuntimeError):
     """任务被用户取消：在检查点抛出，让 finally 正常释放浏览器等资源。"""
     pass
+
+
+def dump_debug(page, name: str) -> None:
+    """页面处理失败时保存 HTML 快照，便于排查选择器问题。"""
+    try:
+        (DEBUG_DIR / f"{name}.html").write_text(page.html, encoding="utf-8")
+    except Exception:
+        pass
 
 
 def load_items_from_raw(raw_path: str) -> list[VideoItem]:
@@ -46,11 +59,14 @@ def load_items_from_raw(raw_path: str) -> list[VideoItem]:
     ]
 
 
-def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str, log) -> tuple[list[VideoItem], str]:
-    """浏览器采集。浏览器阶段持锁：同一时刻只跑一个采集任务；
-    转写与落盘在锁释放后进行，不阻塞其他任务排队。单条失败自动重试。"""
+def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | None, log) -> list[VideoItem]:
+    """浏览器采集（搜索择优 + 单条重试）。浏览器阶段持锁：同一时刻只跑一个采集任务；
+    转写在锁释放后进行。原始 JSON 落盘由调用方在缺口补全后统一做（含补采视频）。"""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     def cancelled() -> bool:
+        if job_id is None:
+            return False
         with _LOCK:
             return JOBS.get(job_id, {}).get("cancel_requested", False)
 
@@ -67,9 +83,13 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str, log)
         try:
             if not ensure_login(page):
                 raise RuntimeError("未检测到抖音登录态：请在弹出的浏览器中用采集小号扫码后重试")
-            log(f"搜索关键词：{keyword}")
-            urls = crawler.search(keyword, limit)
+            log(f"搜索关键词：{keyword}（多角度查询 + 按点赞择优）")
+            urls = crawler.search_and_rank(keyword, limit)
             log(f"搜到 {len(urls)} 条视频")
+            if not urls:
+                # 0 结果大概率是选择器失效：存快照 + 明确告警，降低排查成本
+                dump_debug(page, f"svc_fail_{ts}_search")
+                log("搜索 0 结果：已保存页面快照到 data/debug/，请对照 crawler/douyin.py 顶部 SEL_* 常量排查")
             for i, url in enumerate(urls, 1):
                 if cancelled():
                     raise Cancelled()
@@ -95,6 +115,7 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str, log)
                             log(f"[{i}/{len(urls)}] 采集失败：{e}，稍后重试…")
                             time.sleep(3)
                 if last_err is not None:
+                    dump_debug(page, f"svc_fail_{ts}_{i}")
                     log(f"[{i}/{len(urls)}] 采集失败（已重试 {FETCH_RETRIES} 次）：{last_err}")
         finally:
             try:
@@ -117,15 +138,102 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str, log)
             transcribe_items(items, workers=2, progress=_prog)
             ok = sum(1 for it in items if it.transcript)
             log(f"转写完成 {ok}/{len(items)} 条，耗时 {time.time() - t0:.0f} 秒")
+    return items
 
+
+def save_raw(keyword: str, items: list[VideoItem]) -> str:
+    """把采集结果（含缺口补采）存为原始 JSON，返回路径。"""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     raw_path = RAW_DIR / f"{keyword}_{ts}.json"
     raw_path.write_text(
         json.dumps([it.to_dict() for it in items], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    log(f"原始数据已保存：{raw_path.name}")
-    return items, str(raw_path)
+    return str(raw_path)
+
+
+def missing_topics(points: list[dict]) -> list[str]:
+    """核心主题缺口检测：返回要点中完全未覆盖的核心主题。纯函数，独立可测。"""
+    covered = {p.get("topic") for p in points}
+    return [t for t in CORE_TOPICS if t not in covered]
+
+
+def _fill_gaps(keyword: str, items: list[VideoItem], all_points: list[dict],
+               comments: int, job_id: str | None, log) -> tuple[list[VideoItem], list[dict]]:
+    """信息缺口补全：核心主题（门票/交通）完全缺失时，定向补搜补采一轮。
+    硬上限 MAX_GAP_SEARCHES 次查询 × 每次 GAP_VIDEOS_PER_SEARCH 条视频，守频控；
+    补采失败不阻断主流程（宁缺勿崩）。job_id 为 None 时（CLI）不响应取消。"""
+    gaps = missing_topics(all_points)[:MAX_GAP_SEARCHES]
+    if not gaps:
+        log("核心主题（门票/交通）已覆盖，无需补全")
+        return items, all_points
+    log(f"检测到信息缺口：{'、'.join(gaps)}，开始定向补采")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def cancelled() -> bool:
+        if job_id is None:
+            return False
+        with _LOCK:
+            return JOBS.get(job_id, {}).get("cancel_requested", False)
+
+    new_items: list[VideoItem] = []
+    with _CRAWL_LOCK:
+        from crawler.browser import create_page, ensure_login
+        from crawler.douyin import DouyinCrawler
+        from core.rate_limiter import RateLimiter
+
+        page = create_page()
+        crawler = DouyinCrawler(page, RateLimiter())
+        try:
+            if not ensure_login(page):
+                log("缺口补采跳过：未检测到登录态")
+                return items, all_points
+            for gi, topic in enumerate(gaps, 1):
+                if cancelled():
+                    raise Cancelled()
+                q = f"{keyword} {topic}"
+                log(f"补采 [{gi}/{len(gaps)}] 搜索：{q}")
+                urls = crawler.search_and_rank(q, GAP_VIDEOS_PER_SEARCH)
+                if not urls:
+                    dump_debug(page, f"gap_fail_{ts}_{gi}")
+                for url in urls:
+                    if cancelled():
+                        raise Cancelled()
+                    try:
+                        new_items.append(crawler.fetch_video(url, max_comments=comments))
+                        log(f"  补采 {new_items[-1].video_id} | 评论 {len(new_items[-1].comments)} 条")
+                    except Exception as e:
+                        log(f"  补采失败：{e}")
+        finally:
+            try:
+                page.quit()
+            except Exception:
+                pass
+
+    if not new_items:
+        log("缺口补采未获得新内容，跳过")
+        return items, all_points
+
+    # 补采视频提取要点（3 路并发，与主提取一致）
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from pipeline.extract import extract_points
+
+    extra_points: list[dict] = []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(extract_points, it): it for it in new_items}
+        for fut in as_completed(futures):
+            if cancelled():
+                raise Cancelled()
+            it = futures[fut]
+            try:
+                pts = fut.result()
+                extra_points.extend(pts)
+                log(f"  {it.video_id}: 补采提取 {len(pts)} 条要点")
+            except Exception as e:
+                log(f"  {it.video_id}: 补采提取失败 {e}")
+    log(f"缺口补全完成：新增 {len(new_items)} 条视频 / {len(extra_points)} 条要点")
+    return items + new_items, all_points + extra_points
 
 
 # 模式预设：快速迭代用 fast，出发前做最终规划用 deep
@@ -215,12 +323,14 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
             reason = "已过期" if (not force and knowledge.find_fresh(keyword, KB_TTL_DAYS * 365)) else "首次查询"
             log(f"知识库未命中（{reason}），开始采集")
             job["stage"] = "采集数据"
-            items, raw_path = _crawl(keyword, limit, comments, asr, job_id, log)
+            items = _crawl(keyword, limit, comments, asr, job_id, log)
             if not items:
-                raise RuntimeError("没有采集到任何内容：可能页面改版或关键词过冷，请查看调试快照")
-            record_id = knowledge.record_crawl(
-                keyword, raw_path, len(items), sum(len(i.comments) for i in items)
-            )
+                raise RuntimeError(
+                    "没有采集到任何内容：疑似选择器失效或关键词过冷，"
+                    "请查看 data/debug/ 快照并对照 crawler/douyin.py 顶部 SEL_* 常量"
+                )
+            record_id = None  # 缺口补全后再落盘与登记（补采视频一并入库）
+            raw_path = None
 
         # 2) 提取（并行）
         job["stage"] = "提取要点"
@@ -247,6 +357,20 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
             raise RuntimeError("没有提取到任何要点")
         if _cancelled():
             raise Cancelled()
+
+        # 2.5) 信息缺口补全（门票/交通等核心主题完全缺失时定向补采）
+        job["stage"] = "补全缺口"
+        items, all_points = _fill_gaps(keyword, items, all_points, comments, job_id, log)
+        if _cancelled():
+            raise Cancelled()
+
+        # 2.6) 缺口补全后统一落盘与登记：补采视频一并入原始 JSON 和知识库计数
+        if not job.get("cache_hit"):
+            raw_path = save_raw(keyword, items)
+            log(f"原始数据已保存：{Path(raw_path).name}")
+            record_id = knowledge.record_crawl(
+                keyword, raw_path, len(items), sum(len(i.comments) for i in items)
+            )
 
         # 3) 交叉验证
         job["stage"] = "交叉验证"
