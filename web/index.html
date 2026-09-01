@@ -153,6 +153,15 @@
 const $ = id => document.getElementById(id);
 let currentJobId = null;  // 当前正在轮询的任务，供取消按钮使用
 let currentTab = 'research';
+let outputTab = null;     // 输出区（进度/结果/历史）归属的页签，切换时跟随分类不串页
+
+// 输出区可见性统一收口：只显示归属当前页签的内容，任务在后台照跑不误
+function syncOutput() {
+  const mine = outputTab === currentTab;
+  $('result').classList.toggle('hidden', !mine);
+  $('history').classList.toggle('hidden', !mine || !$('hist').innerHTML.trim());
+  $('progress').classList.toggle('hidden', !mine || !$('log').textContent.trim());
+}
 
 function switchTab(t) {
   currentTab = t;
@@ -162,6 +171,7 @@ function switchTab(t) {
   $('tab-research').classList.toggle('active', t === 'research');
   $('tab-trip').classList.toggle('active', t === 'trip');
   $('tab-heat').classList.toggle('active', t === 'heat');
+  syncOutput();
   if (t === 'heat' && $('heatCity').value.trim()) viewHeat();
 }
 
@@ -176,6 +186,7 @@ async function go() {
   // 含义：将“取消任务”按钮的 disabled 属性设为 false，即启用该按钮，允许用户在任务运行期间点击取消以中断采集。
   $('cancelBtn').disabled = false;
   $('result').classList.add('hidden');
+  outputTab = currentTab;
   $('progress').classList.remove('hidden');
   $('stage').className = 'stage';
   $('stage').innerHTML = '<span class="spin"></span>准备中…';
@@ -227,7 +238,9 @@ async function poll(id) {
   $('progress').classList.add('hidden');
   if (job.kind === 'heat') {
     renderHeat(job.result);
-    window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
+    if (!$('result').classList.contains('hidden')) {
+      window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
+    }
     return;
   }
   const r = job.result, s = r.stats;
@@ -252,8 +265,11 @@ async function poll(id) {
       (r.cache_hit ? '<span>⚡ 知识库命中，免采集</span>' : '<span>🆕 本次全新采集</span>') +
       `<span>文件：${r.report_name}</span>`;
   $('report').innerHTML = renderMd(r.markdown);
-  window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
+  if (!$('result').classList.contains('hidden')) {
+    window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
+  }
   loadHistory();
+  syncOutput();
 }
 
 async function goTrip() {
@@ -266,6 +282,7 @@ async function goTrip() {
   $('tripBtn').disabled = true;
   $('cancelBtn').disabled = false;
   $('result').classList.add('hidden');
+  outputTab = currentTab;
   $('progress').classList.remove('hidden');
   $('stage').className = 'stage';
   $('stage').innerHTML = '<span class="spin"></span>准备中…';
@@ -308,7 +325,7 @@ function renderHeat(r) {
   $('dlHtml').classList.add('hidden');
   $('stats').innerHTML = `<span>城市 <b>${r.city}</b></span>` +
     (r.ranking.length ? `<span>景点 <b>${r.ranking.length}</b> 个</span>` : '');
-  if (!r.ranking.length) { $('report').innerHTML = `<p>${r.hint || '暂无数据'}</p>`; return; }
+  if (!r.ranking.length) { $('report').innerHTML = `<p>${r.hint || '暂无数据'}</p>`; syncOutput(); return; }
   $('report').innerHTML = '<table class="heat-tbl">' +
     '<tr><th>#</th><th>景点</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>更新时间</th></tr>' +
     r.ranking.map((h, i) =>
@@ -316,11 +333,13 @@ function renderHeat(r) {
       `<td>${h.score.toFixed(2)}</td><td>${Math.round(h.fresh7 * 100)}%</td>` +
       `<td>${h.likes}</td><td>${h.videos}</td><td>${(h.updated_at || '').replace('T', ' ')}</td></tr>`
     ).join('') + '</table>';
+  syncOutput();
 }
 
 async function viewHeat() {
   const city = $('heatCity').value.trim();
   if (!city) { $('heatCity').focus(); return; }
+  outputTab = currentTab;  // 主动查询的榜单归属当前页签
   try {
     const r = await (await fetch('/api/heat/' + encodeURIComponent(city))).json();
     renderHeat(r);
@@ -333,6 +352,7 @@ async function goHeatRefresh() {
   $('heatBtn').disabled = true;
   $('cancelBtn').disabled = false;
   $('result').classList.add('hidden');
+  outputTab = currentTab;
   $('progress').classList.remove('hidden');
   $('stage').className = 'stage';
   $('stage').innerHTML = '<span class="spin"></span>准备中…';
@@ -385,6 +405,7 @@ async function viewReport(name) {
   const resp = await fetch('/api/reports/download?name=' + name);
   if (!resp.ok) { alert('报告文件不存在或已被删除'); return; }
   const md = await resp.text();
+  outputTab = currentTab;  // 从历史点开的内容归属当前页签
   $('result').classList.remove('hidden');
   $('dl').href = '/api/reports/download?name=' + encodeURIComponent(decodeURIComponent(name));
   $('stats').innerHTML = `<span>文件：${decodeURIComponent(name)}</span>`;
