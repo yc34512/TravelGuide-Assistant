@@ -20,7 +20,7 @@ for _d in (DATA_DIR, RAW_DIR, REPORT_DIR, DEBUG_DIR):
 REQUEST_DELAY_MIN = float(os.getenv("REQUEST_DELAY_MIN", "2.5"))
 REQUEST_DELAY_MAX = float(os.getenv("REQUEST_DELAY_MAX", "5.0"))
 MAX_VIDEOS_PER_RUN = int(os.getenv("MAX_VIDEOS_PER_RUN", "10"))
-MAX_COMMENTS_PER_VIDEO = int(os.getenv("MAX_COMMENTS_PER_VIDEO", "50"))
+MAX_COMMENTS_PER_VIDEO = int(os.getenv("MAX_COMMENTS_PER_VIDEO", "100"))
 MAX_SEARCH_SCROLLS = int(os.getenv("MAX_SEARCH_SCROLLS", "8"))
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 
