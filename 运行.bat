@@ -1,6 +1,10 @@
 @echo off
 cd /d "%~dp0"
-rem 自动探测 Python：PATH 优先，其次 py 启动器；找不到时提示安装
+rem 优先使用 install.bat 创建的虚拟环境，其次 PATH 与 py 启动器
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" run_cli.py %*
+    goto :end
+)
 where python >nul 2>nul
 if %errorlevel%==0 (
     python run_cli.py %*
@@ -11,6 +15,6 @@ if %errorlevel%==0 (
     py run_cli.py %*
     goto :end
 )
-echo [X] 未找到 Python：请先安装 Python 3.10+（安装时勾选 Add to PATH）
+echo [X] Python not found: run install.bat first, or install Python 3.10+ (check Add to PATH)
 :end
 pause

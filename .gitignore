@@ -3,5 +3,6 @@ data/
 browser_profile/
 __pycache__/
 *.pyc
+.venv/
 .idea/
 .vscode/
