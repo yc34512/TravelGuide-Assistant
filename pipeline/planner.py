@@ -9,6 +9,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from config import LLM_WEB_SEARCH
 from core.llm import chat_json
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -43,7 +44,8 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
 2. 顺路优先：同一天安排通行时间数据中相距近的景点（同区域聚类，避免来回折返）；每天从酒店出发，晚上回酒店附近；
 3. 尊重景点的 best_time_slot，尽量把景点排在它最佳的时段；
 4. 景点档案中的 avoid 与 tips 必须完整写进该景点的 notes，不得省略；
-5. 给出了通行时间数据的路段，transport 必须引用真实数据（如"公交约40分钟"）；没给出的写"建议查地图"；
+5. transport 必须具体：给出了交通方案数据的路段，直接引用其中的线路/时长/费用（保留"约""估算"字样）；
+   未给出的路段按距离给出大致方案（如"打车约X元/约X分钟，具体以地图App为准"），禁止只写"建议查地图"；
 6. 每天的午餐与晚餐各从给定餐厅候选中选一家推荐，写进当天对应时段的 food 字段
    （午餐→下午时段，晚餐→晚上时段），格式："店名：推荐菜（人均X元）"；
    同一家餐厅全程最多推荐一次；没给餐厅候选或当天时段没排点位时写空字符串；
@@ -57,6 +59,14 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
 13. 输出严格 JSON：{"summary_note": "...", "days": [{"day": 1, "slots": [{"slot": "上午|下午|晚上", "spot": "景点名",
    "duration": "约X小时", "transport": "从上一地点至此的方式与耗时", "cost": 数字,
    "reasons": "...", "notes": "...", "food": "", "pitfall_quotes": ["评论原文"]}]}]}"""
+
+TRANSPORT_SYSTEM = """你是本地交通向导。给定城市、住宿位置与景点清单，为各段路线给出具体交通建议。
+规则：
+1. 覆盖：住宿到每个景点各一条；景点之间挑地理位置邻近或常被同天游览的组合给出（总数不超过给定上限）；
+2. 每条建议包含：公交/地铁（线路名+约几分钟+约几元；不确定具体线路时写"公交/地铁约X分钟，线路以地图App为准"）
+   与打车（约X元/约X分钟，按当地里程估算）；1.5公里内的写步行约X分钟；
+3. 所有数字前必须带"约"，是估算不是实测；禁止编造精确票价；
+4. 输出严格 JSON：{"routes": [{"from": "起点名", "to": "终点名", "advice": "..."}]}"""
 
 DIGEST_SYSTEM = """你是评价分析专家。给定某景点的编号信息要点（含立场标注与部分评论原文引用），
 压缩成一份"真实评价摘要"，供游客出发前一分钟读完。
@@ -216,6 +226,34 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
     return {"days": out_days, "summary_note": str(data.get("summary_note") or "").strip()}
 
 
+def transport_hints(city: str, hotel: str, spots: list[str], max_routes: int = 15) -> list[str]:
+    """无高德 Key 时的降级：LLM 按城市常识生成具体交通估算（一次调用，联网能力随配置生效）。
+
+    返回 ["起点->终点: 建议（估算）"] 供规划提示词引用；失败返回空列表（不阻断行程）。
+    """
+    names = [s for s in spots if s][:8]
+    if not names:
+        return []
+    user = (f"城市：{city}\n住宿位置：{hotel or '未指定（按市中心算）'}\n"
+            f"景点清单：{'、'.join(names)}\n路线条数上限：{max_routes}")
+    try:
+        data = chat_json(TRANSPORT_SYSTEM, user, web_search=LLM_WEB_SEARCH)
+    except Exception:
+        return []
+    out: list[str] = []
+    for r in data.get("routes") or []:
+        if not isinstance(r, dict):
+            continue
+        a = str(r.get("from") or "").strip()
+        b = str(r.get("to") or "").strip()
+        adv = str(r.get("advice") or "").strip()
+        if a and b and adv:
+            out.append(f"{a}->{b}: {adv}（估算，以地图App为准）")
+        if len(out) >= max_routes:
+            break
+    return out
+
+
 def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
                    travel_lines: list[str], preferences: str,
                    budget: float | None = None, preference_mode: str = "均衡",
@@ -242,7 +280,8 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         + budget_line
         + f"用户偏好：{preferences or '无'}\n\n"
         f"景点档案：\n" + "\n".join(profile_lines) + "\n\n"
-        f"通行时间数据（高德实测）：\n" + ("\n".join(travel_lines) if travel_lines else "（无，请按区域常识排线）")
+        + f"交通方案数据（实测或估算，transport 优先引用）：\n"
+        + ("\n".join(travel_lines) if travel_lines else "（无，按距离给出大致方案并标注'以地图App为准'）")
     )
     if foods:
         food_lines = []
@@ -370,7 +409,7 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
         f"> 住宿：{hotel or '未指定'}",
         f"> 数据来源：{len(profiles)} 个景点" + (f" + {len(foods)} 家餐厅" if foods else "")
         + f"的抖音实地调研 · 共 {total_slots} 个行程点",
-        f"> 路线依据：{'高德地图实测通行时间' if geo_on else 'LLM 区域推断（未配置高德 Key，顺路精度有限）'}",
+        f"> 路线依据：{'高德地图实测（公交线路/票价/打车费用）' if geo_on else 'LLM 交通估算（未配置高德 Key，线路与费用为估算，出发前以地图 App 为准）'}",
         "",
     ]
     # 行程概览卡：总天数/总预算与日均/亮点与避坑数量，一眼看全貌

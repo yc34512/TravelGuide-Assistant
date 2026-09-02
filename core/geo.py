@@ -16,6 +16,7 @@ _BASE = "https://restapi.amap.com/v3"
 # 进程内缓存（任务级生命周期足够，无需持久化）
 _geo_cache: dict[tuple[str, str], dict | None] = {}
 _time_cache: dict[tuple[str, str], tuple[int, str] | None] = {}
+_route_cache: dict[tuple[str, str], str | None] = {}
 
 
 def available() -> bool:
@@ -166,3 +167,95 @@ def travel_time(origin_loc: str, dest_loc: str, city: str = "") -> tuple[int, st
         result = None
     _time_cache[key] = result
     return result
+
+
+def _transit_legs(transit: dict) -> str:
+    """把一条公交换乘方案的 segments 拼成'线路名(上车站→下车站, N站)'描述。"""
+    legs = []
+    for seg in transit.get("segments") or []:
+        bus = seg.get("bus") or {}
+        for line in (bus.get("buslines") or [])[:1]:
+            name = (line.get("name") or "").split("(")[0].strip()
+            dep = (line.get("departure_stop") or {}).get("name") or ""
+            arr = (line.get("arrival_stop") or {}).get("name") or ""
+            stops = line.get("via_num_stops") or ""
+            if name:
+                legs.append(f"{name}({dep}→{arr}, {stops}站)" if dep and arr else name)
+    return " 换乘 ".join(legs)
+
+
+def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
+    """两点具体交通方案：公交/地铁线路+站数+票价+时长，并列打车费用与时长。
+
+    返回如 "公交约42分钟·2元：603路(鼓楼站→云冈石窟站, 12站)，含步行约800米；打车约30分钟·约35元"；
+    1.5 公里内给步行方案（不附打车）；无 Key / 全部查询失败返回 None（调用方降级）。
+    """
+    if not available():
+        return None
+    key = (origin_loc, dest_loc)
+    if key in _route_cache:
+        return _route_cache[key]
+    parts: list[str] = []
+    d = distance_km(origin_loc, dest_loc)
+    walk_range = d is not None and d < 1.5
+    try:
+        if walk_range:
+            r = httpx.get(
+                f"{_BASE}/direction/walking",
+                params={"key": AMAP_API_KEY, "origin": origin_loc, "destination": dest_loc},
+                timeout=10,
+            )
+            data = r.json()
+            paths = (data.get("route") or {}).get("paths") or []
+            if data.get("status") == "1" and paths:
+                mins = max(1, round(int(paths[0]["duration"]) / 60))
+                dist = round(int(paths[0].get("distance") or 0))
+                parts.append(f"步行约{mins}分钟（约{dist}米）")
+        else:
+            r = httpx.get(
+                f"{_BASE}/direction/transit/integrated",
+                params={"key": AMAP_API_KEY, "origin": origin_loc, "destination": dest_loc,
+                        "city": city or "全国", "cityd": city or "全国"},
+                timeout=10,
+            )
+            data = r.json()
+            transits = (data.get("route") or {}).get("transits") or []
+            if data.get("status") == "1" and transits:
+                t = transits[0]
+                mins = max(1, round(int(t.get("duration") or 0) / 60))
+                head = f"公交约{mins}分钟"
+                cost = str(t.get("cost") or "").strip()
+                if cost:
+                    head += f"·{cost}元"
+                legs = _transit_legs(t)
+                if legs:
+                    head += f"：{legs}"
+                walk = str(t.get("walking_distance") or "").strip()
+                if walk:
+                    head += f"，含步行约{walk}米"
+                parts.append(head)
+        # 打车估算（driving 路线含 taxi_cost）：步行圈外与公交并列给出，用户二选一
+        if not walk_range:
+            r = httpx.get(
+                f"{_BASE}/direction/driving",
+                params={"key": AMAP_API_KEY, "origin": origin_loc,
+                        "destination": dest_loc, "extensions": "base"},
+                timeout=10,
+            )
+            data = r.json()
+            paths = (data.get("route") or {}).get("paths") or []
+            if data.get("status") == "1" and paths:
+                mins = max(1, round(int(paths[0].get("duration") or 0) / 60))
+                txt = f"打车约{mins}分钟"
+                try:
+                    taxi = float((data.get("route") or {}).get("taxi_cost") or 0)
+                    if taxi > 0:
+                        txt += f"·约{round(taxi)}元"
+                except (TypeError, ValueError):
+                    pass
+                parts.append(txt)
+    except Exception:
+        parts = []
+    out = "；".join(parts) or None
+    _route_cache[key] = out
+    return out

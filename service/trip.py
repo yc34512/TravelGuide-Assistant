@@ -33,6 +33,7 @@ from pipeline.planner import (
     plan_itinerary,
     render_trip,
     render_trip_html,
+    transport_hints,
 )
 from service.research import (
     JOBS,
@@ -292,7 +293,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if _cancelled():
             raise Cancelled()
 
-        # 4) 通行矩阵：高德真实耗时；无 Key 降级（功能可用，顺路精度弱）
+        # 4) 交通方案：高德 Key 在时给具体线路（公交/地铁站数+票价+打车费用）；
+        #    无 Key 降级为 LLM 交通估算（标注"以地图App为准"），两者都失败才纯区域排线
         job["stage"] = "计算路线"
         travel_lines: list[str] = []
         locs: dict[str, str] = {}
@@ -309,22 +311,30 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                     locs[s] = g["location"]
                 else:
                     log(f"景点\"{s}\"未能在地图定位，相关路段将缺通行数据")
+
+            def _leg(a: str, b: str) -> None:
+                adv = geo.route_advice(locs[a], locs[b], city)
+                if adv:
+                    travel_lines.append(f"{a}->{b}: {adv}")
+
             if "酒店" in locs:
                 for s in spot_points:
                     if s in locs:
-                        tt = geo.travel_time(locs["酒店"], locs[s], city)
-                        if tt:
-                            travel_lines.append(f"酒店->{s}: {tt[1]}约{tt[0]}分钟")
+                        _leg("酒店", s)
             names = [s for s in spot_points if s in locs]
             for a in names:
                 for b in names:
                     if a != b:
-                        tt = geo.travel_time(locs[a], locs[b], city)
-                        if tt:
-                            travel_lines.append(f"{a}->{b}: {tt[1]}约{tt[0]}分钟")
-            log(f"高德通行矩阵：{len(travel_lines)} 条路段")
-        else:
-            log("未配置高德 Key（AMAP_API_KEY）：降级为纯 LLM 按区域排线")
+                        _leg(a, b)
+            log(f"高德交通方案：{len(travel_lines)} 条路段（含公交线路/站数/票价/打车估算）")
+            if not travel_lines:
+                log("高德路线查询均失败，回退 LLM 交通估算")
+        if not travel_lines:
+            travel_lines = transport_hints(city, hotel, list(spot_points.keys()))
+            if travel_lines:
+                log(f"LLM 交通估算：{len(travel_lines)} 条路段（均标注'估算，以地图App为准'）")
+            else:
+                log("LLM 交通估算也失败：降级为纯区域排线，transport 由规划模型给大致方案")
         if _cancelled():
             raise Cancelled()
 

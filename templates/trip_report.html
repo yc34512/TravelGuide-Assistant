@@ -100,7 +100,7 @@
       <span>生成于 {{ generated }}</span>
       <span>住宿：{{ hotel or '未指定' }}</span>
       <span>{{ profiles|length }} 个景点{% if foods %} + {{ foods|length }} 家餐厅{% endif %}实地调研 · {{ total_slots }} 个行程点</span>
-      <span>{{ '路线依据：高德实测通行时间' if geo_on else '路线依据：区域推断（未配置地图）' }}</span>
+      <span>{{ '路线依据：高德实测（公交线路/票价/打车费用）' if geo_on else '路线依据：LLM 交通估算（未配置地图 Key，出发前以地图 App 为准）' }}</span>
     </div>
   </header>
 
