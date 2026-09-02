@@ -23,6 +23,7 @@ from pipeline.candidates import (
 )
 from pipeline.extract import extract_points
 from pipeline.heat import heat_index, pitfall_digest
+from pipeline.verify import annotate_confidence
 from pipeline.planner import (
     build_budget_summary,
     build_review_digest,
@@ -151,6 +152,10 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                                     pass
                     pos = sum(1 for p in pts if p.get("stance") == "推荐")
                     neg = sum(1 for p in pts if p.get("stance") == "避雷")
+                    # 置信度标注：同景点组内交叉验证 + 营销号来源降级（后续档案/避坑复用同一批要点）
+                    if pts:
+                        mkt_src = {it.url for it in items if is_marketing(it.description)}
+                        pts = annotate_confidence(pts, marketing_sources=mkt_src)
                     vstats[name] = {
                         "videos": len(items), "marketing_hits": mkt,
                         "positive": pos, "negative": neg,
@@ -238,6 +243,9 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 if not pts:
                     log(f"[{label}{i}/{len(names)}] {name}：未提取到要点，跳过")
                     continue
+                # 置信度标注：景点/餐厅组内交叉验证，营销号来源降为低置信度
+                mkt_src = {it.url for it in items if is_marketing(it.description)}
+                pts = annotate_confidence(pts, marketing_sources=mkt_src)
                 points[name] = pts
                 sources[name] = [it.url for it in items]
                 items_by[name] = items

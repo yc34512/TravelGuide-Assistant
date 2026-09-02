@@ -372,13 +372,17 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
                 keyword, raw_path, len(items), sum(len(i.comments) for i in items)
             )
 
-        # 3) 交叉验证
+        # 3) 交叉验证（含量化置信度：高/中/低 + 独立来源数，营销号来源降级）
         job["stage"] = "交叉验证"
+        from pipeline.candidates import is_marketing
         from pipeline.verify import annotate_confidence
 
-        all_points = annotate_confidence(all_points)
+        mkt_src = {it.url for it in items if is_marketing(it.description)}
+        all_points = annotate_confidence(all_points, marketing_sources=mkt_src)
         dist = Counter(p["confidence"] for p in all_points)
-        log("置信度分布：" + "、".join(f"{k} {v}" for k, v in dist.items()))
+        lvl = Counter(p.get("conf_level") for p in all_points if p.get("conf_level"))
+        log("置信度分布：" + "、".join(f"{k} {v}" for k, v in dist.items())
+            + ("｜等级：" + "、".join(f"{k} {v}" for k, v in lvl.items()) if lvl else ""))
 
         # 4) 报告
         job["stage"] = "生成报告"

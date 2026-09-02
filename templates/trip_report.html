@@ -46,6 +46,9 @@
   .pit-card .claim { font-weight: 700; color: #922b21; }
   .pit-card .conf { display: inline-block; font-size: 11px; color: var(--amber); background: #fef5e7;
                     border: 1px solid #f8d9a8; border-radius: 10px; padding: 0 8px; margin-left: 8px; }
+  .pit-card .conf.c-high { color: #1e8449; background: #eafaf1; border-color: #a9dfbf; }
+  .pit-card .conf.c-mid { color: var(--amber); background: #fef5e7; border-color: #f8d9a8; }
+  .pit-card .conf.c-low { color: #707b7c; background: #f2f3f4; border-color: #d5d8dc; }
   .pit-card blockquote { margin: 8px 0 0; padding: 6px 12px; background: #fff; border-radius: 8px;
                          border-left: 3px solid #e6b0aa; color: #7b241c; font-size: 13px; }
   .pit-card .src-btn { display: inline-block; margin-top: 8px; font-size: 12px; color: #fff; background: var(--red);
@@ -171,10 +174,10 @@
 
   {% if pitfall %}
   <section>
-    <h2>避坑专题（附评论原文）</h2>
+    <h2>避坑专题（附评论原文 · 高置信度排前）</h2>
     {% for row in pitfall %}
     <div class="pit-card">
-      <span class="claim">{{ loop.index }}. {{ row.claim }}</span><span class="conf">{{ row.confidence }}</span>
+      <span class="claim">{{ loop.index }}. {{ row.claim }}</span><span class="conf {{ {'高置信度': 'c-high', '中置信度': 'c-mid'}.get(row.conf_level, 'c-low') }}">{{ row.conf_level or row.confidence }}{% if row.n_sources and row.n_sources > 1 %} · {{ row.n_sources }}来源{% endif %}</span>
       {% if row.quote %}<blockquote>“{{ row.quote }}”</blockquote>{% endif %}
       {% if row.source %}<a class="src-btn" href="{{ row.source }}" target="_blank" rel="noopener">📺 查看来源视频</a>{% endif %}
     </div>

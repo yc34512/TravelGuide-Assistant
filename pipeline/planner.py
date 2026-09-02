@@ -146,10 +146,19 @@ def empty_profile() -> dict:
     }
 
 
+def _conf_badge(p: dict) -> str:
+    """量化置信度徽章：高/中/低置信度 + 独立来源数（未标注时回退语义标签）。"""
+    level = p.get("conf_level")
+    if not level:
+        return p.get("confidence", "单源")
+    n = p.get("n_sources") or 1
+    return f"{level}·{n}来源" if n > 1 else level
+
+
 def build_spot_profile(spot: str, points: list[dict]) -> dict:
     """从某景点的全部要点蒸馏结构化档案（单次 LLM 调用）。"""
     numbered = "\n".join(
-        f"[{i + 1}] ({p.get('topic', '其他')}|{p.get('confidence', '单源')}|{p.get('stance', '中性')}) {p['claim']}"
+        f"[{i + 1}] ({p.get('topic', '其他')}|{_conf_badge(p)}|{p.get('stance', '中性')}) {p['claim']}"
         for i, p in enumerate(points)
     )
     data = chat_json(PROFILE_SYSTEM, f"景点：{spot}\n信息要点：\n{numbered or '(无)'}")
@@ -180,7 +189,7 @@ def build_review_digest(spot: str, points: list[dict]) -> dict:
     返回 {"verdict", "positive", "negative", "quotes"}；调用方失败时降级为空摘要。"""
     quote_pool = [p["quote"] for p in points if p.get("quote")]
     numbered = "\n".join(
-        f"[{i + 1}] ({p.get('stance', '中性')}) {p['claim']}"
+        f"[{i + 1}] ({p.get('stance', '中性')}|{_conf_badge(p)}) {p['claim']}"
         + (f"（评论原文：{p['quote']}）" if p.get("quote") else "")
         for i, p in enumerate(points)
     )
@@ -428,9 +437,9 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
     if plan.get("summary_note"):
         lines += [f"- 规划说明：{plan['summary_note']}", ""]
     if pitfall:
-        lines += ["## 避坑专题（附评论原文）", ""]
+        lines += ["## 避坑专题（附评论原文 · 高置信度排前）", ""]
         for i, row in enumerate(pitfall, 1):
-            lines.append(f"{i}. **{row['claim']}**（{row['confidence']}）")
+            lines.append(f"{i}. **{row['claim']}**（{_conf_badge(row)}）")
             if row["quote"]:
                 lines.append(f"   > 评论原文：\"{row['quote']}\"")
             if row["source"]:

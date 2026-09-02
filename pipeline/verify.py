@@ -1,16 +1,24 @@
-"""多源交叉验证：对提取要点做语义聚类，标注置信度。
+"""多源交叉验证：对提取要点做语义聚类，标注置信度（标签 + 量化评分）。
 
-置信度三级：
-- 多源一致：≥2 个独立来源（不同视频）说同一件事，可信度最高；
-- 存分歧：来源互相矛盾（如票价说法不一）或立场对立（一说推荐一说避雷），
-  报告中必须并列呈现；
+语义标签三级（报告展示用，兼容旧版）：
+- 多源一致：≥2 个独立来源（不同视频）说同一件事；
+- 存分歧：来源互相矛盾（如票价说法不一）或立场对立，报告中必须并列呈现；
 - 单源：仅一个来源，报告中用"有博主提到"等谨慎语气。
+
+量化置信度三级（conf_level/conf_score/n_sources，营销号来源降级）：
+- 高置信度 0.9：≥3 个独立来源且无矛盾；
+- 中置信度 0.6：2 个独立来源，或有轻微矛盾（存分歧但多源）；
+- 低置信度 0.3：单源，或来源疑似营销号。
+独立来源数按"非营销号视频"计（同组内营销号来源不计入印证）。
 
 验证本身用 LLM 调用做语义等价聚类；要点数超过 BATCH_THRESHOLD 时按批次聚类再合并，
 避免单次大输入漏分组；任何解析异常都回退为"全部单源"，宁可保守也不阻断主流程。
 """
 from config import VERIFY_ENABLE_THINKING
 from core.llm import chat_json
+
+# 量化置信度分值（避坑排序/展示用，集中在此便于调参）
+CONF_HIGH, CONF_MID, CONF_LOW = 0.9, 0.6, 0.3
 
 # 超过该数量的要点分批聚类：大输入下单次调用容易漏分组，分批后各批编号短小、判断更稳。
 BATCH_THRESHOLD = 40
@@ -65,10 +73,14 @@ def _stance_conflicts(points: list[dict], groups: list[list[int]]) -> list[tuple
     return pairs
 
 
-def annotate_confidence(points: list[dict]) -> list[dict]:
+def annotate_confidence(points: list[dict],
+                        marketing_sources: set[str] | None = None) -> list[dict]:
+    """语义聚类 + 置信度标注。marketing_sources 为疑似营销号的视频 URL 集合：
+    这些来源不计入独立印证数，且自身要点直接降为低置信度。"""
     n = len(points)
     if n == 0:
         return points
+    mkt = marketing_sources or set()
 
     try:
         if n <= BATCH_THRESHOLD:
@@ -117,12 +129,27 @@ def annotate_confidence(points: list[dict]) -> list[dict]:
     out = []
     for i, p in enumerate(points, 1):
         q = dict(p)
-        if i in conflict_ids:
+        sources = group_sources[group_of[i]]
+        eff = {s for s in sources if s and s not in mkt}  # 有效独立来源：剔除营销号
+        conflicted = i in conflict_ids
+        if conflicted:
             q["confidence"] = "存分歧"
-        elif len(group_sources[group_of[i]]) >= 2:
+        elif len(sources) >= 2:
             q["confidence"] = "多源一致"
         else:
             q["confidence"] = "单源"
+        # 量化置信度：高=≥3 独立来源无矛盾；中=2 来源或轻微矛盾；低=单源/营销号来源
+        if p.get("source") in mkt and p.get("source"):
+            level, score = "低置信度", CONF_LOW  # 来源疑似营销号：无论多少印证都降级
+        elif len(eff) >= 3 and not conflicted:
+            level, score = "高置信度", CONF_HIGH
+        elif len(eff) >= 2:
+            level, score = "中置信度", CONF_MID
+        else:
+            level, score = "低置信度", CONF_LOW
+        q["conf_level"] = level
+        q["conf_score"] = score
+        q["n_sources"] = len(eff)
         out.append(q)
     return out
 

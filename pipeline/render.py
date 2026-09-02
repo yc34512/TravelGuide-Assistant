@@ -8,6 +8,15 @@ DISCLAIMER = """> ℹ️ 本报告由 AI 汇总抖音公开视频与评论区信
 > 如内容涉及侵权或需删除，可按来源清单中的视频 ID 定位并下架。"""
 
 
+def _conf_badge(p: dict) -> str:
+    """置信度徽章：高/中/低置信度 + 独立来源数（未量化时回退旧三级标签）。"""
+    level = p.get("conf_level")
+    if not level:
+        return p.get("confidence", "单源")
+    n = p.get("n_sources") or 1
+    return f"{level}·{n}来源" if n > 1 else level
+
+
 def _quick_glance(points: list[dict]) -> str:
     """结构化速览：由代码直接从要点聚合（不依赖 LLM，永不缺席）。
     三栏：值得做（推荐且无分歧）/ 别踩坑（避雷且无分歧）/ 有争议（存分歧）。"""
@@ -39,7 +48,7 @@ def render_report(keyword: str, body_md: str, items: list[VideoItem], points: li
         stance_dist[p.get("stance", "中性")] = stance_dist.get(p.get("stance", "中性"), 0) + 1
 
     point_lines = "\n".join(
-        f"{i + 1}. ({p['topic']} · {p.get('confidence', '单源')} · {p.get('stance', '中性')}"
+        f"{i + 1}. ({p['topic']} · {_conf_badge(p)} · {p.get('stance', '中性')}"
         f"{' · ⚠️时效敏感' if p['time_sensitive'] else ''}) {p['claim']} —— 来源：{p['source']}"
         for i, p in enumerate(points)
     )

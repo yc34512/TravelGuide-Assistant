@@ -5,11 +5,14 @@
 - 评论密度：评论数 / 视频数（讨论活跃度的代理指标）；
 - 新鲜度：近 90 天发布视频的占比（"最近突然火了"的信号）。
 
-避坑专题：避雷立场要点汇总，每条附评论原文引用 + 来源 + 置信度，多源一致排前。
+避坑专题：避雷立场要点汇总，每条附评论原文引用 + 来源 + 置信度，
+按量化置信度评分降序（高置信度排前，同分再按语义标签排）。
 两个函数都是纯函数，独立可测。
 """
 import math
 from datetime import datetime, timedelta
+
+from pipeline.verify import CONF_LOW, CONF_MID
 
 FRESH_DAYS = 90
 DIGEST_MAX = 12  # 避坑专题条数上限，多了没人看
@@ -68,19 +71,29 @@ def heat_index(items: list, now: datetime | None = None) -> dict:
 
 
 def pitfall_digest(all_points: list[dict]) -> list[dict]:
-    """避坑专题：汇总避雷要点，多源一致排前，每条带评论原文引用（可为空）。"""
+    """避坑专题：汇总避雷要点，高置信度排前，每条带评论原文引用（可为空）。
+
+    排序键：量化置信度评分降序（未标注时按语义标签回退映射），同分再按
+    多源一致 > 存分歧 > 单源。行内携带 conf_level/conf_score/n_sources 供渲染展示。"""
     order = {"多源一致": 0, "存分歧": 1, "单源": 2}
-    rows = [
-        {
+    fallback = {"多源一致": CONF_MID, "存分歧": CONF_MID}  # 旧数据无评分时按标签回退
+    rows = []
+    for p in all_points:
+        if p.get("stance") != "避雷":
+            continue
+        score = p.get("conf_score")
+        if score is None:
+            score = fallback.get(p.get("confidence", "单源"), CONF_LOW)
+        rows.append({
             "claim": p["claim"],
             "quote": p.get("quote") or "",
             "source": p.get("source", ""),
             "confidence": p.get("confidence", "单源"),
-        }
-        for p in all_points
-        if p.get("stance") == "避雷"
-    ]
-    rows.sort(key=lambda r: order.get(r["confidence"], 3))
+            "conf_level": p.get("conf_level", ""),
+            "conf_score": score,
+            "n_sources": p.get("n_sources", 1),
+        })
+    rows.sort(key=lambda r: (-r["conf_score"], order.get(r["confidence"], 3)))
     return rows[:DIGEST_MAX]
 
 
