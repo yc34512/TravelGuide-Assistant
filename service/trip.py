@@ -378,7 +378,9 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         md = render_trip(city, days, hotel, plan, profiles, spot_sources, geo.available(),
                          budget_summary=budget_summary, pitfall=pitfall, heat=heat_rows,
                          digests=digests, foods=food_profiles or None,
-                         food_sources=food_sources or None)
+                         food_sources=food_sources or None,
+                         preferences=preferences, preference_mode=preference_mode,
+                         user_spots=user_spots)
         report_path = REPORT_DIR / f"行程_{city}_{ts:%Y%m%d_%H%M%S}.md"
         report_path.write_text(md, encoding="utf-8")
         # 行程报告无采集档案，单独登记进报告表，网页历史列表才不会遗漏
@@ -393,7 +395,9 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 render_trip_html(city, days, hotel, plan, profiles, spot_sources,
                                  geo.available(), locs=locs, budget_summary=budget_summary,
                                  pitfall=pitfall, heat=heat_rows, digests=digests,
-                                 foods=food_profiles or None, food_sources=food_sources or None),
+                                 foods=food_profiles or None, food_sources=food_sources or None,
+                                 preferences=preferences, preference_mode=preference_mode,
+                                 user_spots=user_spots),
                 encoding="utf-8",
             )
             log(f"行程已保存：{report_path.name}（含 HTML 可视化版 {html_path.name}）")

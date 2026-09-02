@@ -17,6 +17,11 @@
   header h1 { font-size: 24px; margin-bottom: 10px; }
   .meta { display: flex; flex-wrap: wrap; gap: 8px; }
   .meta span { background: rgba(255,255,255,.18); border-radius: 20px; padding: 3px 12px; font-size: 13px; }
+  /* 输入参数回显条：让用户确认报告是按他的需求生成的 */
+  .echo-bar { margin-top: 12px; font-size: 13px; background: rgba(255,255,255,.14);
+              border-radius: 10px; padding: 8px 12px; }
+  .echo-bar b { color: #ffe9a8; }
+  .echo-tip { display: block; margin-top: 3px; font-size: 12px; opacity: .75; }
   section { background: #fff; border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
   h2 { font-size: 18px; color: var(--green); margin-bottom: 14px; border-left: 4px solid var(--green); padding-left: 10px; }
   .day-title { font-size: 16px; font-weight: 600; margin: 18px 0 10px; color: var(--ink); }
@@ -104,6 +109,14 @@
       <span>住宿：{{ hotel or '未指定' }}</span>
       <span>{{ profiles|length }} 个景点{% if foods %} + {{ foods|length }} 家餐厅{% endif %}实地调研 · {{ total_slots }} 个行程点</span>
       <span>{{ '路线依据：高德实测（公交线路/票价/打车费用）' if geo_on else '路线依据：LLM 交通估算（未配置地图 Key，出发前以地图 App 为准）' }}</span>
+    </div>
+    <div class="echo-bar">📋 你的需求：目的地 <b>{{ city }}</b> · 天数 <b>{{ days }} 天</b>
+      {% if hotel %} · 住宿 <b>{{ hotel }}</b>{% endif %}
+      {% if budget_summary and budget_summary.total_budget %} · 预算 <b>{{ '%.0f'|format(budget_summary.total_budget) }} 元</b>{% endif %}
+      {% if preference_mode %} · 消费偏好 <b>{{ preference_mode }}</b>{% endif %}
+      {% if preferences %} · 特别偏好 <b>{{ preferences }}</b>{% endif %}
+      {% if user_spots %} · 指定景点 <b>{{ user_spots|join('、') }}</b>{% endif %}
+      <span class="echo-tip">如与预期不符，可在网页调整参数后重新生成</span>
     </div>
   </header>
 

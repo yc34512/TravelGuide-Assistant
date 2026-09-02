@@ -408,12 +408,28 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
                 budget_summary: dict | None = None, pitfall: list[dict] | None = None,
                 heat: list[dict] | None = None, digests: dict[str, dict] | None = None,
                 foods: dict[str, dict] | None = None,
-                food_sources: dict[str, list[str]] | None = None) -> str:
+                food_sources: dict[str, list[str]] | None = None,
+                preferences: str = "", preference_mode: str = "",
+                user_spots: list[str] | None = None) -> str:
     """把行程 JSON 渲染成 Markdown 路书（逐日卡片 + 预算 + 避坑专题 + 热度榜 + 景点详情 + 来源链接）。"""
     total_slots = sum(len(d["slots"]) for d in plan["days"])
+    # 输入参数回显：让用户确认报告是按他的需求生成的，也方便对照调整参数重新生成
+    echo = [f"目的地 **{city}**", f"天数 **{days} 天**"]
+    if hotel:
+        echo.append(f"住宿 **{hotel}**")
+    if budget_summary and budget_summary.get("total_budget"):
+        echo.append(f"预算 **{budget_summary['total_budget']:.0f} 元**")
+    if preference_mode:
+        echo.append(f"消费偏好 **{preference_mode}**")
+    if preferences:
+        echo.append(f"特别偏好 **{preferences}**")
+    if user_spots:
+        echo.append(f"指定景点 **{'、'.join(s.strip() for s in user_spots if s and s.strip())}**")
     lines = [
         f"# 《{city}》{days} 天行程规划",
         "",
+        f"> 你的需求：{' ｜ '.join(echo)}",
+        "> 如与预期不符，可在网页调整参数后重新生成",
         f"> 生成时间：{datetime.now():%Y-%m-%d %H:%M}",
         f"> 住宿：{hotel or '未指定'}",
         f"> 数据来源：{len(profiles)} 个景点" + (f" + {len(foods)} 家餐厅" if foods else "")
@@ -556,7 +572,9 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
                      pitfall: list[dict] | None = None, heat: list[dict] | None = None,
                      digests: dict[str, dict] | None = None,
                      foods: dict[str, dict] | None = None,
-                     food_sources: dict[str, list[str]] | None = None) -> str:
+                     food_sources: dict[str, list[str]] | None = None,
+                     preferences: str = "", preference_mode: str = "",
+                     user_spots: list[str] | None = None) -> str:
     """渲染 HTML 可视化路书（Jinja2 模板 + ECharts/Leaflet CDN，离线时模板内置文本版降级）。"""
     env = Environment(
         loader=FileSystemLoader(_TEMPLATE_DIR),
@@ -573,6 +591,8 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
     return tpl.render(
         city=city, days=days, hotel=hotel, plan=plan, profiles=profiles,
         spot_sources=spot_sources, geo_on=geo_on, markers=markers,
+        preferences=preferences, preference_mode=preference_mode,
+        user_spots=user_spots or [],
         budget_summary=budget_summary, pitfall=pitfall or [], heat=heat or [],
         digests=digests or {},
         foods=foods or {},
