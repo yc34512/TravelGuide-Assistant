@@ -137,7 +137,7 @@
   <div id="result" class="card hidden">
     <div class="row" style="justify-content: space-between; margin-bottom: 8px;">
       <div class="stats" id="stats" style="margin-bottom: 0;"></div>
-      <a id="dlHtml" class="mini-btn hidden" style="text-decoration: none;" href="#" target="_blank">打开 HTML 可视化</a>
+      <a id="dlHtml" class="mini-btn hidden" style="text-decoration:none; background:#1f7a5c; color:#fff; font-weight:600; padding:4px 14px;" href="#" target="_blank">📊 打开可视化路书（时间线·饼图·地图）</a>
       <a id="dl" class="mini-btn" style="text-decoration: none;" download>下载 Markdown</a>
     </div>
     <article id="report"></article>
@@ -405,6 +405,9 @@ async function loadHistory() {
     $('hist').innerHTML = reports.map(r =>
       `<li><span class="kw" onclick="viewReport('${encodeURIComponent(r.report_path)}')">${r.keyword}</span>` +
       `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
+      (r.report_path.endsWith('.md') && r.keyword.startsWith('行程')
+        ? `<a class="mini-btn" style="text-decoration:none; margin-right:6px;" target="_blank" href="/api/reports/download?name=${encodeURIComponent(r.report_path.replace(/\.md$/, '.html'))}">📊 可视化</a>`
+        : '') +
       `<a class="mini-btn" download href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">下载</a></li>`
     ).join('');
   } catch (e) { /* 历史加载失败不影响主流程 */ }

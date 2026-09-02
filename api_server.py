@@ -159,4 +159,7 @@ def download_report(name: str):
     if path.parent != REPORT_DIR.resolve() or path.suffix not in (".md", ".html") or not path.exists():
         raise HTTPException(status_code=404, detail="报告不存在")
     media = "text/html" if path.suffix == ".html" else "text/markdown"
-    return FileResponse(path, filename=path.name, media_type=media)
+    # HTML 可视化版内联打开（新标签页直接渲染）；Markdown 保持下载
+    disposition = "inline" if path.suffix == ".html" else "attachment"
+    return FileResponse(path, filename=path.name, media_type=media,
+                        content_disposition_type=disposition)

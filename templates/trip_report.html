@@ -38,11 +38,19 @@
   th, td { padding: 8px 10px; border-bottom: 1px solid #eef1f3; text-align: left; }
   th { background: #f4f8f6; color: var(--green); }
   .risk-high { color: var(--red); font-weight: 600; }
-  .digest-item { border-radius: 8px; background: #fdf3f2; border-left: 3px solid var(--red); padding: 10px 14px; margin-bottom: 10px; font-size: 14px; }
-  .digest-item .claim { font-weight: 600; }
-  .digest-item .conf { font-size: 12px; color: var(--muted); margin-left: 6px; }
-  .digest-item blockquote { margin: 6px 0 0; padding: 4px 10px; background: #fff; border-radius: 6px; color: #7b241c; font-size: 13px; }
-  .digest-item a { font-size: 12px; color: var(--muted); }
+  /* 避坑警示卡：红橙渐变 + 左侧粗边 + 图标，一眼识别风险 */
+  .pit-card { position: relative; background: linear-gradient(135deg, #fff7ef, #fdeeee); border: 1px solid #f2c4bd;
+              border-left: 5px solid var(--red); border-radius: 12px; padding: 13px 16px 12px 46px;
+              margin-bottom: 12px; font-size: 14px; box-shadow: 0 2px 8px rgba(192, 57, 43, .08); }
+  .pit-card::before { content: "⚠️"; position: absolute; left: 14px; top: 12px; font-size: 18px; }
+  .pit-card .claim { font-weight: 700; color: #922b21; }
+  .pit-card .conf { display: inline-block; font-size: 11px; color: var(--amber); background: #fef5e7;
+                    border: 1px solid #f8d9a8; border-radius: 10px; padding: 0 8px; margin-left: 8px; }
+  .pit-card blockquote { margin: 8px 0 0; padding: 6px 12px; background: #fff; border-radius: 8px;
+                         border-left: 3px solid #e6b0aa; color: #7b241c; font-size: 13px; }
+  .pit-card .src-btn { display: inline-block; margin-top: 8px; font-size: 12px; color: #fff; background: var(--red);
+                       border-radius: 12px; padding: 2px 12px; text-decoration: none; }
+  .pit-card .src-btn:hover { background: #922b21; }
   .card { border: 1px solid #e8ecee; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; font-size: 14px; }
   .card h3 { font-size: 15px; margin-bottom: 6px; }
   .card .src { font-size: 12px; }
@@ -57,6 +65,31 @@
   .ov-num { font-size: 18px; font-weight: 700; color: var(--green); }
   .ov-lab { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .day-subtotal { font-size: 13px; background: #f4f8f6; border-radius: 6px; padding: 6px 12px; margin-top: 8px; }
+  /* 每日行程可视化时间线：竖线 + 节点圆点 + 时段气泡，避坑节点变红 */
+  .timeline { position: relative; padding-left: 30px; margin-top: 4px; }
+  .timeline::before { content: ""; position: absolute; left: 9px; top: 10px; bottom: 10px; width: 3px;
+                      border-radius: 3px; background: linear-gradient(180deg, #2e9e77, #a9dfbf); }
+  .tl-item { position: relative; margin-bottom: 14px; }
+  .tl-item::before { content: ""; position: absolute; left: -28px; top: 16px; width: 11px; height: 11px;
+                     border-radius: 50%; background: #fff; border: 3px solid var(--green); box-shadow: 0 0 0 4px #eaf4f0; }
+  .tl-item.pitfall::before { border-color: var(--red); box-shadow: 0 0 0 4px #fdecea; }
+  .tl-item .slot { margin-bottom: 0; }
+  /* 热度榜进度条：热度分按榜首归一化，趋势四态配色 */
+  .heat-list { display: flex; flex-direction: column; gap: 12px; }
+  .heat-row { display: flex; align-items: center; gap: 10px; }
+  .heat-rank { flex: 0 0 26px; height: 26px; border-radius: 50%; background: #eaf4f0; color: var(--green);
+               font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .heat-row:first-child .heat-rank { background: #f9e79f; color: #7d6608; }
+  .heat-main { flex: 1; min-width: 0; }
+  .heat-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .heat-bar { height: 10px; background: #eef1f3; border-radius: 6px; overflow: hidden; }
+  .heat-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #58d68d, #1f7a5c); }
+  .heat-meta { flex: 0 0 auto; font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
+  .trend-tag { font-size: 11px; border-radius: 10px; padding: 1px 8px; margin-left: 6px; white-space: nowrap; }
+  .t-hot { background: #fdedec; color: #c0392b; border: 1px solid #f5b7b1; }
+  .t-ever { background: #fef9e7; color: #b7950b; border: 1px solid #f7dc6f; }
+  .t-cool { background: #ebf5fb; color: #2471a3; border: 1px solid #aed6f1; }
+  .t-flat { background: #f2f3f4; color: #7f8c8d; border: 1px solid #d5d8dc; }
 </style>
 </head>
 <body>
@@ -109,10 +142,12 @@
   <section>
     <h2>第 {{ d.day }} 天</h2>
     {% set outer_idx = loop.index0 %}
+    <div class="timeline">
     {% for s in d.slots %}
+    <div class="tl-item {{ 'pitfall' if s.pitfall_quotes else '' }}">
     <div class="slot {{ 'pitfall' if s.pitfall_quotes else '' }}">
       <div class="slot-head">
-        <span class="time">{{ s.slot }}</span>
+        <span class="time">{{ {'上午': '🌅 ', '下午': '☀️ ', '晚上': '🌙 '}.get(s.slot, '') }}{{ s.slot }}</span>
         <span class="name">{{ s.spot }}</span>
         {% if s.duration %}<span class="tag">{{ s.duration }}</span>{% endif %}
         {% if s.cost %}<span class="cost">约 {{ '%.0f'|format(s.cost) }} 元</span>{% endif %}
@@ -123,7 +158,9 @@
       {% for q in s.pitfall_quotes %}<div class="quote">“{{ q }}”</div>{% endfor %}
       {% if s.food %}<p>🍜 {{ s.food }}</p>{% endif %}
     </div>
+    </div>
     {% endfor %}
+    </div>
     {% if budget_summary and day_costs and outer_idx < day_costs|length %}
     {% set sc = day_costs[outer_idx] %}
     <div class="day-subtotal">💰 当日花费小计：<b>约 {{ '%.0f'|format(sc.total) }} 元</b>
@@ -136,10 +173,10 @@
   <section>
     <h2>避坑专题（附评论原文）</h2>
     {% for row in pitfall %}
-    <div class="digest-item">
+    <div class="pit-card">
       <span class="claim">{{ loop.index }}. {{ row.claim }}</span><span class="conf">{{ row.confidence }}</span>
       {% if row.quote %}<blockquote>“{{ row.quote }}”</blockquote>{% endif %}
-      {% if row.source %}<a href="{{ row.source }}" target="_blank" rel="noopener">查看来源视频 ↗</a>{% endif %}
+      {% if row.source %}<a class="src-btn" href="{{ row.source }}" target="_blank" rel="noopener">📺 查看来源视频</a>{% endif %}
     </div>
     {% endfor %}
   </section>
@@ -148,16 +185,21 @@
   {% if heat %}
   <section>
     <h2>热度榜（近 90 天抖音数据）</h2>
-    <table>
-      <tr><th>#</th><th>景点</th><th>热度指数</th><th>趋势</th><th>视频</th><th>点赞</th><th>评论</th></tr>
+    {% set top = heat|map(attribute='score')|max %}
+    <div class="heat-list">
       {% for h in heat %}
-      <tr>
-        <td>{{ loop.index }}</td><td>{{ h.spot }}</td><td>{{ '%.2f'|format(h.score) }}</td>
-        <td>{{ '🔥 ' + h.trend if h.trend == '近期热度上升' else h.trend }}</td>
-        <td>{{ h.videos }}</td><td>{{ h.likes }}</td><td>{{ h.comments }}</td>
-      </tr>
+      {% set tcls = {'本周最火': 't-hot', '长盛不衰': 't-ever', '正在降温': 't-cool', '近期热度上升': 't-hot'}.get(h.trend, 't-flat') %}
+      {% set ticon = {'本周最火': '🔥', '长盛不衰': '✨', '正在降温': '🔻', '近期热度上升': '🔥'}.get(h.trend, '➖') %}
+      <div class="heat-row">
+        <span class="heat-rank">{{ loop.index }}</span>
+        <div class="heat-main">
+          <div class="heat-name">{{ h.spot }}<span class="trend-tag {{ tcls }}">{{ ticon }} {{ h.trend }}</span></div>
+          <div class="heat-bar"><div class="heat-fill" style="width: {{ '%.0f'|format((h.score / top * 100) if top else 0) }}%;"></div></div>
+        </div>
+        <div class="heat-meta">热度 {{ '%.2f'|format(h.score) }}<br>视频 {{ h.videos }} · 赞 {{ h.likes }} · 评 {{ h.comments }}</div>
+      </div>
       {% endfor %}
-    </table>
+    </div>
   </section>
   {% endif %}
 
