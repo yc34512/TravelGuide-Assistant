@@ -346,7 +346,7 @@ class TestPlanner(unittest.TestCase):
         self.assertEqual(plan["days"][1]["slots"][0]["spot"], "善化寺")
 
     def test_render_trip(self):
-        """路书渲染：逐日卡片 + 景点详情卡 + 溯源链接都在。"""
+        """路书渲染：逐日卡片 + 景点详情卡 + 溯源链接 + 参数回显都在。"""
         from pipeline.planner import render_trip
 
         plan = {"days": [{"day": 1, "slots": [
@@ -360,7 +360,9 @@ class TestPlanner(unittest.TestCase):
         md = render_trip("大同", 1, "大同站", plan, profiles,
                          {"云冈石窟": ["https://www.douyin.com/video/123"]}, geo_on=False)
         for expect in ("《大同》1 天行程规划", "上午 · 云冈石窟", "公交约40分钟",
-                       "全程两万步", "别踩坑", "[来源1]", "LLM 区域推断"):
+                       "全程两万步", "别踩坑", "[来源1]", "LLM 交通估算",
+                       "你的需求：目的地 **大同**", "调整参数后重新生成",
+                       "💡 提示：全程两万步"):
             self.assertIn(expect, md)
 
 
@@ -534,7 +536,8 @@ class TestBudgetAndHtml(unittest.TestCase):
         )
         for expect in ("《大同》1 天行程规划", "行程概览", "budget-chart", "echarts", "leaflet",
                        "两万步勝退", "走到腳断", "近期热度上升", "信息溯源",
-                       "仅供参考", '"lng": 113.05', "当日花费小计", "预算明细"):
+                       "仅供参考", '"lng": 113.05', "当日花费小计", "预算明细",
+                       "timeline", "pit-card", "echo-bar", "heat-bar", "heat-note"):
             self.assertIn(expect, html)
         # 非法坐标被丢弃，合法坐标进 markers（酒店也在）
         self.assertNotIn("bad", html)
@@ -736,15 +739,229 @@ class TestDigestAndHeatApi(unittest.TestCase):
             self.assertEqual(sorted(knowledge.list_city_spots("大同")), ["云冈石窟", "华严寺"])
             self.assertEqual(knowledge.list_city_spots("未登记"), [])
             snap = {"score": 0.5, "fresh7": 0.25, "fresh60": 0.5, "old60": 0.25,
-                    "likes": 100, "videos": 4, "trend": "平稳"}
+                    "likes": 100, "videos": 4, "trend": "平稳",
+                    "mkt_ratio": 0.25, "sentiment": "口碑平稳"}
             knowledge.upsert_heat_snapshot("大同", "云冈石窟", snap)
-            knowledge.upsert_heat_snapshot("大同", "云冈石窟", {**snap, "score": 0.9, "trend": "本周最火"})
+            knowledge.upsert_heat_snapshot("大同", "云冈石窟", {**snap, "score": 0.9, "trend": "本周最火",
+                                                          "mkt_ratio": 0.5, "sentiment": "好评下降"})
             rows = knowledge.load_heat_snapshots("大同")
             self.assertEqual(len(rows), 1)  # UPSERT 不重复
             self.assertEqual(rows[0]["score"], 0.9)
             self.assertEqual(rows[0]["trend"], "本周最火")
+            self.assertEqual(rows[0]["mkt_ratio"], 0.5)
+            self.assertEqual(rows[0]["sentiment"], "好评下降")
         finally:
             knowledge._DB_PATH = orig
+
+
+class TestNotesSplit(unittest.TestCase):
+    def test_classify_note(self):
+        """注意事项关键词兕底分类：避坑 > 费用 > 时间 > 提示。"""
+        from pipeline.planner import classify_note
+
+        self.assertEqual(classify_note("别开闪光灯，注意保护壁画"), "避坑")
+        self.assertEqual(classify_note("门票120元，学生半价"), "费用")
+        self.assertEqual(classify_note("8:30开放，周一闭馆"), "时间")
+        self.assertEqual(classify_note("东门人少"), "提示")
+
+    def test_normalize_notes(self):
+        """notes 规范化：旧字符串拆分、非法类型兕底、None 安全。"""
+        from pipeline.planner import normalize_notes
+
+        out = normalize_notes("别排队太久；门票120元")
+        self.assertEqual([x["type"] for x in out], ["避坑", "费用"])
+        out = normalize_notes([{"type": "费用", "text": "人均50"}, {"type": "瞎写", "text": "周一闭馆"}])
+        self.assertEqual(out[0]["type"], "费用")
+        self.assertEqual(out[1]["type"], "时间")  # 非法类型按关键词兕底
+        self.assertEqual(normalize_notes(None), [])
+
+    def test_render_notes_bullets(self):
+        """MD 渲染：注意事项分点，避坑/费用加粗，普通提示不加粗。"""
+        from pipeline.planner import render_trip
+
+        plan = {"days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "云冈石窟", "duration": "", "transport": "",
+             "reasons": "", "notes": "别穿高跟鞋；门票120元；早去人少", "food": ""}]}]}
+        profiles = {"云冈石窟": {
+            "duration_hours": None, "best_time_slot": "全天", "highlights": [],
+            "avoid": [], "food": [], "photo_spots": [], "tips": [], "cost_items": []}}
+        md = render_trip("大同", 1, "", plan, profiles, {}, geo_on=False)
+        self.assertIn("❌ **避坑：别穿高跟鞋**", md)
+        self.assertIn("💰 **费用：门票120元**", md)
+        self.assertIn("💡 提示：早去人少", md)
+        self.assertNotIn("**提示：早去人少**", md)
+
+
+class TestSentiment(unittest.TestCase):
+    def test_time_token_to_date(self):
+        """评论时间换算：相对/绝对格式都认，识别不了给 None。"""
+        from datetime import datetime
+
+        from core.sanitize import time_token_to_date
+
+        now = datetime(2026, 9, 3)
+        self.assertEqual(time_token_to_date("刚刚", now), "2026-09-03")
+        self.assertEqual(time_token_to_date("昨天", now), "2026-09-02")
+        self.assertEqual(time_token_to_date("3天前", now), "2026-08-31")
+        self.assertEqual(time_token_to_date("2周前", now), "2026-08-20")
+        self.assertEqual(time_token_to_date("08-15", now), "2026-08-15")
+        self.assertEqual(time_token_to_date("2025-07-01", now), "2025-07-01")
+        self.assertEqual(time_token_to_date("2025年7月1日", now), "2025-07-01")
+        self.assertIsNone(time_token_to_date("瞎写", now))
+
+    def test_classify_comment(self):
+        """关键词情感判定：负面优先（反词包含关系不被误判）。"""
+        from pipeline.heat import classify_comment
+
+        self.assertEqual(classify_comment("太好看了，值得二刷"), 1)
+        self.assertEqual(classify_comment("不好吃，太贵了"), -1)  # 含"好吃"但先命中"不好"
+        self.assertEqual(classify_comment("不推荐，纯智商税"), -1)
+        self.assertEqual(classify_comment("从北京坐高铁过来的"), 0)
+
+    def test_sentiment_trend(self):
+        """情感趋势：近30天好评率对比更早，样本不足/无时间给数据不足。"""
+        from datetime import datetime, timedelta
+
+        from pipeline.heat import sentiment_trend
+
+        now = datetime(2026, 9, 3)
+        recent = (now - timedelta(days=5)).strftime("%Y-%m-%d")
+        earlier = (now - timedelta(days=60)).strftime("%Y-%m-%d")
+
+        def c(text, t):
+            return {"text": text, "time": t}
+
+        up = ([c("太难吃了", earlier)] * 4 + [c("好吃", earlier)]
+              + [c("好吃", recent)] * 4 + [c("难吃", recent)])
+        self.assertEqual(sentiment_trend(up, now)["trend"], "好评上升")
+        down = ([c("好吃", earlier)] * 4 + [c("难吃", earlier)]
+                + [c("难吃", recent)] * 4 + [c("好吃", recent)])
+        self.assertEqual(sentiment_trend(down, now)["trend"], "好评下降")
+        flat = [c("好吃", earlier)] * 5 + [c("好吃", recent)] * 5
+        self.assertEqual(sentiment_trend(flat, now)["trend"], "口碑平稳")
+        self.assertEqual(sentiment_trend([c("好吃", recent)] * 3, now)["trend"], "数据不足")
+        # 旧缓存无时间字段：全部跳过 → 数据不足（不阻断榜单）
+        self.assertEqual(sentiment_trend([{"text": "好吃", "time": None}] * 20, now)["trend"], "数据不足")
+
+
+class TestConfidenceScoring(unittest.TestCase):
+    def test_levels_and_marketing(self):
+        """量化置信度：≥3源无矛盾=高，2源=中，矛盾=中，营销号来源=低且不计印证。"""
+        import pipeline.verify as v
+
+        def pt(src):
+            return {"topic": "门票", "claim": "免费", "stance": "中性",
+                    "time_sensitive": False, "source": src}
+
+        orig = v.chat_json
+        try:
+            v.chat_json = lambda *a, **k: {"groups": [[1, 2, 3, 4]], "conflicts": []}
+            out = v.annotate_confidence([pt("u1"), pt("u2"), pt("u3"), pt("mkt1")],
+                                        marketing_sources={"mkt1"})
+            self.assertEqual(out[0]["conf_level"], "高置信度")  # 3 个有效源无矛盾
+            self.assertEqual(out[0]["conf_score"], 0.9)
+            self.assertEqual(out[0]["n_sources"], 3)  # 营销号不计入印证
+            self.assertEqual(out[3]["conf_level"], "低置信度")  # 自身来源是营销号
+            v.chat_json = lambda *a, **k: {"groups": [[1, 2]], "conflicts": []}
+            out2 = v.annotate_confidence([pt("u1"), pt("u2")])
+            self.assertEqual(out2[0]["conf_level"], "中置信度")  # 2 源
+            v.chat_json = lambda *a, **k: {"groups": [[1, 2, 3]], "conflicts": [[1, 2]]}
+            out3 = v.annotate_confidence([pt("u1"), pt("u2"), pt("u3")])
+            self.assertEqual(out3[0]["confidence"], "存分歧")
+            self.assertEqual(out3[0]["conf_level"], "中置信度")  # 轻微矛盾不高于中
+            self.assertEqual(out3[2]["conf_level"], "高置信度")  # 未卷入矛盾的第三源
+        finally:
+            v.chat_json = orig
+
+    def test_pitfall_sorted_by_score(self):
+        """避坑专题按置信度评分降序，无评分的旧数据按标签回退。"""
+        from pipeline.heat import pitfall_digest
+
+        pts = [
+            {"claim": "低分坑", "stance": "避雷", "confidence": "单源",
+             "conf_score": 0.3, "conf_level": "低置信度", "n_sources": 1},
+            {"claim": "高分坑", "stance": "避雷", "confidence": "多源一致",
+             "conf_score": 0.9, "conf_level": "高置信度", "n_sources": 3},
+            {"claim": "旧数据坑", "stance": "避雷", "confidence": "多源一致"},
+        ]
+        rows = pitfall_digest(pts)
+        self.assertEqual([r["claim"] for r in rows], ["高分坑", "旧数据坑", "低分坑"])
+        self.assertEqual(rows[0]["conf_level"], "高置信度")
+        self.assertEqual(rows[0]["n_sources"], 3)
+
+
+class TestTransportHints(unittest.TestCase):
+    def test_hints_format_and_fail(self):
+        """LLM 交通估算：格式化带估算标注，缺字段丢弃，异常/空清单不阻断。"""
+        import pipeline.planner as pp
+
+        orig = pp.chat_json
+        try:
+            pp.chat_json = lambda *a, **k: {"routes": [
+                {"from": "酒店", "to": "云冈石窟", "advice": "打车约40元/约40分钟"},
+                {"from": "", "to": "x", "advice": "y"},
+            ]}
+            out = pp.transport_hints("大同", "古城内", ["云冈石窟"])
+            self.assertEqual(len(out), 1)
+            self.assertEqual(out[0], "酒店->云冈石窟: 打车约40元/约40分钟（估算，以地图App为准）")
+
+            def boom(*a, **k):
+                raise RuntimeError("x")
+
+            pp.chat_json = boom
+            self.assertEqual(pp.transport_hints("大同", "", ["甲"]), [])
+            self.assertEqual(pp.transport_hints("大同", "", []), [])
+        finally:
+            pp.chat_json = orig
+
+    def test_route_advice_degrade(self):
+        """无高德 Key 时 route_advice 返回 None（降级不阻断）。"""
+        from core import geo
+
+        self.assertIsNone(geo.route_advice("113,40", "114,41", "大同"))
+
+
+class TestFoodsRender(unittest.TestCase):
+    def test_render_foods_and_echo(self):
+        """餐厅详情卡/每日餐饮推荐/概览卡餐厅数/预算餐厅人均/参数回显全链路。"""
+        from pipeline.planner import build_budget_summary, render_trip
+
+        plan = {"days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "云冈石窟", "duration": "", "transport": "", "cost": 120,
+             "reasons": "", "notes": "", "food": "凤临阁：烧麦（人均80元）"}]}]}
+        profiles = {"云冈石窟": {
+            "duration_hours": None, "best_time_slot": "全天", "highlights": [],
+            "avoid": [], "food": [], "photo_spots": [], "tips": [],
+            "cost_items": [{"item": "门票", "type": "门票", "amount": 120.0}]}}
+        foods = {"凤临阁": {
+            "duration_hours": None, "best_time_slot": "全天", "highlights": ["百花烧麦"],
+            "avoid": ["饭点排队久"], "food": [], "photo_spots": [], "tips": [],
+            "cost_items": [{"item": "人均", "type": "餐饮人均", "amount": 80.0}]}}
+        b = build_budget_summary({**profiles, **foods}, plan, days=1, budget=1500)
+        md = render_trip("大同", 1, "古城内", plan, profiles, {}, geo_on=False,
+                         budget_summary=b, foods=foods,
+                         food_sources={"凤临阁": ["https://www.douyin.com/video/9"]},
+                         preferences="喜欢历史", preference_mode="均衡",
+                         user_spots=["云冈石窟"])
+        self.assertIn("凤临阁：烧麦（人均80元）", md)          # 每日餐饮推荐
+        self.assertIn("## 餐厅详情卡（含避坑分析）", md)
+        self.assertIn("百花烧麦", md)
+        self.assertIn("推荐餐厅 **1 家**", md)                 # 概览卡
+        self.assertIn("调研到的餐厅人均：凤临阁 人均 80 元", md)  # 预算明细依据
+        self.assertIn("特别偏好 **喜欢历史**", md)             # 参数回显
+        self.assertIn("指定景点 **云冈石窟**", md)
+
+    def test_heat_index_marketing(self):
+        """热度画像附带营销号计数与占比。"""
+        from pipeline.heat import heat_index
+
+        class FakeItem:
+            def __init__(self, desc):
+                self.description, self.like_count, self.publish_time, self.comments = desc, 10, None, []
+
+        h = heat_index([FakeItem("点击左下角团购"), FakeItem("真实分享")])
+        self.assertEqual(h["marketing"], 1)
+        self.assertEqual(h["mkt_ratio"], 0.5)
 
 
 if __name__ == "__main__":
