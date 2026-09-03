@@ -33,6 +33,7 @@ PROFILE_SYSTEM = """你是旅游数据分析师。给定某景点的编号信息
 4. avoid 收录"避雷"立场的要点；时效敏感与其他注意事项归入 tips；
 5. cost_items：从要点提取的确定花费，每条 {"item": "名称", "type": "门票|餐饮人均|交通|其他", "amount": 数字}；
    只收录要点中有明确数字的花费，估算与无依据的一律不写；无则空数组；
+   门票/入园/预约类费用（含第三方渠道预约费）一律 type="门票"，价格给区间时取最低明确数字；
 6. 每条文本一句话，保留具体事实（数字、地名、时间），不要空泛概括；
 7. 输出严格 JSON：{"duration_hours": 数字或null, "best_time_slot": "上午|下午|晚上|全天",
    "highlights": ["..."], "avoid": ["..."], "food": ["..."], "photo_spots": ["..."], "tips": ["..."],
@@ -41,7 +42,8 @@ PROFILE_SYSTEM = """你是旅游数据分析师。给定某景点的编号信息
 PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间数据，生成逐日分时段的行程规划。
 
 规则：
-1. 每天分上午/下午/晚上三个时段，每时段安排 0~2 个景点（行程要留白，不要排满）；
+1. 每天分上午/下午/晚上三个时段，每时段安排 0~2 个景点；每天至少两个时段有安排，不要把行程排得过空；
+   档案 best_time_slot 为"晚上"的景点（夜景/夜游类）必须排在当天晚上时段；
 2. 顺路优先：同一天安排通行时间数据中相距近的景点（同区域聚类，避免来回折返）；每天从酒店出发，晚上回酒店附近；
 3. 尊重景点的 best_time_slot，尽量把景点排在它最佳的时段；
 4. 注意事项分点写：把景点档案中的 avoid 与 tips 逐条拆进 notes 数组，不得省略；
@@ -52,14 +54,17 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
    未给出的路段按距离给出大致方案（如"打车约X元/约X分钟，具体以地图App为准"），禁止只写"建议查地图"；
 6. 每天的午餐与晚餐各从给定餐厅候选中选一家推荐，写进当天对应时段的 food 字段
    （午餐→下午时段，晚餐→晚上时段），格式："店名：推荐菜（人均X元）"；
-   同一家餐厅全程最多推荐一次；没给餐厅候选或当天时段没排点位时写空字符串；
-7. spot 只能从给定景点名单中选择；每个景点全程只出现一次；
+   同一家餐厅全程最多推荐一次；没给餐厅候选或当天时段没排点位时写空字符串，
+   严禁编造候选之外的店名或餐厅描述；
+7. spot 只能从给定景点名单中选择；每个景点全程只出现一次；与用户偏好相符的地标景点
+   （如主题乐园、偏好中点名的类型）必须排入行程，游玩时长长的可整天只排它一个；
 8. reasons 一句话说明为什么值得去（来自档案 highlights）；
 9. cost：该点位预估花费（元，数字）：门票类花费按档案 cost_items 计入；免费或未知写 0；
 10. pitfall_quotes：从该景点档案 avoid 对应的要点中挑最重要的 1~2 条评论原文引用（逐字，不改写）；没有则空数组；
 11. 预算约束：若给出了总预算，全部点位 cost 合计加上餐饮/交通估算不得显著超出；
     超支时优先去掉"体验/购物"类点位并在 summary_note 说明；省钱优先模式下优先免费/低价点位；
-12. summary_note：一句话说明预算匹配情况（结余/超支及调整建议），无预算时为空字符串；
+12. summary_note：说明预算匹配情况（结余/超支及调整建议）；若有调研过但未排入行程的景点，
+    必须把它们列为"备选"并一句话说明原因；无预算且无备选景点时为空字符串；
 13. 输出严格 JSON：{"summary_note": "...", "days": [{"day": 1, "slots": [{"slot": "上午|下午|晚上", "spot": "景点名",
    "duration": "约X小时", "transport": "从上一地点至此的方式与耗时", "cost": 数字,
    "reasons": "...", "notes": [{"type": "避坑|费用|时间|提示", "text": "一句话"}], "food": "", "pitfall_quotes": ["评论原文"]}]}]}"""
@@ -357,21 +362,86 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
             )
         user += "\n\n餐厅候选（每日午餐/晚餐从中推荐，每家最多推荐一次）：\n" + "\n".join(food_lines)
     data = chat_json(PLAN_SYSTEM, user)
-    return _normalize_plan(data, set(profiles.keys()), days)
+    plan = _normalize_plan(data, set(profiles.keys()), days)
+    # 覆盖率兜底：排点过少/晚上型景点错位/未排景点无备选说明时，
+    # 带问题清单重试一次（仅多一次 LLM 调用），变好才采纳，防止地标景点被静默丢弃
+    issues = _coverage_issues(plan, profiles, days)
+    if issues:
+        fix_note = "\n\n上一版规划存在以下问题，本版必须修正：\n" + "\n".join(f"- {x}" for x in issues)
+        data2 = chat_json(PLAN_SYSTEM, user + fix_note)
+        plan2 = _normalize_plan(data2, set(profiles.keys()), days)
+        if len(_coverage_issues(plan2, profiles, days)) < len(issues):
+            plan = plan2
+    # 餐厅防编造：food 推荐必须命中候选店名，否则清空（没调研过的店不能写进路书）
+    plan = _filter_fabricated_food(plan, set(foods or {}))
+    return plan
+
+
+def _filter_fabricated_food(plan: dict, food_names: set[str]) -> dict:
+    """清空未命中餐厅候选的 food 字段（LLM 无候选时会自行编店名）。纯函数可测。"""
+    out = dict(plan)
+    out["days"] = [
+        {**d, "slots": [
+            {**s, "food": s.get("food", "") if any(n in str(s.get("food", "")) for n in food_names) else ""}
+            for s in d.get("slots", [])]}
+        for d in plan.get("days", [])
+    ]
+    return out
+
+
+def _coverage_issues(plan: dict, profiles: dict[str, dict], days: int) -> list[str]:
+    """规划覆盖率检查（纯函数可测）：行程点过少、晚上型景点错位、未排景点无备选说明。
+
+    不要求全排入：景点多天数少时有备选是正常的，关键是地标不能被静默丢掉。"""
+    slots = [s for d in plan.get("days", []) for s in d.get("slots", [])]
+    issues: list[str] = []
+    min_slots = min(2 * days, len(profiles))
+    if len(slots) < min_slots:
+        issues.append(f"行程点只有 {len(slots)} 个，低于下限 {min_slots} 个，请把更多已调研景点排入行程")
+    planned = {s["spot"] for s in slots}
+    for name in planned:
+        p = profiles.get(name) or {}
+        if p.get("best_time_slot") == "晚上" and not any(
+                s["spot"] == name and s["slot"] == "晚上" for s in slots):
+            issues.append(f"{name} 的最佳时段是晚上，却没有排在晚上时段，必须调整到晚上")
+    unplanned = [n for n in profiles if n not in planned]
+    if unplanned and "备选" not in str(plan.get("summary_note", "")):
+        issues.append(f"未排入的景点：{'、'.join(unplanned)}——与用户偏好相符的地标景点（如主题乐园）必须排入，"
+                      "确实排不下的在 summary_note 中列为备选并说明原因")
+    return issues
 
 
 def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
                          budget: float | None) -> dict:
-    """预算明细汇总：门票（多源去重后求和）/餐饮（人均×天数×2 正餐）/市内交通估算/弹性 10%。
-    纯函数，独立可测；无预算时 total_budget 为 None。"""
+    """预算明细汇总：门票（只计已排入行程的景点，多源去重后求和）/餐饮（人均×天数×2 正餐）
+    /市内交通估算/弹性 10%。纯函数，独立可测；无预算时 total_budget 为 None。
+    tickets_missing 记录已排入但无票价数据的景点（渲染层明示提醒，不静默漏算）。"""
+    planned = {s["spot"] for d in plan.get("days", []) for s in d.get("slots", [])}
+    # 点位花费兜底：档案无门票项时用 LLM 排入的 cost（环球这类票价在贴士不在 cost_items 的场景）
+    slot_cost: dict[str, float] = {}
+    for d in plan.get("days", []):
+        for s in d.get("slots", []):
+            slot_cost[s["spot"]] = max(slot_cost.get(s["spot"], 0), float(s.get("cost") or 0))
     tickets = []
+    ticket_detail_items: list[str] = []   # 与总额同口径的门票明细，渲染层直接复用
     food_prices = []
-    for p in profiles.values():
+    tickets_missing = []
+    for name, p in profiles.items():
+        has_ticket = False
         for c in p.get("cost_items", []):
             if c["type"] == "门票":
-                tickets.append(round(c["amount"]))
+                has_ticket = True
+                if name in planned:  # 调研了但没排进行程的，门票不计入预算
+                    tickets.append(round(c["amount"]))
+                    ticket_detail_items.append(f"{name} {c['item']} {c['amount']:.0f} 元")
             elif c["type"] == "餐饮人均":
                 food_prices.append(c["amount"])
+        if name in planned and not has_ticket:
+            if slot_cost.get(name, 0) > 0:
+                tickets.append(round(slot_cost[name]))
+                ticket_detail_items.append(f"{name} 点位预估 {slot_cost[name]:.0f} 元")
+            else:
+                tickets_missing.append(name)
     ticket_total = float(sum(dict.fromkeys(tickets)))  # 同价位门票去重（多个来源说同一票价）
     avg_meal = round(sum(food_prices) / len(food_prices)) if food_prices else 50
     food_total = float(avg_meal * days * 2)
@@ -382,6 +452,8 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
     total = round(subtotal + flex, 2)
     out = {
         "tickets": ticket_total,
+        "tickets_detail": ticket_detail_items,
+        "tickets_missing": tickets_missing,
         "food": food_total,
         "food_avg": float(avg_meal),
         "transport": transport,
@@ -438,19 +510,21 @@ def budget_breakdown(profiles: dict[str, dict], budget_summary: dict | None,
     """预算明细行：门票逐点列明 / 餐饮 / 交通 / 弹性。纯函数可测。"""
     if not budget_summary:
         return []
-    ticket_items = []
     food_items = []
     for name, p in profiles.items():
         for c in p.get("cost_items", []):
-            if c["type"] == "门票":
-                ticket_items.append(f"{name} {c['item']} {c['amount']:.0f} 元")
-            elif c["type"] == "餐饮人均":
+            if c["type"] == "餐饮人均":
                 food_items.append(f"{name} 人均 {c['amount']:.0f} 元")
+    # 门票明细直接用汇总层同口径的结果，避免"列了未排入景点门票但总额为 0"的矛盾
+    ticket_detail = "；".join(budget_summary.get("tickets_detail") or []) or "已排入景点均无票价数据"
+    missing = (budget_summary or {}).get("tickets_missing") or []
+    if missing:
+        ticket_detail += f"（{'、'.join(missing)} 无票价数据，可能免费或未被提及，出发前请核实）"
     food_detail = f"人均 {budget_summary['food_avg']:.0f} 元 × 2 正餐 × {days} 天"
     if food_items:
         food_detail += "（调研到的餐厅人均：" + "；".join(food_items) + "）"
     return [
-        {"item": "门票", "detail": "；".join(ticket_items) or "无门票数据", "amount": budget_summary["tickets"]},
+        {"item": "门票", "detail": ticket_detail, "amount": budget_summary["tickets"]},
         {"item": "餐饮", "detail": food_detail, "amount": budget_summary["food"]},
         {"item": "市内交通", "detail": "估算（每行程点约 15 元）", "amount": budget_summary["transport"]},
         {"item": "弹性预留", "detail": "前几项小计的 10%", "amount": budget_summary["flex"]},

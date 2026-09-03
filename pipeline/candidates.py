@@ -47,6 +47,7 @@ VERIFY_SYSTEM = """你是信息核查专家。输入是候选清单及各自的�
 3. evidence 依据正面证据强度：强/中/弱；
 4. reason 一句话说明判断依据（引用关键评论摘录内容）；
 5. 最终 keep 的候选控制在 8~12 个：景点类至少保留 4 个（行程骨架），名额不足时优先砍购物、其次体验；
+   美食类只要有正面证据且营销号不过半就应 keep（餐厅是午/晚餐推荐的刚需，名额不与景点竞争）；
 6. 输出严格 JSON：{"results": [{"name": "...", "verdict": "keep|drop", "evidence": "强|中|弱",
    "pitfall_risk": "低|中|高", "reason": "..."}]}"""
 
@@ -166,4 +167,20 @@ def verify_candidates(candidates: list[dict], stats: dict[str, dict]) -> list[di
             if r["name"] in cut:
                 r["verdict"] = "drop"
                 r["reason"] += "（超出保留上限被裁剪）"
+    # 美食保底：餐厅全被评审淘汰但有正面证据时，恢复证据最强的前 2 家
+    # （午/晚餐推荐是行程刚需，全灭会让 LLM 转而编造餐厅）；因超额被裁的不恢复
+    foods = [c for c in candidates if c["category"] == "美食"]
+    if foods and not any(results[c["name"]]["verdict"] == "keep" for c in foods):
+        order = {"强": 0, "中": 1, "弱": 2}
+        revivable = []
+        for c in foods:
+            r = results[c["name"]]
+            s = stats.get(c["name"]) or {}
+            ratio = (s.get("marketing_hits") or 0) / max(1, s.get("videos") or 1)
+            if (s.get("positive") or 0) > 0 and ratio <= 0.5 and "被裁剪" not in r["reason"]:
+                revivable.append((order.get(r["evidence"], 3), -(s.get("positive") or 0), r))
+        revivable.sort(key=lambda x: x[:2])
+        for _, _, r in revivable[:2]:
+            r["verdict"] = "keep"
+            r["reason"] += "（美食保底恢复：有正面证据且营销号不过半）"
     return [results[c["name"]] for c in candidates if c["name"] in results]

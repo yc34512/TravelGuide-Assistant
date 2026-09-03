@@ -581,6 +581,117 @@ class TestBudgetAndHtml(unittest.TestCase):
         self.assertEqual(md.count("## 预算明细"), 1)  # 不重复
 
 
+class TestPlanQualityGuards(unittest.TestCase):
+    """北京样例 P0 修复：覆盖率兜底检查 + 预算只计已排入景点 + 缺票价明示。"""
+
+    def test_coverage_issues(self):
+        from pipeline.planner import _coverage_issues
+
+        profiles = {
+            "环球影城": {"best_time_slot": "全天"},
+            "什刹海": {"best_time_slot": "晚上"},   # 夜景型，必须排晚上
+            "天坛": {"best_time_slot": "上午"},
+        }
+        # 只排 1 个点 + 什刹海排错时段 + 未排景点无备选说明 → 三类问题都命中
+        bad = {"summary_note": "", "days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "天坛"}, {"slot": "下午", "spot": "什刹海"}]}]}
+        issues = _coverage_issues(bad, profiles, days=2)
+        self.assertEqual(len(issues), 3)
+        self.assertTrue(any("低于下限" in x for x in issues))
+        self.assertTrue(any("什刹海" in x and "晚上" in x for x in issues))
+        self.assertTrue(any("环球影城" in x for x in issues))
+        # 排够点数 + 晚上型归位 + summary_note 提到备选 → 无问题
+        good = {"summary_note": "天坛列为备选，时间不够", "days": [
+            {"day": 1, "slots": [{"slot": "全天", "spot": "环球影城"},
+                                   {"slot": "晚上", "spot": "什刹海"}]},
+            {"day": 2, "slots": [{"slot": "上午", "spot": "天坛"},
+                                   {"slot": "下午", "spot": "环球影城"}]}]}
+        self.assertEqual(_coverage_issues(good, profiles, days=2), [])
+
+    def test_budget_only_planned_tickets(self):
+        from pipeline.planner import budget_breakdown, build_budget_summary
+
+        profiles = {
+            "环球影城": {"cost_items": [{"item": "门票", "type": "门票", "amount": 528.0}]},
+            "天坛": {"cost_items": [{"item": "门票", "type": "门票", "amount": 35.0}]},
+            "免费公园": {"cost_items": []},
+        }
+        plan = {"summary_note": "", "days": [{"day": 1, "slots": [
+            {"slot": "全天", "spot": "环球影城"}, {"slot": "晚上", "spot": "免费公园"}]}]}
+        b = build_budget_summary(profiles, plan, days=1, budget=None)
+        self.assertEqual(b["tickets"], 528.0)              # 天坛没排入，35 元不计
+        self.assertEqual(b["tickets_missing"], ["免费公园"])  # 排入了但无票价 → 明示
+        rows = budget_breakdown(profiles, b, days=1)
+        self.assertIn("免费公园", rows[0]["detail"])        # 明细行提醒核实
+        self.assertIn("出发前请核实", rows[0]["detail"])
+        # 全部排入且都有票价 → 无 missing
+        plan_all = {"summary_note": "", "days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "环球影城"}, {"slot": "下午", "spot": "天坛"}]}]}
+        b2 = build_budget_summary(profiles, plan_all, days=1, budget=None)
+        self.assertEqual(b2["tickets"], 528.0 + 35.0)
+        self.assertNotIn("免费公园", b2["tickets_missing"])
+
+    def test_budget_slot_cost_fallback(self):
+        """档案无门票项时用点位 cost 兜底（环球 650 在 slot.cost 不在 cost_items 的场景）。"""
+        from pipeline.planner import build_budget_summary
+
+        profiles = {"环球影城": {"cost_items": []}, "什刹海": {"cost_items": []}}
+        plan = {"summary_note": "", "days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "环球影城", "cost": 650},
+            {"slot": "下午", "spot": "什刹海", "cost": 0}]}]}
+        b = build_budget_summary(profiles, plan, days=1, budget=1500)
+        self.assertEqual(b["tickets"], 650.0)
+        self.assertIn("环球影城 点位预估 650 元", b["tickets_detail"])
+        self.assertEqual(b["tickets_missing"], ["什刹海"])   # cost=0 且无档案票价 → 仍明示
+        self.assertGreater(b["total"], 650.0)                # 总计不再是漏算环球的 319
+
+    def test_filter_fabricated_food(self):
+        """餐厅防编造：food 未命中候选店名则清空，命中则保留。"""
+        from pipeline.planner import _filter_fabricated_food
+
+        plan = {"summary_note": "", "days": [{"day": 1, "slots": [
+            {"slot": "下午", "spot": "什刹海", "food": "后海铜锅涮肉：白汤锅底（人均120元）"},
+            {"slot": "晚上", "spot": "五道营胡同", "food": "胡大饭馆：簋街小龙虾（人均100元）"}]}]}
+        out = _filter_fabricated_food(plan, {"胡大饭馆"})
+        slots = out["days"][0]["slots"]
+        self.assertEqual(slots[0]["food"], "")            # 编造店名被清空
+        self.assertIn("胡大饭馆", slots[1]["food"])       # 候选内保留
+        # 无候选时全部清空
+        out2 = _filter_fabricated_food(plan, set())
+        self.assertEqual([s["food"] for s in out2["days"][0]["slots"]], ["", ""])
+
+    def test_verify_food_rescue(self):
+        """美食保底：餐厅全被评审淘汰但有正面证据时，恢复证据最强的前 2 家。"""
+        import pipeline.candidates as pc
+
+        orig = pc.chat_json
+        # 模拟 LLM 评审把两家餐厅都判 drop（北京任务实况），景点 keep
+        pc.chat_json = lambda *a, **k: {"results": [
+            {"name": "景A", "verdict": "keep", "evidence": "强", "pitfall_risk": "低", "reason": "好"},
+            {"name": "食A", "verdict": "drop", "evidence": "中", "pitfall_risk": "中", "reason": "排队久"},
+            {"name": "食B", "verdict": "drop", "evidence": "弱", "pitfall_risk": "中", "reason": "争议多"},
+            {"name": "食C", "verdict": "drop", "evidence": "弱", "pitfall_risk": "高", "reason": "负面强"},
+        ]}
+        try:
+            cands = [{"name": "景A", "category": "景点", "reason": ""},
+                     {"name": "食A", "category": "美食", "reason": ""},
+                     {"name": "食B", "category": "美食", "reason": ""},
+                     {"name": "食C", "category": "美食", "reason": ""}]
+            stats = {
+                "景A": {"videos": 5, "marketing_hits": 0, "positive": 6, "negative": 1, "sample_quotes": []},
+                "食A": {"videos": 5, "marketing_hits": 0, "positive": 8, "negative": 0, "sample_quotes": []},
+                "食B": {"videos": 5, "marketing_hits": 1, "positive": 9, "negative": 3, "sample_quotes": []},
+                "食C": {"videos": 4, "marketing_hits": 4, "positive": 1, "negative": 5, "sample_quotes": []},
+            }
+            results = {r["name"]: r for r in pc.verify_candidates(cands, stats)}
+            self.assertEqual(results["食A"]["verdict"], "keep")   # 证据中+正面多 → 恢复
+            self.assertEqual(results["食B"]["verdict"], "keep")   # 证据弱但正面最多 → 恢复（前 2 家）
+            self.assertEqual(results["食C"]["verdict"], "drop")   # 营销号过半 → 不恢复
+            self.assertIn("美食保底恢复", results["食A"]["reason"])
+        finally:
+            pc.chat_json = orig
+
+
 class TestMcpAndOpenapi(unittest.TestCase):
     def test_mcp_tools_registered(self):
         """MCP 服务器注册了全套 7 个工具（不拉起服务，只验证注册表）。"""
