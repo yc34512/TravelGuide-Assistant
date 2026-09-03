@@ -4,6 +4,7 @@
 输出是按时间/空间维度排布的行程路书。所有 LLM 输出都做防御性规范化，
 结构不合法宁可降级也不把脏数据传下去。
 """
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -43,7 +44,10 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
 1. 每天分上午/下午/晚上三个时段，每时段安排 0~2 个景点（行程要留白，不要排满）；
 2. 顺路优先：同一天安排通行时间数据中相距近的景点（同区域聚类，避免来回折返）；每天从酒店出发，晚上回酒店附近；
 3. 尊重景点的 best_time_slot，尽量把景点排在它最佳的时段；
-4. 景点档案中的 avoid 与 tips 必须完整写进该景点的 notes，不得省略；
+4. 注意事项分点写：把景点档案中的 avoid 与 tips 逐条拆进 notes 数组，不得省略；
+   每条 {"type": "避坑|费用|时间|提示", "text": "一句话"}：avoid/警示类=避坑，
+   票价/花费类=费用，开放时间/预约/排队类=时间，其余=提示；
+   text 限一句话（不超过 30 字），长内容必须拆成多条；
 5. transport 必须具体：给出了交通方案数据的路段，直接引用其中的线路/时长/费用（保留"约""估算"字样）；
    未给出的路段按距离给出大致方案（如"打车约X元/约X分钟，具体以地图App为准"），禁止只写"建议查地图"；
 6. 每天的午餐与晚餐各从给定餐厅候选中选一家推荐，写进当天对应时段的 food 字段
@@ -58,7 +62,7 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
 12. summary_note：一句话说明预算匹配情况（结余/超支及调整建议），无预算时为空字符串；
 13. 输出严格 JSON：{"summary_note": "...", "days": [{"day": 1, "slots": [{"slot": "上午|下午|晚上", "spot": "景点名",
    "duration": "约X小时", "transport": "从上一地点至此的方式与耗时", "cost": 数字,
-   "reasons": "...", "notes": "...", "food": "", "pitfall_quotes": ["评论原文"]}]}]}"""
+   "reasons": "...", "notes": [{"type": "避坑|费用|时间|提示", "text": "一句话"}], "food": "", "pitfall_quotes": ["评论原文"]}]}]}"""
 
 TRANSPORT_SYSTEM = """你是本地交通向导。给定城市、住宿位置与景点清单，为各段路线给出具体交通建议。
 规则：
@@ -197,6 +201,56 @@ def build_review_digest(spot: str, points: list[dict]) -> dict:
     return _normalize_digest(data, quote_pool)
 
 
+# —— 注意事项分点化：类型图标 + 关键词兜底分类（纯函数，独立可测）——
+NOTE_TYPES = {"避坑", "费用", "时间", "提示"}
+NOTE_ICONS = {"避坑": "❌", "费用": "💰", "时间": "🕐", "提示": "💡"}
+
+_PIT_RE = re.compile(r"别|不要|禁止|严禁|注意|当[心小]|避[雷坑]|勿|坑|劝退|不值|不划算|警惕")
+_COST_RE = re.compile(r"\d+\s*元|门票|收费|免费|人均|费用|押金|价格|价钱")
+_TIME_RE = re.compile(r"\d+\s*[点时分]|开放|闭[馆园门]|周[一二三四五六日末]|节假日|预约|排队|早[上晨]|夜场|旺季|淡季")
+
+
+def classify_note(text: str) -> str:
+    """注意事项类型兜底分类（LLM 未给或给错类型时按关键词判）：避坑 > 费用 > 时间 > 提示。"""
+    if _PIT_RE.search(text):
+        return "避坑"
+    if _COST_RE.search(text):
+        return "费用"
+    if _TIME_RE.search(text):
+        return "时间"
+    return "提示"
+
+
+def normalize_notes(raw) -> list[dict]:
+    """notes 统一成 [{"type", "text"}] 分点列表：兼容旧版字符串（按；/换行拆分）、
+    字符串列表、字典列表；类型非法时用 classify_note 兜底。纯函数可测。"""
+    items: list[dict] = []
+    if isinstance(raw, str):
+        parts = [x.strip() for x in re.split(r"[；;\n]", raw) if x.strip()]
+        items = [{"text": p} for p in parts]
+    elif isinstance(raw, list):
+        for x in raw:
+            if isinstance(x, dict) and str(x.get("text") or "").strip():
+                items.append({"text": str(x["text"]).strip(), "type": x.get("type")})
+            elif isinstance(x, str) and x.strip():
+                items.append({"text": x.strip()})
+    out = []
+    for it in items:
+        t = str(it.get("type") or "").strip()
+        out.append({"type": t if t in NOTE_TYPES else classify_note(it["text"]), "text": it["text"]})
+    return out
+
+
+def _plan_with_note_lists(plan: dict) -> dict:
+    """渲染前统一把每个 slot 的 notes 转成分点列表（旧数据/测试夹具的字符串也能渲染）。"""
+    out = dict(plan)
+    out["days"] = [
+        {**d, "slots": [{**s, "notes": normalize_notes(s.get("notes"))} for s in d.get("slots", [])]}
+        for d in plan.get("days", [])
+    ]
+    return out
+
+
 def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
     """行程防御性规范化：丢弃不在名单中的景点、修正非法时段、限制天数。纯函数可测。"""
     out_days = []
@@ -225,7 +279,7 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
                     "transport": str(s.get("transport") or "").strip(),
                     "cost": round(cost, 2),
                     "reasons": str(s.get("reasons") or "").strip(),
-                    "notes": str(s.get("notes") or "").strip(),
+                    "notes": normalize_notes(s.get("notes")),
                     "food": str(s.get("food") or "").strip(),
                     "pitfall_quotes": quotes,
                 }
@@ -412,6 +466,7 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
                 preferences: str = "", preference_mode: str = "",
                 user_spots: list[str] | None = None) -> str:
     """把行程 JSON 渲染成 Markdown 路书（逐日卡片 + 预算 + 避坑专题 + 热度榜 + 景点详情 + 来源链接）。"""
+    plan = _plan_with_note_lists(plan)
     total_slots = sum(len(d["slots"]) for d in plan["days"])
     # 输入参数回显：让用户确认报告是按他的需求生成的，也方便对照调整参数重新生成
     echo = [f"目的地 **{city}**", f"天数 **{days} 天**"]
@@ -475,7 +530,11 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
             if s["reasons"]:
                 lines.append(f"- 值得去：{s['reasons']}")
             if s["notes"]:
-                lines.append(f"- 注意事项：{s['notes']}")
+                lines.append("- 注意事项：")
+                for nt in s["notes"]:
+                    # 避坑/费用/时间属重要信息，整条加粗；普通提示保持常规字重
+                    mark = "**" if nt["type"] in ("避坑", "费用", "时间") else ""
+                    lines.append(f"  - {NOTE_ICONS.get(nt['type'], '💡')} {mark}{nt['type']}：{nt['text']}{mark}")
             for q in s.get("pitfall_quotes", []):
                 lines.append(f"  > 避坑引用：\"{q}\"")
             if s["food"]:
@@ -576,6 +635,7 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
                      preferences: str = "", preference_mode: str = "",
                      user_spots: list[str] | None = None) -> str:
     """渲染 HTML 可视化路书（Jinja2 模板 + ECharts/Leaflet CDN，离线时模板内置文本版降级）。"""
+    plan = _plan_with_note_lists(plan)
     env = Environment(
         loader=FileSystemLoader(_TEMPLATE_DIR),
         autoescape=select_autoescape(["html"]),

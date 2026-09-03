@@ -73,6 +73,13 @@
   .ov-num { font-size: 18px; font-weight: 700; color: var(--green); }
   .ov-lab { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .day-subtotal { font-size: 13px; background: #f4f8f6; border-radius: 6px; padding: 6px 12px; margin-top: 8px; }
+  /* 注意事项分点列表：避坑红/费用橙/时间蓝/提示灰，每点一句话 */
+  .note-list { list-style: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .note-list li { font-size: 13px; border-radius: 6px; padding: 4px 10px; background: #fff; border: 1px solid #e8ecee; }
+  .note-list li.nt-pit { color: #922b21; background: #fdf3f2; border-color: #f2c4bd; font-weight: 600; }
+  .note-list li.nt-cost { color: #9c640c; background: #fef9e7; border-color: #f8d9a8; }
+  .note-list li.nt-time { color: #2471a3; background: #ebf5fb; border-color: #aed6f1; }
+  .note-list li.nt-tip { color: var(--ink); }
   /* 每日行程可视化时间线：竖线 + 节点圆点 + 时段气泡，避坑节点变红 */
   .timeline { position: relative; padding-left: 30px; margin-top: 4px; }
   .timeline::before { content: ""; position: absolute; left: 9px; top: 10px; bottom: 10px; width: 3px;
@@ -170,7 +177,13 @@
       </div>
       {% if s.transport %}<p>🚗 {{ s.transport }}</p>{% endif %}
       {% if s.reasons %}<p>✅ {{ s.reasons }}</p>{% endif %}
-      {% if s.notes %}<p>⚠️ {{ s.notes }}</p>{% endif %}
+      {% if s.notes %}
+      <ul class="note-list">
+        {% for nt in s.notes %}
+        <li class="nt-{{ {'避坑': 'pit', '费用': 'cost', '时间': 'time'}.get(nt.type, 'tip') }}">{{ {'避坑': '❌', '费用': '💰', '时间': '🕐'}.get(nt.type, '💡') }} <b>{{ nt.type }}</b>：{{ nt.text }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
       {% for q in s.pitfall_quotes %}<div class="quote">“{{ q }}”</div>{% endfor %}
       {% if s.food %}<p>🍜 {{ s.food }}</p>{% endif %}
     </div>
