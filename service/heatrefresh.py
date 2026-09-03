@@ -10,6 +10,7 @@ import time
 import uuid
 from datetime import datetime
 
+from config import CRAWL_TABS
 from core import knowledge
 from pipeline.candidates import candidate_foods
 from pipeline.heat import heat_index, sentiment_trend, time_windows, trend_of
@@ -92,12 +93,13 @@ def _run_heat(job_id: str, city: str) -> None:
         with _CRAWL_LOCK:
             if _cancelled():
                 raise Cancelled()
-            from core.rate_limiter import RateLimiter
+            from core.rate_limiter import global_limiter
             from crawler.browser import create_page, ensure_login
             from crawler.douyin import DouyinCrawler
+            from crawler.tabs import fetch_videos
 
             page = create_page()
-            crawler = DouyinCrawler(page, RateLimiter())
+            crawler = DouyinCrawler(page, global_limiter())
             try:
                 if not ensure_login(page):
                     raise RuntimeError("未检测到抖音登录态：请在弹出的浏览器中用采集小号扫码后重试")
@@ -115,18 +117,19 @@ def _run_heat(job_id: str, city: str) -> None:
                         dump_debug(page, f"heat_fail_{ts}_{si}")
                         log("  搜索 0 结果：已存页面快照到 data/debug/")
                         continue
+                    # 多 Tab 并发取元数据；首个视频连评论一起采（情感趋势原料），其余控成本
                     items = []
-                    for vi, url in enumerate(urls, 1):
-                        if _cancelled():
-                            raise Cancelled()
-                        try:
-                            # 首个视频连评论一起采（情感趋势原料），其余只取元数据控成本
-                            item = crawler.fetch_video(url, collect_comments=(vi <= HEAT_SENTIMENT_VIDEOS))
-                            items.append(item)
-                            log(f"  [{vi}/{len(urls)}] {item.video_id} | "
-                                f"点赞 {item.like_count or 0} | 发布 {item.publish_time or '未知'}")
-                        except Exception as e:
-                            log(f"  [{vi}/{len(urls)}] 元数据采集失败：{e}")
+                    for _i, item, _err in fetch_videos(
+                            page, urls, workers=CRAWL_TABS, cancelled=_cancelled,
+                            per_item_kwargs=lambda i, u: {"collect_comments": i < HEAT_SENTIMENT_VIDEOS},
+                            on_error=lambda idx, e, tab: log(f"  [{idx + 1}/{len(urls)}] 元数据采集失败：{e}")):
+                        if item is None:
+                            continue
+                        items.append(item)
+                        log(f"  [{len(items)}/{len(urls)}] {item.video_id} | "
+                            f"点赞 {item.like_count or 0} | 发布 {item.publish_time or '未知'}")
+                    if _cancelled():
+                        raise Cancelled()
                     if items:
                         collected[spot] = items
             finally:

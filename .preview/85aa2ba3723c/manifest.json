@@ -1,0 +1,73 @@
+{
+  "schema_version": "1",
+  "source_path": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\开源与商业化分析_AI旅游助手.html",
+  "source_filename": "开源与商业化分析_AI旅游助手.html",
+  "source_hash": "85aa2ba3723c",
+  "source_size_bytes": 28849,
+  "kind": "html",
+  "rendered_at_utc": "2026-09-03T03:55:55+00:00",
+  "output_dir": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\.preview\\85aa2ba3723c",
+  "page_count": 4,
+  "rendered_page_count": 4,
+  "collage_count": 1,
+  "extracted_text_chars": 19846,
+  "text_relpath": "text.md",
+  "thumbnail_relpath": "thumb.jpg",
+  "pages": [
+    {
+      "page": 1,
+      "relpath": "pages\\p001.png",
+      "size_bytes": 236277,
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "page": 2,
+      "relpath": "pages\\p002.png",
+      "size_bytes": 280231,
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "page": 3,
+      "relpath": "pages\\p003.png",
+      "size_bytes": 212821,
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "page": 4,
+      "relpath": "pages\\p004.png",
+      "size_bytes": 203668,
+      "width": 1280,
+      "height": 1331
+    }
+  ],
+  "collages": [
+    {
+      "relpath": "collages\\c1.jpg",
+      "covers_pages": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "grid_cols": 2,
+      "grid_rows": 2,
+      "size_bytes": 305396
+    }
+  ],
+  "warnings": [],
+  "options": {
+    "max_pages": 12,
+    "collage": true,
+    "page_range": null,
+    "thumbnail": true,
+    "text_only": false,
+    "jpeg_quality": 85,
+    "out_max_dim": 2048
+  },
+  "summary": {
+    "bytes": 28849
+  }
+}

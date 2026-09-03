@@ -7,11 +7,13 @@
 import argparse
 import json
 import sys
+import time
 from datetime import datetime
 
 from rich.console import Console
 
 from config import (
+    CRAWL_TABS,
     DEBUG_DIR,
     MAX_COMMENTS_PER_VIDEO,
     MAX_VIDEOS_PER_RUN,
@@ -20,7 +22,8 @@ from config import (
 )
 from crawler.browser import create_page, ensure_login
 from crawler.douyin import DouyinCrawler
-from core.rate_limiter import RateLimiter
+from crawler.tabs import fetch_videos
+from core.rate_limiter import global_limiter
 
 console = Console()
 
@@ -56,7 +59,7 @@ def main():
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     page = create_page()
-    crawler = DouyinCrawler(page, RateLimiter())
+    crawler = DouyinCrawler(page, global_limiter())
     items = []
     try:
         if not ensure_login(page):
@@ -72,17 +75,19 @@ def main():
                 "请检查 data/debug/ 下的页面快照，并对照 crawler/douyin.py 顶部选择器。[/yellow]"
             )
 
-        console.print(f"[cyan]2/3[/cyan] 逐条读取视频内容与评论（每条约 20~40 秒，共 {len(urls)} 条）")
-        for i, url in enumerate(urls, 1):
-            try:
-                item = crawler.fetch_video(url, max_comments=args.comments, with_asr=asr_on)
+        console.print(f"[cyan]2/3[/cyan] 读取视频内容与评论（共 {len(urls)} 条，最多 {CRAWL_TABS} 个标签页并发）")
+
+        def _on_err(idx, err, tab):
+            console.print(f"    [red][{idx + 1}/{len(urls)}] 处理失败：{err}（已存调试快照）[/red]")
+            dump_debug(tab, f"fail_{ts}_{idx + 1}")
+
+        t0 = time.time()
+        for _i, item, _err in fetch_videos(
+                page, urls, comments=args.comments, asr=asr_on, workers=CRAWL_TABS,
+                log=lambda m: console.print(f"    {m}"), on_error=_on_err):
+            if item is not None:
                 items.append(item)
-                console.print(
-                    f"    [{i}/{len(urls)}] {item.video_id} | 文案 {len(item.description)} 字 | 评论 {len(item.comments)} 条"
-                )
-            except Exception as e:
-                console.print(f"    [red][{i}/{len(urls)}] 处理失败：{e}（已存调试快照）[/red]")
-                dump_debug(page, f"fail_{ts}_{i}")
+        console.print(f"    采集完成 {len(items)}/{len(urls)} 条，耗时 {time.time() - t0:.0f} 秒")
 
         if asr_on:
             from concurrent.futures import ThreadPoolExecutor  # noqa: F401

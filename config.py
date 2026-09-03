@@ -24,6 +24,14 @@ MAX_COMMENTS_PER_VIDEO = int(os.getenv("MAX_COMMENTS_PER_VIDEO", "100"))
 MAX_SEARCH_SCROLLS = int(os.getenv("MAX_SEARCH_SCROLLS", "8"))
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 
+# —— 采集提速（不提高风控风险：请求间隔仍由全局频控器逐个预约兜底）——
+# 并发标签页数：1 = 串行（旧行为）；>1 时多 Tab 并行渲染页面，
+# 单位时间发往抖音的请求数不变（共享令牌桶），只是不再互相干等
+CRAWL_TABS = int(os.getenv("CRAWL_TABS", "3"))
+# 拦截图片/字体/视频分片等重资源（只采文本，页面加载显著提速）；
+# ASR 开启时自动放行视频域（否则捕获不到播放地址）
+BLOCK_MEDIA = os.getenv("BLOCK_MEDIA", "true").lower() == "true"
+
 # —— LLM（OpenAI 兼容接口，任选 DeepSeek / 智谱 / 通义 等）——
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")

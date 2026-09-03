@@ -10,7 +10,7 @@ import time
 
 from DrissionPage import ChromiumPage, ChromiumOptions
 
-from config import BROWSER_PROFILE_DIR, HEADLESS
+from config import BLOCK_MEDIA, BROWSER_PROFILE_DIR, HEADLESS
 
 _BROWSER_CANDIDATES = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -19,6 +19,14 @@ _BROWSER_CANDIDATES = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
 ]
+
+# 重资源拦截清单：本项目只采文本，图片/字体/视频分片白白占带宽与渲染时间。
+# 视频 CDN（douyinvod）单独一组：ASR 要从它拿播放地址，开 ASR 时必须放行。
+_BLOCK_IMAGE_FONT = [
+    "*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.bmp", "*.ico", "*.svg",
+    "*.woff", "*.woff2", "*.ttf", "*.otf", "*.eot",
+]
+_BLOCK_VIDEO = ["*.mp4", "*.m4s", "*.flv", "*.ts", "*douyinvod*"]
 
 
 def _pick_browser() -> str | None:
@@ -42,6 +50,21 @@ def create_page() -> ChromiumPage:
         # 不推荐：首次扫码登录需要可见窗口
         co.headless()
     return ChromiumPage(co)
+
+
+def block_heavy_resources(page, keep_video: bool = False) -> bool:
+    """拦截与文本采集无关的重资源，返回是否生效（失败静默降级，不阻断采集）。
+
+    keep_video=True 用于 ASR 场景：只拦图片/字体，放行视频 CDN，
+    否则 listen 抓不到 douyinvod 播放地址。"""
+    if not BLOCK_MEDIA:
+        return False
+    patterns = list(_BLOCK_IMAGE_FONT) + ([] if keep_video else _BLOCK_VIDEO)
+    try:
+        page.set.blocked_urls(patterns)
+        return True
+    except Exception:
+        return False
 
 
 def is_logged_in(page: ChromiumPage) -> bool:

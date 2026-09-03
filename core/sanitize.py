@@ -4,6 +4,7 @@
 但只有经过本文件的解析与白名单过滤，数据才允许进入下游存储。
 """
 import re
+import time
 from datetime import datetime, timedelta
 
 from core.models import Comment
@@ -54,6 +55,20 @@ def time_token_to_date(token: str, now: datetime | None = None) -> str | None:
         except ValueError:
             return None
     return None
+
+
+def timestamp_to_date(ts) -> str | None:
+    """unix 秒级时间戳 -> YYYY-MM-DD（纯函数可测）。
+
+    评论接口返回的是精确时间戳，比页面上的"X 天前"可靠（无需按当前时间反推）。
+    只接受抖音上线（2016 年）至今 +1 天内的值，越界当脏数据返回 None。"""
+    try:
+        n = int(ts)
+    except (TypeError, ValueError):
+        return None
+    if not 1467000000 <= n <= time.time() + 86400:
+        return None
+    return datetime.fromtimestamp(n).strftime("%Y-%m-%d")
 
 
 def parse_count(text: str | None) -> int | None:

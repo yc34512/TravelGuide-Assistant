@@ -1,0 +1,89 @@
+{
+  "schema_version": "1",
+  "source_path": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\项目优化分析_AI旅游助手.html",
+  "source_filename": "项目优化分析_AI旅游助手.html",
+  "source_hash": "69532ca30f29",
+  "source_size_bytes": 37326,
+  "kind": "html",
+  "rendered_at_utc": "2026-09-03T03:48:42+00:00",
+  "output_dir": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\.preview\\69532ca30f29",
+  "page_count": 5,
+  "rendered_page_count": 5,
+  "collage_count": 2,
+  "extracted_text_chars": 25608,
+  "text_relpath": "text.md",
+  "thumbnail_relpath": "thumb.jpg",
+  "pages": [
+    {
+      "page": 1,
+      "relpath": "pages\\p001.png",
+      "size_bytes": 315437,
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "page": 2,
+      "relpath": "pages\\p002.png",
+      "size_bytes": 224407,
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "page": 3,
+      "relpath": "pages\\p003.png",
+      "size_bytes": 245162,
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "page": 4,
+      "relpath": "pages\\p004.png",
+      "size_bytes": 182361,
+      "width": 1280,
+      "height": 1600
+    },
+    {
+      "page": 5,
+      "relpath": "pages\\p005.png",
+      "size_bytes": 148276,
+      "width": 1280,
+      "height": 1031
+    }
+  ],
+  "collages": [
+    {
+      "relpath": "collages\\c1.jpg",
+      "covers_pages": [
+        1,
+        2,
+        3
+      ],
+      "grid_cols": 2,
+      "grid_rows": 1,
+      "size_bytes": 179419
+    },
+    {
+      "relpath": "collages\\c2.jpg",
+      "covers_pages": [
+        4,
+        5
+      ],
+      "grid_cols": 2,
+      "grid_rows": 1,
+      "size_bytes": 81547
+    }
+  ],
+  "warnings": [],
+  "options": {
+    "max_pages": 12,
+    "collage": true,
+    "page_range": null,
+    "thumbnail": true,
+    "text_only": false,
+    "jpeg_quality": 85,
+    "out_max_dim": 2048
+  },
+  "summary": {
+    "bytes": 37326
+  }
+}

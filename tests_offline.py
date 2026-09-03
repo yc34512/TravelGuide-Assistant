@@ -692,6 +692,319 @@ class TestPlanQualityGuards(unittest.TestCase):
             pc.chat_json = orig
 
 
+class TestCrawlSpeedUp(unittest.TestCase):
+    """采集提速：全局令牌桶 / 评论 JSON 解析 / 条件等待 / 多 Tab 并发调度。"""
+
+    def test_rate_limiter_global_queue(self):
+        """全局令牌桶：并发调用也排在同一条时间轴上（请求间隔不因并发缩短）。"""
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        from core.rate_limiter import RateLimiter, global_limiter
+
+        RateLimiter.reset()
+        lim = RateLimiter(min_s=0.05, max_s=0.05)
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda _: lim.wait(), range(4)))
+        # 4 次请求：首个立即放行，后 3 个各排 0.05 秒 → 总耗时至少 0.15 秒
+        self.assertGreaterEqual(time.time() - t0, 0.14)
+        # 不同实例共享同一队列（多 Tab 各持一个实例也不会抢间隔）
+        RateLimiter.reset()
+        a, b = RateLimiter(min_s=0.05, max_s=0.05), RateLimiter(min_s=0.05, max_s=0.05)
+        a.wait()
+        t1 = time.time()
+        b.wait()
+        self.assertGreaterEqual(time.time() - t1, 0.04)
+        self.assertIs(global_limiter(), global_limiter())   # 单例
+        RateLimiter.reset()
+
+    def test_timestamp_to_date(self):
+        """评论精确时间戳换算：字符串数字也认，脏数据/越界给 None。"""
+        import time
+        from datetime import datetime
+
+        from core.sanitize import timestamp_to_date
+
+        ts = int(datetime(2026, 3, 5, 10, 30).timestamp())
+        self.assertEqual(timestamp_to_date(ts), "2026-03-05")
+        self.assertEqual(timestamp_to_date(str(ts)), "2026-03-05")
+        self.assertIsNone(timestamp_to_date(None))
+        self.assertIsNone(timestamp_to_date("abc"))
+        self.assertIsNone(timestamp_to_date(100))                          # 早于抖音上线
+        self.assertIsNone(timestamp_to_date(int(time.time()) + 10 ** 6))   # 未来太多
+
+    def test_parse_comment_payload(self):
+        """评论接口 JSON 解析：作者 UID 比对、脏数据跳过，个人信息不得落入结果。"""
+        from datetime import datetime
+
+        from crawler.douyin import parse_comment_payload
+
+        ts = int(datetime(2026, 1, 15, 12, 0).timestamp())
+        rows = parse_comment_payload([
+            {"text": "门票免费的", "digg_count": 35, "create_time": ts,
+             "user": {"uid": "111", "nickname": "小明", "ip_label": "北京"}},
+            {"text": "作者说得对", "digg_count": 3, "create_time": ts, "user": {"uid": "999"}},
+            {"text": "   ", "digg_count": 9, "user": {"uid": "1"}},      # 空正文丢弃
+            "不是字典",                                                 # 脏数据跳过
+            {"text": "点赞是字符串", "digg_count": "1.2万", "create_time": "abc"},
+        ], author_uid="999")
+        self.assertEqual([r["text"] for r in rows], ["门票免费的", "作者说得对", "点赞是字符串"])
+        self.assertEqual(rows[0]["like_count"], 35)
+        self.assertEqual(rows[0]["time"], "2026-01-15")     # 精确日期（情感趋势用）
+        self.assertFalse(rows[0]["is_author_reply"])
+        self.assertTrue(rows[1]["is_author_reply"])         # UID 命中作者
+        self.assertEqual(rows[2]["like_count"], 12000)      # 字符串计数走 parse_count
+        self.assertIsNone(rows[2]["time"])                  # 非法时间戳给 None
+        for r in rows:   # 合规：只允许白名单四个字段，昵称/UID/属地不得进入下游
+            self.assertEqual(set(r.keys()), {"text", "like_count", "is_author_reply", "time"})
+
+    def test_packet_json_and_author_uid(self):
+        """监听包容错：dict/JSON 字符串/bytes 都认，其余静默降级为 None。"""
+        from types import SimpleNamespace
+
+        from crawler.douyin import author_uid_of, packet_json
+
+        pk = lambda body: SimpleNamespace(response=SimpleNamespace(body=body))
+        self.assertEqual(packet_json(pk({"a": 1})), {"a": 1})
+        self.assertEqual(packet_json(pk('{"a": 2}')), {"a": 2})
+        self.assertEqual(packet_json(pk(b'{"a": 3}')), {"a": 3})
+        self.assertIsNone(packet_json(pk("不是JSON")))
+        self.assertIsNone(packet_json(pk([1, 2])))
+        self.assertIsNone(packet_json(SimpleNamespace(response=None)))   # 取 body 报错也降级
+        self.assertEqual(author_uid_of({"aweme_detail": {"author": {"uid": "u1"}}}), "u1")
+        self.assertEqual(author_uid_of({"item_list": [{"author": {"sec_uid": "s2"}}]}), "s2")
+        self.assertIsNone(author_uid_of({"other": 1}))
+
+    def test_rank_and_filter_shared(self):
+        """两条采集路径共用的点赞排序+低质过滤+保底放宽。"""
+        from core.models import Comment
+        from crawler.douyin import rank_and_filter
+
+        cs = [Comment(text=f"h{i}", like_count=10 + i) for i in range(5)] + [
+            Comment(text="low", like_count=1),
+            Comment(text="author", like_count=0, is_author_reply=True)]
+        out = rank_and_filter(cs, 10)
+        self.assertEqual(out[0].text, "h4")                      # 高赞在前
+        self.assertIn("author", [c.text for c in out])           # 作者回复豁免门槛
+        self.assertNotIn("low", [c.text for c in out])           # 1 赞低质被过滤
+        self.assertEqual(len(out), 6)
+        self.assertEqual([c.text for c in rank_and_filter(cs, 2)], ["h4", "h3"])   # 截断
+        weak = [Comment(text=str(i), like_count=0) for i in range(3)]
+        self.assertEqual(len(rank_and_filter(weak, 10)), 3)      # 不足保底数则放宽
+
+    def test_comments_by_listen(self):
+        """评论监听路径：接口 JSON 包直接解析成评论，无需滚 DOM。"""
+        from datetime import datetime
+        from types import SimpleNamespace
+
+        from crawler.douyin import DouyinCrawler
+
+        ts = int(datetime(2026, 2, 10, 9, 0).timestamp())
+        packets = [
+            SimpleNamespace(url="https://www.douyin.com/aweme/v1/web/aweme/detail/?x=1",
+                            response=SimpleNamespace(body={"aweme_detail": {"author": {"uid": "u9"}}})),
+            SimpleNamespace(url="https://www.douyin.com/aweme/v1/web/comment/list/?y=1",
+                            response=SimpleNamespace(body={"comments": [
+                                {"text": "排队两小时", "digg_count": 88, "create_time": ts,
+                                 "user": {"uid": "u1"}},
+                                {"text": "周一闭馆", "digg_count": 5, "create_time": ts,
+                                 "user": {"uid": "u9"}},
+                                {"text": "排队两小时", "digg_count": 1, "user": {"uid": "u2"}},  # 重复正文去重
+                            ]})),
+        ]
+
+        class FakeListen:
+            def __init__(self): self.started = None
+            def start(self, targets): self.started = targets
+            def stop(self): pass
+            def wait(self, count=1, timeout=None, fit_count=True, raise_err=None):
+                return packets.pop(0) if packets else None
+
+        class FakePage:
+            def __init__(self): self.listen = FakeListen()
+            def ele(self, sel, timeout=None): return None
+            def run_js(self, *a, **k): return None
+
+        got = DouyinCrawler(FakePage())._comments_by_listen(max_n=10, container=None)
+        self.assertEqual([r["text"] for r in got], ["排队两小时", "周一闭馆"])   # 按正文去重
+        self.assertEqual(got[0]["like_count"], 88)
+        self.assertEqual(got[0]["time"], "2026-02-10")
+        self.assertTrue(got[1]["is_author_reply"])     # 作者 UID 先于评论包到达，比对生效
+
+    def test_wait_helpers(self):
+        """条件等待：命中即返回，未命中以 timeout 封顶（不按选择器个数累加）。"""
+        import time
+
+        from crawler.douyin import _wait_any, _wait_until
+
+        self.assertTrue(_wait_until(lambda: True, timeout=1))
+        t0 = time.time()
+        self.assertFalse(_wait_until(lambda: False, timeout=0.3, interval=0.05))
+        self.assertGreaterEqual(time.time() - t0, 0.28)
+        state = {"n": 0}
+
+        def third_time():
+            state["n"] += 1
+            return state["n"] >= 3
+
+        t1 = time.time()
+        self.assertTrue(_wait_until(third_time, timeout=5, interval=0.01))
+        self.assertLess(time.time() - t1, 1)          # 命中即返回，不等满上限
+
+        class Scope:
+            def ele(self, sel, timeout=None):
+                return "ELE" if sel == "css:ok" else None
+
+        self.assertEqual(_wait_any(Scope(), ["css:bad", "css:ok"], timeout=2), "ELE")
+
+        class Empty:
+            def ele(self, sel, timeout=None):
+                return None
+
+        t2 = time.time()
+        self.assertIsNone(_wait_any(Empty(), ["css:a", "css:b"], timeout=0.3))
+        self.assertLess(time.time() - t2, 0.55)       # 两个选择器也只等 0.3 秒，不累加
+
+    def test_open_tabs_degrade(self):
+        """Tab 池：开不出来就退化为可用数量，至少保留主页面。"""
+        from crawler.tabs import close_tabs, open_tabs
+
+        class OkPage:
+            def __init__(self, n=2): self.n, self.made, self.closed = n, 0, False
+            def new_tab(self):
+                if self.made >= self.n:
+                    raise RuntimeError("开不出更多标签页")
+                self.made += 1
+                return OkPage(0)
+            def close(self): self.closed = True
+
+        main = OkPage()
+        tabs = open_tabs(main, 5)
+        self.assertEqual(len(tabs), 3)              # 主页 + 2 个（第三个报错就停）
+        self.assertIs(tabs[0], main)
+        close_tabs(tabs, main)
+        self.assertFalse(main.closed)               # 主页面不关
+        self.assertTrue(all(t.closed for t in tabs[1:]))
+
+        class BadPage:
+            def new_tab(self): raise RuntimeError("不支持多标签")
+        self.assertEqual(len(open_tabs(BadPage(), 3)), 1)
+
+    def test_fetch_videos_parallel(self):
+        """多 Tab 并发：结果按原顺序返回，且同一 Tab 任意时刻只有一个线程在驱动。"""
+        import time
+        from types import SimpleNamespace
+
+        import crawler.douyin as cd
+        from crawler.tabs import fetch_videos
+
+        created, instances = [], []
+
+        class FakeCrawler:
+            def __init__(self, page, limiter):
+                self.page, self.limiter, self.inside, self.max_inside = page, limiter, 0, 0
+                instances.append(self)
+
+            def fetch_video(self, url, **kw):
+                self.inside += 1
+                self.max_inside = max(self.max_inside, self.inside)
+                time.sleep(0.02)
+                self.inside -= 1
+                return SimpleNamespace(video_id=url[-1], description="abc",
+                                       comments=[1, 2], play_urls=[])
+
+        def make_page():
+            class P:
+                def new_tab(self):
+                    t = P()
+                    created.append(t)
+                    return t
+
+                def close(self):
+                    self.closed = True
+            return P()
+
+        orig = cd.DouyinCrawler
+        cd.DouyinCrawler = FakeCrawler
+        try:
+            page = make_page()
+            urls = [f"https://www.douyin.com/video/{i}" for i in range(6)]
+            logs = []
+            out = fetch_videos(page, urls, workers=3, log=logs.append)
+            self.assertEqual(len(created), 2)                        # 主页 + 2 个新 Tab
+            self.assertEqual([i for i, it, e in out], list(range(6)))  # 顺序不乱
+            self.assertTrue(all(it is not None and e is None for _, it, e in out))
+            self.assertEqual([it.video_id for _, it, _ in out], [u[-1] for u in urls])
+            self.assertEqual(len(instances), 3)                      # 每 Tab 一个 crawler
+            self.assertTrue(all(c.max_inside == 1 for c in instances))  # 同 Tab 不并发
+            self.assertEqual(len(logs), 6)                           # 逐条进度日志
+            self.assertIn("评论 2 条", logs[0])
+            # 共享全局频控器：所有 crawler 拿的是同一个实例
+            self.assertEqual(len({id(c.limiter) for c in instances}), 1)
+            # workers=1 不开新 Tab，串行等价
+            created.clear(), instances.clear()
+            page2 = make_page()
+            out2 = fetch_videos(page2, urls[:2], workers=1)
+            self.assertEqual(created, [])
+            self.assertEqual(len(out2), 2)
+            self.assertEqual(fetch_videos(make_page(), []), [])       # 空清单安全
+        finally:
+            cd.DouyinCrawler = orig
+
+    def test_fetch_videos_retry_and_cancel(self):
+        """单条失败自动重试；任务取消时不再继续采集。"""
+        from types import SimpleNamespace
+
+        import crawler.douyin as cd
+        from crawler.tabs import fetch_videos
+
+        class FlakyCrawler:
+            tries = {}
+
+            def __init__(self, page, limiter): pass
+
+            def fetch_video(self, url, **kw):
+                FlakyCrawler.tries[url] = FlakyCrawler.tries.get(url, 0) + 1
+                if FlakyCrawler.tries[url] == 1:
+                    raise RuntimeError("渲染抖动")
+                return SimpleNamespace(video_id="ok", description="d", comments=[], play_urls=[])
+
+        class P:
+            def new_tab(self): return P()
+            def close(self): pass
+
+        orig = cd.DouyinCrawler
+        cd.DouyinCrawler = FlakyCrawler
+        try:
+            logs, errs = [], []
+            out = fetch_videos(P(), ["u1"], workers=1, retries=1, log=logs.append,
+                               on_error=lambda i, e, tab: errs.append(e))
+            self.assertIsNotNone(out[0][1])                    # 重试后成功
+            self.assertEqual(FlakyCrawler.tries["u1"], 2)
+            self.assertTrue(any("稍后重试" in m for m in logs))
+            self.assertEqual(errs, [])                         # 成功了就不走失败回调
+
+            # 全程抛错 → 最终失败并回调
+            class DeadCrawler:
+                def __init__(self, page, limiter): pass
+                def fetch_video(self, url, **kw): raise RuntimeError("挂了")
+
+            cd.DouyinCrawler = DeadCrawler
+            errs2 = []
+            out2 = fetch_videos(P(), ["u2"], workers=1, retries=0,
+                                on_error=lambda i, e, tab: errs2.append(str(e)))
+            self.assertIsNone(out2[0][1])
+            self.assertEqual(errs2, ["挂了"])
+
+            # 取消：不开工，全部空结果
+            cd.DouyinCrawler = FlakyCrawler
+            out3 = fetch_videos(P(), ["a", "b"], workers=1, cancelled=lambda: True)
+            self.assertTrue(all(it is None for _, it, _ in out3))
+        finally:
+            cd.DouyinCrawler = orig
+
+
 class TestMcpAndOpenapi(unittest.TestCase):
     def test_mcp_tools_registered(self):
         """MCP 服务器注册了全套 7 个工具（不拉起服务，只验证注册表）。"""

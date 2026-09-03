@@ -13,14 +13,14 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from config import DEBUG_DIR, KB_TTL_DAYS, RAW_DIR, REPORT_DIR
+from config import CRAWL_TABS, DEBUG_DIR, KB_TTL_DAYS, RAW_DIR, REPORT_DIR
 from core import knowledge
 from core.models import Comment, VideoItem
 
 JOBS: dict[str, dict] = {}
 _LOCK = threading.Lock()        # JOBS 字典读写保护
 _CRAWL_LOCK = threading.Lock()  # 浏览器采集全局唯一：同一时刻只允许一个采集任务
-FETCH_RETRIES = 2               # 单条视频采集失败自动重试次数（偶发网络/渲染抖动）
+# 单条视频失败重试已移到 crawler.tabs.FETCH_RETRIES（并发采集统一处理）
 
 # —— 信息缺口补全（合规硬上限：最多 2 次补充搜索，每次最多 3 条视频）——
 CORE_TOPICS = ("门票", "交通")  # 攻略核心主题：完全缺失时触发定向补采
@@ -75,10 +75,12 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | Non
             raise Cancelled()
         from crawler.browser import create_page, ensure_login
         from crawler.douyin import DouyinCrawler
-        from core.rate_limiter import RateLimiter
+        from crawler.tabs import fetch_videos
+        from core.rate_limiter import global_limiter
 
         page = create_page()
-        crawler = DouyinCrawler(page, RateLimiter())
+        # 搜索阶段用主页面；视频阶段交给 fetch_videos 开多 Tab 并发（共享全局频控）
+        crawler = DouyinCrawler(page, global_limiter())
         items: list[VideoItem] = []
         try:
             if not ensure_login(page):
@@ -90,33 +92,20 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | Non
                 # 0 结果大概率是选择器失效：存快照 + 明确告警，降低排查成本
                 dump_debug(page, f"svc_fail_{ts}_search")
                 log("搜索 0 结果：已保存页面快照到 data/debug/，请对照 crawler/douyin.py 顶部 SEL_* 常量排查")
-            for i, url in enumerate(urls, 1):
-                if cancelled():
-                    raise Cancelled()
-                # 单条重试：页面渲染/网络偶发抖动很常见，重试一次成功率明显提升；
-                # 重试仍失败才记日志继续下一条，不阻断整体采集。
-                last_err: Exception | None = None
-                for attempt in range(FETCH_RETRIES + 1):
-                    try:
-                        item = crawler.fetch_video(url, max_comments=comments, with_asr=asr)
-                        items.append(item)
-                        msg = (f"[{i}/{len(urls)}] {item.video_id} | 文案 {len(item.description)} 字 | "
-                               f"评论 {len(item.comments)} 条")
-                        if asr and item.play_urls:
-                            msg += f" | 已捕获 {len(item.play_urls)} 个媒体地址"
-                        if attempt:
-                            msg += f"（第 {attempt + 1} 次尝试成功）"
-                        log(msg)
-                        last_err = None
-                        break
-                    except Exception as e:
-                        last_err = e
-                        if attempt < FETCH_RETRIES:
-                            log(f"[{i}/{len(urls)}] 采集失败：{e}，稍后重试…")
-                            time.sleep(3)
-                if last_err is not None:
-                    dump_debug(page, f"svc_fail_{ts}_{i}")
-                    log(f"[{i}/{len(urls)}] 采集失败（已重试 {FETCH_RETRIES} 次）：{last_err}")
+            # 多 Tab 并发：单条重试、进度日志、失败快照均在 fetch_videos 内统一处理；
+            # 请求间隔由共享频控器兜底，并发只消除互相干等，不提高风控风险
+            t0 = time.time()
+            for _i, item, _err in fetch_videos(
+                    page, urls, comments=comments, asr=asr, workers=CRAWL_TABS,
+                    log=log, cancelled=cancelled,
+                    on_error=lambda idx, _e, tab: dump_debug(tab, f"svc_fail_{ts}_{idx + 1}")):
+                if item is not None:
+                    items.append(item)
+            if cancelled():
+                raise Cancelled()
+            if urls:
+                log(f"采集完成 {len(items)}/{len(urls)} 条，耗时 {time.time() - t0:.0f} 秒"
+                    f"（最多 {CRAWL_TABS} 个标签页并发）")
         finally:
             try:
                 page.quit()
@@ -180,10 +169,11 @@ def _fill_gaps(keyword: str, items: list[VideoItem], all_points: list[dict],
     with _CRAWL_LOCK:
         from crawler.browser import create_page, ensure_login
         from crawler.douyin import DouyinCrawler
-        from core.rate_limiter import RateLimiter
+        from crawler.tabs import fetch_videos
+        from core.rate_limiter import global_limiter
 
         page = create_page()
-        crawler = DouyinCrawler(page, RateLimiter())
+        crawler = DouyinCrawler(page, global_limiter())
         try:
             if not ensure_login(page):
                 log("缺口补采跳过：未检测到登录态")
@@ -196,14 +186,12 @@ def _fill_gaps(keyword: str, items: list[VideoItem], all_points: list[dict],
                 urls = crawler.search_and_rank(q, GAP_VIDEOS_PER_SEARCH)
                 if not urls:
                     dump_debug(page, f"gap_fail_{ts}_{gi}")
-                for url in urls:
-                    if cancelled():
-                        raise Cancelled()
-                    try:
-                        new_items.append(crawler.fetch_video(url, max_comments=comments))
-                        log(f"  补采 {new_items[-1].video_id} | 评论 {len(new_items[-1].comments)} 条")
-                    except Exception as e:
-                        log(f"  补采失败：{e}")
+                for _i, item, _err in fetch_videos(page, urls, comments=comments,
+                                                   workers=CRAWL_TABS, log=log, cancelled=cancelled):
+                    if item is not None:
+                        new_items.append(item)
+                if cancelled():
+                    raise Cancelled()
         finally:
             try:
                 page.quit()
