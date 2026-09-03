@@ -153,13 +153,13 @@
 const $ = id => document.getElementById(id);
 let currentJobId = null;  // 当前正在轮询的任务，供取消按钮使用
 let currentTab = 'research';
-let outputTab = null;     // 输出区（进度/结果/历史）归属的页签，切换时跟随分类不串页
+let outputTab = null;     // 输出区（进度/结果）归属的页签，切换时跟随分类不串页
+let historyRows = [];     // 历史报告原始数据：按报告类型归入对应页签展示
 
 // 输出区可见性统一收口：只显示归属当前页签的内容，任务在后台照跑不误
 function syncOutput() {
   const mine = outputTab === currentTab;
   $('result').classList.toggle('hidden', !mine);
-  $('history').classList.toggle('hidden', !mine || !$('hist').innerHTML.trim());
   $('progress').classList.toggle('hidden', !mine || !$('log').textContent.trim());
 }
 
@@ -172,6 +172,7 @@ function switchTab(t) {
   $('tab-trip').classList.toggle('active', t === 'trip');
   $('tab-heat').classList.toggle('active', t === 'heat');
   syncOutput();
+  renderHistory();  // 历史卡按页签分类：行程报告在行程页、攻略报告在攻略页
   if (t === 'heat' && $('heatCity').value.trim()) viewHeat();
 }
 
@@ -356,6 +357,7 @@ function renderHeat(r) {
 async function viewHeat() {
   const city = $('heatCity').value.trim();
   if (!city) { $('heatCity').focus(); return; }
+  localStorage.setItem('heatCity', city);  // 记住城市：刷新后切到热度榜自动查榜
   outputTab = currentTab;  // 主动查询的榜单归属当前页签
   try {
     const r = await (await fetch('/api/heat/' + encodeURIComponent(city))).json();
@@ -366,6 +368,7 @@ async function viewHeat() {
 async function goHeatRefresh() {
   const city = $('heatCity').value.trim();
   if (!city) { $('heatCity').focus(); return; }
+  localStorage.setItem('heatCity', city);
   $('heatBtn').disabled = true;
   $('cancelBtn').disabled = false;
   $('result').classList.add('hidden');
@@ -408,17 +411,27 @@ async function loadHistory() {
   try {
     const resp = await fetch('/api/reports');
     const { reports } = await resp.json();
-    if (!reports || !reports.length) return;
-    $('history').classList.remove('hidden');
-    $('hist').innerHTML = reports.map(r =>
-      `<li><span class="kw" onclick="viewReport('${encodeURIComponent(r.report_path)}')">${r.keyword}</span>` +
-      `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
-      (r.report_path.endsWith('.md') && r.keyword.startsWith('行程')
-        ? `<a class="mini-btn" style="text-decoration:none; margin-right:6px;" target="_blank" href="/api/reports/download?name=${encodeURIComponent(r.report_path.replace(/\.md$/, '.html'))}">📊 可视化</a>`
-        : '') +
-      `<a class="mini-btn" download href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">下载</a></li>`
-    ).join('');
+    historyRows = reports || [];
+    renderHistory();
   } catch (e) { /* 历史加载失败不影响主流程 */ }
+}
+
+// 历史报告按类型自动归入对应页签（行程报告→行程规划，攻略报告→攻略报告），
+// 刷新后不再全部堆在攻略页里
+function renderHistory() {
+  const rows = historyRows.filter(r =>
+    currentTab === 'trip' ? (r.keyword || '').startsWith('行程')
+    : currentTab === 'research' ? !(r.keyword || '').startsWith('行程')
+    : false);
+  $('hist').innerHTML = rows.map(r =>
+    `<li><span class="kw" onclick="viewReport('${encodeURIComponent(r.report_path)}')">${r.keyword}</span>` +
+    `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
+    (r.report_path.endsWith('.md') && r.keyword.startsWith('行程')
+      ? `<a class="mini-btn" style="text-decoration:none; margin-right:6px;" target="_blank" href="/api/reports/download?name=${encodeURIComponent(r.report_path.replace(/\.md$/, '.html'))}">📊 可视化</a>`
+      : '') +
+    `<a class="mini-btn" download href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">下载</a></li>`
+  ).join('');
+  $('history').classList.toggle('hidden', !rows.length);
 }
 
 async function viewReport(name) {
@@ -433,6 +446,7 @@ async function viewReport(name) {
   window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
 }
 
+$('heatCity').value = localStorage.getItem('heatCity') || '';
 loadHistory();
 </script>
 </body>
