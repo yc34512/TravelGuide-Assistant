@@ -100,6 +100,11 @@
   .heat-bar { height: 10px; background: #eef1f3; border-radius: 6px; overflow: hidden; }
   .heat-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #58d68d, #1f7a5c); }
   .heat-meta { flex: 0 0 auto; font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
+  .heat-note { font-size: 12px; color: var(--muted); background: #f8faf9; border-radius: 8px;
+               padding: 8px 12px; margin-bottom: 12px; line-height: 1.7; }
+  .mkt-warn { color: var(--red); font-weight: 700; }
+  .senti-up { color: #1e8449; }
+  .senti-down { color: var(--red); font-weight: 600; }
   .trend-tag { font-size: 11px; border-radius: 10px; padding: 1px 8px; margin-left: 6px; white-space: nowrap; }
   .t-hot { background: #fdedec; color: #c0392b; border: 1px solid #f5b7b1; }
   .t-ever { background: #fef9e7; color: #b7950b; border: 1px solid #f7dc6f; }
@@ -214,6 +219,9 @@
   {% if heat %}
   <section>
     <h2>热度榜（近 90 天抖音数据）</h2>
+    <div class="heat-note">热度指数 = 点赞热度 40%（对数归一）+ 评论密度 30% + 新鲜度 30%（近 90 天发布占比）；
+      营销号占比 = 文案命中营销话术的视频占比，<b>≥50% 需谨慎看待</b>；
+      情感趋势 = 近 30 天评论好评率与更早对比（判断是不是越做越差）。</div>
     {% set top = heat|map(attribute='score')|max %}
     <div class="heat-list">
       {% for h in heat %}
@@ -225,7 +233,9 @@
           <div class="heat-name">{{ h.spot }}<span class="trend-tag {{ tcls }}">{{ ticon }} {{ h.trend }}</span></div>
           <div class="heat-bar"><div class="heat-fill" style="width: {{ '%.0f'|format((h.score / top * 100) if top else 0) }}%;"></div></div>
         </div>
-        <div class="heat-meta">热度 {{ '%.2f'|format(h.score) }}<br>视频 {{ h.videos }} · 赞 {{ h.likes }} · 评 {{ h.comments }}</div>
+        <div class="heat-meta">热度 {{ '%.2f'|format(h.score) }}<br>视频 {{ h.videos }} · 赞 {{ h.likes }} · 评 {{ h.comments }}<br>
+          <span class="{{ 'mkt-warn' if (h.mkt_ratio or 0) >= 0.5 else '' }}">营销号 {{ h.marketing or 0 }}/{{ h.videos }}{% if (h.mkt_ratio or 0) >= 0.5 %} ⚠️{% endif %}</span>
+          {% if h.sentiment %} · <span class="{{ 'senti-down' if h.sentiment == '好评下降' else ('senti-up' if h.sentiment == '好评上升' else '') }}">{{ h.sentiment }}</span>{% endif %}</div>
       </div>
       {% endfor %}
     </div>

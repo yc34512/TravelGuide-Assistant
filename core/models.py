@@ -15,6 +15,7 @@ class Comment:
     text: str
     like_count: int | None = None
     is_author_reply: bool = False
+    time: str | None = None  # 发布日期 YYYY-MM-DD（由页面相对时间换算；情感趋势用，不含属地等个人信息）
 
 
 @dataclass

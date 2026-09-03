@@ -230,11 +230,11 @@ class DouyinCrawler:
         stale_rounds = 0
         while len(collected) < max_n and stale_rounds < 5:
             for node in _find_items(container, SEL_COMMENT_ITEM):
-                text, like, is_author = parse_comment_block(node.text)
+                text, like, is_author, c_time = parse_comment_block(node.text)
                 if not text or text in collected:
                     continue
                 collected[text] = clean_comment(
-                    {"text": text[:500], "like_count": like, "is_author_reply": is_author}
+                    {"text": text[:500], "like_count": like, "is_author_reply": is_author, "time": c_time}
                 )
                 if len(collected) >= max_n:
                     break

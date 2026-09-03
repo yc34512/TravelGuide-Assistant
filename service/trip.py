@@ -22,7 +22,7 @@ from pipeline.candidates import (
     verify_candidates,
 )
 from pipeline.extract import extract_points
-from pipeline.heat import heat_index, pitfall_digest
+from pipeline.heat import heat_index, pitfall_digest, sentiment_trend
 from pipeline.verify import annotate_confidence
 from pipeline.planner import (
     build_budget_summary,
@@ -364,6 +364,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             if items:
                 h = heat_index(items)
                 h["spot"] = s
+                # 评论情感趋势：行程调研采了评论，顺手算近30天好评率走向（纯函数零成本）
+                h["sentiment"] = sentiment_trend([c for it in items for c in it.comments])["trend"]
                 heat_rows.append(h)
         heat_rows.sort(key=lambda r: r["score"], reverse=True)
         log(f"预算明细：预估 {budget_summary['total']:.0f} 元"

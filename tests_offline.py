@@ -141,24 +141,25 @@ class TestSanitizeAuthor(unittest.TestCase):
         from core.sanitize import parse_comment_block
 
         normal = "昵称\n...\n门票免费的\n1天前·北京\n35\n分享\n回复"
-        text, like, is_author = parse_comment_block(normal)
+        text, like, is_author, c_time = parse_comment_block(normal)
         self.assertEqual(text, "门票免费的")
         self.assertEqual(like, 35)
         self.assertFalse(is_author)
+        self.assertIsNotNone(c_time)  # "1天前"换算成日期（情感趋势用）
 
         author = "某网友\n作者\n...\n谢谢大家支持\n2小时前·浙江\n3\n分享\n回复"
-        text, like, is_author = parse_comment_block(author)
+        text, like, is_author, c_time = parse_comment_block(author)
         self.assertEqual(text, "谢谢大家支持")
         self.assertTrue(is_author)
 
         # 宁漏不误标：正文里含"作者"二字但不是独立标记行，不认定作者回复
         tricky = "昵称\n...\n作者是好人\n1天前\n5\n分享\n回复"
-        text, like, is_author = parse_comment_block(tricky)
+        text, like, is_author, c_time = parse_comment_block(tricky)
         self.assertEqual(text, "作者是好人")
         self.assertFalse(is_author)
 
         # 空块
-        self.assertEqual(parse_comment_block(""), ("", None, False))
+        self.assertEqual(parse_comment_block(""), ("", None, False, None))
 
 
 class TestVerify(unittest.TestCase):

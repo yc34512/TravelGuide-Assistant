@@ -12,13 +12,14 @@ from datetime import datetime
 
 from core import knowledge
 from pipeline.candidates import candidate_foods
-from pipeline.heat import heat_index, time_windows, trend_of
+from pipeline.heat import heat_index, sentiment_trend, time_windows, trend_of
 from pipeline.planner import candidate_spots
 from service.research import JOBS, _CRAWL_LOCK, _LOCK, Cancelled, dump_debug
 
 HEAT_SPOT_LIMIT = 6       # 每次刷榜的景点数硬上限（成本闸）
 HEAT_VIDEOS_PER_SPOT = 4  # 每个景点采的元数据视频数
 HEAT_FOOD_LIMIT = 2       # 美食榜并列：每次刷榜额外采的美食/餐厅数（成本闸）
+HEAT_SENTIMENT_VIDEOS = 1  # 每个对象采评论的视频数（仅首个，算情感趋势；其余纯元数据控成本）
 
 
 def start_heat_refresh(city: str) -> str:
@@ -119,7 +120,8 @@ def _run_heat(job_id: str, city: str) -> None:
                         if _cancelled():
                             raise Cancelled()
                         try:
-                            item = crawler.fetch_video(url, collect_comments=False)
+                            # 首个视频连评论一起采（情感趋势原料），其余只取元数据控成本
+                            item = crawler.fetch_video(url, collect_comments=(vi <= HEAT_SENTIMENT_VIDEOS))
                             items.append(item)
                             log(f"  [{vi}/{len(urls)}] {item.video_id} | "
                                 f"点赞 {item.like_count or 0} | 发布 {item.publish_time or '未知'}")
@@ -141,13 +143,16 @@ def _run_heat(job_id: str, city: str) -> None:
             h = heat_index(items)
             w = time_windows(items)
             trend = trend_of(w["fresh7"], w["old60"], h["score"])
+            senti = sentiment_trend([c for it in items for c in it.comments])
             knowledge.upsert_heat_snapshot(city, spot, {
                 "score": h["score"], "fresh7": w["fresh7"], "fresh60": w["fresh60"],
                 "old60": w["old60"], "likes": h["likes"], "videos": h["videos"],
-                "trend": trend,
+                "trend": trend, "mkt_ratio": h["mkt_ratio"], "sentiment": senti["trend"],
             }, kind=kinds.get(spot, "景点"))
+            warn = "｜⚠️营销号占比高，热度需谨慎看待" if h["mkt_ratio"] >= 0.5 else ""
             log(f"{spot}：热度 {h['score']:.2f} · {trend}"
-                f"（近7天 {w['fresh7']:.0%} / 60天以上 {w['old60']:.0%}）")
+                f"（近7天 {w['fresh7']:.0%} / 60天以上 {w['old60']:.0%}）"
+                f"｜营销号 {h['marketing']}/{h['videos']}｜情感 {senti['trend']}{warn}")
 
         ranking = knowledge.load_heat_snapshots(city)
         job["result"] = {

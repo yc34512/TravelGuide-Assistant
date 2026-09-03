@@ -321,13 +321,21 @@ function trendTag(t) {
 
 function heatTable(rows) {
   return '<table class="heat-tbl">' +
-    '<tr><th>#</th><th>名称</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>更新时间</th></tr>' +
-    rows.map((h, i) =>
-      `<tr><td>${i + 1}</td><td>${h.spot}</td><td>${trendTag(h.trend)}</td>` +
-      `<td>${h.score.toFixed(2)}</td><td>${Math.round(h.fresh7 * 100)}%</td>` +
-      `<td>${h.likes}</td><td>${h.videos}</td><td>${(h.updated_at || '').replace('T', ' ')}</td></tr>`
-    ).join('') + '</table>';
+    '<tr><th>#</th><th>名称</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>营销号占比</th><th>情感趋势</th><th>更新时间</th></tr>' +
+    rows.map((h, i) => {
+      const mkt = h.mkt_ratio || 0;
+      const senti = h.sentiment || '';
+      const sentiColor = senti === '好评下降' ? 'color:#c0392b;font-weight:600;' : (senti === '好评上升' ? 'color:#1e8449;' : '');
+      return `<tr><td>${i + 1}</td><td>${h.spot}</td><td>${trendTag(h.trend)}</td>` +
+        `<td>${h.score.toFixed(2)}</td><td>${Math.round(h.fresh7 * 100)}%</td>` +
+        `<td>${h.likes}</td><td>${h.videos}</td>` +
+        `<td style="${mkt >= 0.5 ? 'color:#c0392b;font-weight:700;' : ''}">${Math.round(mkt * 100)}%${mkt >= 0.5 ? ' ⚠️' : ''}</td>` +
+        `<td style="${sentiColor}">${senti || '—'}</td>` +
+        `<td>${(h.updated_at || '').replace('T', ' ')}</td></tr>`;
+    }).join('') + '</table>';
 }
+
+const HEAT_EXPLAIN = '<p style="font-size:12px;color:#7f8c8d;margin:2px 0 10px;">热度分 = 点赞 40%（对数归一）+ 评论密度 30% + 新鲜度 30%（近90天发布占比）；营销号占比 ≥50% 需谨慎看待；情感趋势 = 近30天评论好评率与更早对比（判断是不是越做越差）。</p>';
 
 function renderHeat(r) {
   $('result').classList.remove('hidden');
@@ -338,7 +346,7 @@ function renderHeat(r) {
     ((r.food_ranking || []).length ? `<span>美食 <b>${r.food_ranking.length}</b> 个</span>` : '');
   const hasFood = (r.food_ranking || []).length > 0;
   if (!r.ranking.length && !hasFood) { $('report').innerHTML = `<p>${r.hint || '暂无数据'}</p>`; syncOutput(); return; }
-  let html = '';
+  let html = HEAT_EXPLAIN;
   if (r.ranking.length) html += '<h3>🏞️ 景点热度榜</h3>' + heatTable(r.ranking);
   if (hasFood) html += '<h3 style="margin-top:14px;">🍜 美食热度榜</h3>' + heatTable(r.food_ranking);
   $('report').innerHTML = html;

@@ -546,10 +546,18 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
                          f"（点位花费 {sc['spots']:.0f} + 餐饮 {sc['food']:.0f} + 市内交通 {sc['transport']:.0f}，弹性预留不分摊）")
             lines.append("")
     if heat:
-        lines += ["## 热度榜（近 90 天抖音数据）", ""]
+        lines += ["## 热度榜（近 90 天抖音数据）", "",
+                  "> 热度指数 = 点赞热度 40%（对数归一）+ 评论密度 30% + 新鲜度 30%（近 90 天发布占比）；",
+                  "> 营销号占比 = 文案命中营销话术的视频占比，≥50% 需谨慎看待该热度；",
+                  "> 情感趋势 = 近 30 天评论好评率与更早对比（关键词判定，判断是不是越做越差）。",
+                  ""]
         for i, h in enumerate(heat, 1):
+            mkt_ratio = h.get("mkt_ratio", 0) or 0
+            warn = " ｜ ⚠️ **营销号占比高，谨慎参考**" if mkt_ratio >= 0.5 else ""
+            senti = f" · 情感 {h['sentiment']}" if h.get("sentiment") else ""
             lines.append(f"{i}. **{h['spot']}** ｜ 热度指数 {h['score']:.2f} ｜ {h['trend']}"
-                         f"（视频 {h['videos']} 条 · 点赞 {h['likes']} · 评论 {h['comments']}）")
+                         f"（视频 {h['videos']} 条 · 点赞 {h['likes']} · 评论 {h['comments']}"
+                         f" · 营销号 {h.get('marketing', 0)}/{h['videos']} · {mkt_ratio:.0%}{senti}）{warn}")
         lines.append("")
     lines.append("## 景点详情卡")
     lines.append("")
