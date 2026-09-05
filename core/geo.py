@@ -5,11 +5,14 @@
 - 数据合规：只上传景点名与酒店文本做查询，不上传任何采集到的内容数据；
 - 进程内缓存：同一任务里重复查询（规划阶段会两两算矩阵）不重复消耗配额。
 """
+import json
 import math
+import threading
+from datetime import date
 
 import httpx
 
-from config import AMAP_API_KEY
+from config import AMAP_API_KEY, AMAP_DAILY_CAP, PROJECT_ROOT
 
 _BASE = "https://restapi.amap.com/v3"
 
@@ -17,6 +20,63 @@ _BASE = "https://restapi.amap.com/v3"
 _geo_cache: dict[tuple[str, str], dict | None] = {}
 _time_cache: dict[tuple[str, str], tuple[int, str] | None] = {}
 _route_cache: dict[tuple[str, str], str | None] = {}
+
+# —— 高德用量护栏：按日计数落盘，达到 AMAP_DAILY_CAP 后停止调用并降级（防烧配额）——
+_USAGE_FILE = PROJECT_ROOT / "data" / "amap_usage.json"
+_usage_lock = threading.Lock()
+_cap_warned = False
+
+
+def _read_usage() -> tuple[str, int]:
+    try:
+        d = json.loads(_USAGE_FILE.read_text(encoding="utf-8"))
+        return str(d.get("date", "")), int(d.get("count", 0))
+    except Exception:
+        return "", 0
+
+
+def amap_usage() -> dict:
+    """今日高德调用量与日上限（供 /api/health 展示与自查）。"""
+    today = date.today().isoformat()
+    d, c = _read_usage()
+    return {"today": c if d == today else 0, "cap": AMAP_DAILY_CAP}
+
+
+def _quota_exhausted() -> bool:
+    return amap_usage()["today"] >= AMAP_DAILY_CAP
+
+
+def _bump_usage() -> None:
+    today = date.today().isoformat()
+    with _usage_lock:
+        d, c = _read_usage()
+        c = c + 1 if d == today else 1
+        try:
+            _USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _USAGE_FILE.write_text(json.dumps({"date": today, "count": c}), encoding="utf-8")
+        except Exception:
+            pass
+
+
+def _warn_cap_once() -> None:
+    global _cap_warned
+    if not _cap_warned:
+        _cap_warned = True
+        print(f"[geo] 高德今日调用已达上限（{AMAP_DAILY_CAP} 次/日），地理查询降级为 LLM 估算；"
+              f"如需提高设 AMAP_DAILY_CAP（个人免费额度 5000/日，请勿超）。")
+
+
+def _amap_get(path: str, params: dict) -> dict | None:
+    """统一高德请求出口：配额护栏 + key 注入 + 异常吞掉返回 None（调用方自动降级）。"""
+    if _quota_exhausted():
+        _warn_cap_once()
+        return None
+    try:
+        r = httpx.get(f"{_BASE}{path}", params={"key": AMAP_API_KEY, **params}, timeout=10)
+        _bump_usage()
+        return r.json()
+    except Exception:
+        return None
 
 
 def available() -> bool:
@@ -35,20 +95,11 @@ def geocode_poi(name: str, city: str) -> dict | None:
     if key in _geo_cache:
         return _geo_cache[key]
     try:
-        r = httpx.get(
-            f"{_BASE}/place/text",
-            params={
-                "key": AMAP_API_KEY,
-                "keywords": name,
-                "city": city,
-                "citylimit": "true",
-                "offset": 1,
-                "extensions": "base",
-            },
-            timeout=10,
-        )
-        data = r.json()
-        if data.get("status") == "1" and data.get("pois"):
+        data = _amap_get("/place/text", {
+            "keywords": name, "city": city, "citylimit": "true",
+            "offset": 1, "extensions": "base",
+        })
+        if data and data.get("status") == "1" and data.get("pois"):
             p = data["pois"][0]
             out = {
                 "name": p.get("name") or name,
@@ -76,20 +127,11 @@ def poi_detail(name: str, city: str) -> dict | None:
     if key in _geo_cache:  # 复用地理编码缓存字典，避免重复消耗配额
         return _geo_cache[key]
     try:
-        r = httpx.get(
-            f"{_BASE}/place/text",
-            params={
-                "key": AMAP_API_KEY,
-                "keywords": name,
-                "city": city,
-                "citylimit": "true",
-                "offset": 1,
-                "extensions": "all",
-            },
-            timeout=10,
-        )
-        data = r.json()
-        if data.get("status") == "1" and data.get("pois"):
+        data = _amap_get("/place/text", {
+            "keywords": name, "city": city, "citylimit": "true",
+            "offset": 1, "extensions": "all",
+        })
+        if data and data.get("status") == "1" and data.get("pois"):
             p = data["pois"][0]
             biz = p.get("biz_ext") or {}
 
@@ -138,30 +180,18 @@ def travel_time(origin_loc: str, dest_loc: str, city: str = "") -> tuple[int, st
     d = distance_km(origin_loc, dest_loc)
     try:
         if d is not None and d < 2.0:
-            r = httpx.get(
-                f"{_BASE}/direction/walking",
-                params={"key": AMAP_API_KEY, "origin": origin_loc, "destination": dest_loc},
-                timeout=10,
-            )
-            data = r.json()
-            paths = (data.get("route") or {}).get("paths") or []
-            if data.get("status") == "1" and paths:
+            data = _amap_get("/direction/walking",
+                             {"origin": origin_loc, "destination": dest_loc})
+            paths = ((data or {}).get("route") or {}).get("paths") or []
+            if data and data.get("status") == "1" and paths:
                 result = (max(1, round(int(paths[0]["duration"]) / 60)), "步行")
         else:
-            r = httpx.get(
-                f"{_BASE}/direction/transit/integrated",
-                params={
-                    "key": AMAP_API_KEY,
-                    "origin": origin_loc,
-                    "destination": dest_loc,
-                    "city": city or "全国",
-                    "cityd": city or "全国",
-                },
-                timeout=10,
-            )
-            data = r.json()
-            transits = (data.get("route") or {}).get("transits") or []
-            if data.get("status") == "1" and transits:
+            data = _amap_get("/direction/transit/integrated", {
+                "origin": origin_loc, "destination": dest_loc,
+                "city": city or "全国", "cityd": city or "全国",
+            })
+            transits = ((data or {}).get("route") or {}).get("transits") or []
+            if data and data.get("status") == "1" and transits:
                 result = (max(1, round(int(transits[0]["duration"]) / 60)), "公交")
     except Exception:
         result = None
@@ -200,27 +230,20 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
     walk_range = d is not None and d < 1.5
     try:
         if walk_range:
-            r = httpx.get(
-                f"{_BASE}/direction/walking",
-                params={"key": AMAP_API_KEY, "origin": origin_loc, "destination": dest_loc},
-                timeout=10,
-            )
-            data = r.json()
-            paths = (data.get("route") or {}).get("paths") or []
-            if data.get("status") == "1" and paths:
+            data = _amap_get("/direction/walking",
+                             {"origin": origin_loc, "destination": dest_loc})
+            paths = ((data or {}).get("route") or {}).get("paths") or []
+            if data and data.get("status") == "1" and paths:
                 mins = max(1, round(int(paths[0]["duration"]) / 60))
                 dist = round(int(paths[0].get("distance") or 0))
                 parts.append(f"步行约{mins}分钟（约{dist}米）")
         else:
-            r = httpx.get(
-                f"{_BASE}/direction/transit/integrated",
-                params={"key": AMAP_API_KEY, "origin": origin_loc, "destination": dest_loc,
-                        "city": city or "全国", "cityd": city or "全国"},
-                timeout=10,
-            )
-            data = r.json()
-            transits = (data.get("route") or {}).get("transits") or []
-            if data.get("status") == "1" and transits:
+            data = _amap_get("/direction/transit/integrated", {
+                "origin": origin_loc, "destination": dest_loc,
+                "city": city or "全国", "cityd": city or "全国",
+            })
+            transits = ((data or {}).get("route") or {}).get("transits") or []
+            if data and data.get("status") == "1" and transits:
                 t = transits[0]
                 mins = max(1, round(int(t.get("duration") or 0) / 60))
                 head = f"公交约{mins}分钟"
@@ -236,15 +259,11 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
                 parts.append(head)
         # 打车估算（driving 路线含 taxi_cost）：步行圈外与公交并列给出，用户二选一
         if not walk_range:
-            r = httpx.get(
-                f"{_BASE}/direction/driving",
-                params={"key": AMAP_API_KEY, "origin": origin_loc,
-                        "destination": dest_loc, "extensions": "base"},
-                timeout=10,
-            )
-            data = r.json()
-            paths = (data.get("route") or {}).get("paths") or []
-            if data.get("status") == "1" and paths:
+            data = _amap_get("/direction/driving", {
+                "origin": origin_loc, "destination": dest_loc, "extensions": "base",
+            })
+            paths = ((data or {}).get("route") or {}).get("paths") or []
+            if data and data.get("status") == "1" and paths:
                 mins = max(1, round(int(paths[0].get("duration") or 0) / 60))
                 txt = f"打车约{mins}分钟"
                 try:

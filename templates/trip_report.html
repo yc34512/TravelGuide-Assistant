@@ -42,6 +42,28 @@
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { padding: 8px 10px; border-bottom: 1px solid #eef1f3; text-align: left; }
   th { background: #f4f8f6; color: var(--green); }
+  /* 质量分卡（§5.3）：总分条 + 各规则状态色 */
+  .qc-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; margin-bottom: 12px; }
+  .qc-score { font-size: 15px; }
+  .qc-score b { font-size: 22px; color: var(--green); }
+  .qc-meta { font-size: 13px; color: var(--muted); background: #f4f8f6; border-radius: 12px; padding: 2px 10px; }
+  .qc-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .qc-list li { font-size: 13px; border-radius: 6px; padding: 5px 10px; border: 1px solid #e8ecee; background: #fff; }
+  .qc-list li.qc-pass { border-left: 3px solid var(--green); }
+  .qc-list li.qc-warn { border-left: 3px solid var(--amber); background: #fef9e7; }
+  .qc-list li.qc-fail { border-left: 3px solid var(--red); background: #fdf3f2; }
+  .qc-list li.qc-skip { border-left: 3px solid #d5d8dc; color: var(--muted); }
+  .qc-actual, .qc-note { color: var(--muted); margin-left: 6px; }
+  .qc-unresolved { margin-top: 14px; background: #fef9e7; border: 1px solid #f8d9a8; border-radius: 10px; padding: 12px 14px; }
+  .qc-unresolved h3 { font-size: 14px; color: #9c640c; margin-bottom: 6px; }
+  .qc-unresolved .qc-tip { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .qc-unresolved ul { margin-left: 18px; font-size: 13px; }
+  /* 选点决策表（F7.1）：状态行配色 */
+  .decision-table td { font-size: 13px; }
+  .decision-table tr.st-in td:first-child { color: var(--green); font-weight: 600; }
+  .decision-table tr.st-alt td:first-child { color: var(--amber); }
+  .decision-table tr.st-out td:first-child { color: var(--red); }
+  .decision-table tr.st-out { opacity: .82; }
   .risk-high { color: var(--red); font-weight: 600; }
   /* 避坑警示卡：红橙渐变 + 左侧粗边 + 图标，一眼识别风险 */
   .pit-card { position: relative; background: linear-gradient(135deg, #fff7ef, #fdeeee); border: 1px solid #f2c4bd;
@@ -149,6 +171,57 @@
     </div>
     {% if plan.summary_note %}<div class="note-bar">规划说明：{{ plan.summary_note }}</div>{% endif %}
   </section>
+
+  {% if quality %}
+  <section>
+    <h2>质量分卡</h2>
+    <div class="qc-head">
+      <span class="qc-score">质量总分 <b>{{ quality.score }}</b> / 100</span>
+      <span class="qc-meta">回炉 {{ quality.repair_rounds }} 轮</span>
+      <span class="qc-meta">已知妥协 {{ quality.unresolved|length }} 项</span>
+      <span class="qc-meta">{{ '✅ 门禁通过' if quality.passed else '⚠️ 存在未达标项' }}</span>
+    </div>
+    <ul class="qc-list">
+      {% for c in quality.checks %}
+      <li class="qc-{{ c.status }}">
+        <span>{{ {'pass':'✅','warn':'⚠️','fail':'❌','skip':'➖'}.get(c.status,'') }}</span>
+        <b>{{ c.rule_id }} {{ c.name }}</b>
+        <span class="qc-actual">{{ c.actual }}</span>
+        {% if c.note %}<span class="qc-note">— {{ c.note }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% if quality.unresolved %}
+    <div class="qc-unresolved">
+      <h3>已知妥协 / 待你定夺</h3>
+      <p class="qc-tip">以下是回炉后仍未能完全满足的项，如实列出而非静默掩盖：</p>
+      <ul>{% for u in quality.unresolved %}<li>{{ u }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if decision_rows %}
+  <section>
+    <h2>选点决策表</h2>
+    <div class="heat-note">每个被圈定的候选都有明确结论——包括没带你去的点及原因。「证据」为多源交叉验证强度，「营销号」占比高需谨慎。</div>
+    <table class="decision-table">
+      <tr><th>状态</th><th>名称</th><th>类别</th><th>来源</th><th>证据</th><th>热度（趋势）</th><th>营销号</th><th>理由</th></tr>
+      {% for r in decision_rows %}
+      <tr class="st-{{ {'入选':'in','备选':'alt','淘汰':'out'}.get(r.state,'none') }}">
+        <td>{{ r.state_icon }} {{ r.state }}</td>
+        <td><b>{{ r.name }}</b></td>
+        <td>{{ r.category }}</td>
+        <td>{{ r.sources }}</td>
+        <td>{{ r.evidence }}</td>
+        <td>{{ r.heat }}（{{ r.trend }}）</td>
+        <td>{{ r.mkt }}</td>
+        <td>{{ r.reason }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endif %}
 
   {% if budget_summary %}
   <section>

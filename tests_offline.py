@@ -26,6 +26,46 @@ class TestKnowledge(unittest.TestCase):
         self.assertEqual(normalize_keyword("武功山旅游攻略"), "武功山")
         self.assertEqual(normalize_keyword("攻略"), "攻略")  # 归一化后为空保留原串
 
+    def test_normalize_strips_qualifiers(self):
+        """括号限定词剥离（全角/半角）：让带分店/范围说明的候选名归一到干净键。"""
+        from core.knowledge import normalize_keyword, strip_qualifiers
+
+        self.assertEqual(strip_qualifiers("什刹海（含前海、后海、西海）"), "什刹海")
+        self.assertEqual(strip_qualifiers("四季民福(故宫店)"), "四季民福")
+        self.assertEqual(normalize_keyword("什刹海（含前海、后海、西海）"), "什刹海")
+        self.assertEqual(normalize_keyword("西湖（一日游）攻略"), "西湖")
+        self.assertEqual(strip_qualifiers("（无主名）"), "（无主名）")  # 剥空回退原串
+
+    def test_find_fresh_reuse_and_poison_guard(self):
+        """缓存复用：括号变体命中干净键 + 前缀回退命中变体名 + 空采集不算命中（防投毒）。"""
+        from core import knowledge
+
+        tmp_db = Path(tempfile.mkdtemp()) / "test_fresh.db"
+        raw_dir = Path(tempfile.mkdtemp())
+        orig = knowledge._DB_PATH
+        knowledge._DB_PATH = tmp_db
+        try:
+            f1 = raw_dir / "a.json"; f1.write_text("[]", encoding="utf-8")
+            knowledge.record_crawl("什刹海", str(f1), 5, 80)
+            # 括号变体查询 -> 剥括号后命中干净键
+            hit = knowledge.find_fresh("什刹海（含前海、后海、西海）", 7)
+            self.assertIsNotNone(hit)
+            self.assertEqual(hit["video_count"], 5)
+
+            f2 = raw_dir / "b.json"; f2.write_text("[]", encoding="utf-8")
+            knowledge.record_crawl("四季民福烤鸭店", str(f2), 5, 100)
+            # 前缀回退："四季民福（故宫店）"→归一"四季民福"→LIKE命中"四季民福烤鸭店"
+            hit2 = knowledge.find_fresh("四季民福（故宫店）", 7)
+            self.assertIsNotNone(hit2)
+            self.assertEqual(hit2["video_count"], 5)
+
+            f3 = raw_dir / "c.json"; f3.write_text("[]", encoding="utf-8")
+            knowledge.record_crawl("某冷门点", str(f3), 0, 0)
+            # 空采集（video_count=0）不算保鲜命中：杜绝历史空数据被误复用
+            self.assertIsNone(knowledge.find_fresh("某冷门点", 7))
+        finally:
+            knowledge._DB_PATH = orig
+
     def test_job_persistence_roundtrip(self):
         """record_job -> load_job -> list_jobs 全链路（临时库，不污染真实数据）。"""
         from core import knowledge
@@ -435,6 +475,33 @@ class TestCandidates(unittest.TestCase):
         finally:
             pc.chat_json = orig
 
+    def test_select_verify_fair_quota(self):
+        """F2.1 公平截断：按类别配额挑选，美食/体验/购物不因返回顺序靠后被整体截断。"""
+        from pipeline.candidates import VERIFY_MAX, select_verify_candidates
+
+        cands = (
+            [{"name": f"景{i}", "category": "景点"} for i in range(10)]
+            + [{"name": f"食{i}", "category": "美食"} for i in range(5)]
+            + [{"name": f"体{i}", "category": "体验"} for i in range(3)]
+            + [{"name": f"购{i}", "category": "购物"} for i in range(2)]
+        )
+        picked = select_verify_candidates(cands, VERIFY_MAX)
+        cats = [c["category"] for c in picked]
+        self.assertEqual(len(picked), VERIFY_MAX)
+        self.assertGreaterEqual(cats.count("美食"), 3)   # 美食保底进验证
+        self.assertGreaterEqual(cats.count("体验"), 1)
+        self.assertGreaterEqual(cats.count("购物"), 1)
+        self.assertLessEqual(cats.count("景点"), 7)      # 景点不再独占前 12
+
+    def test_select_verify_topup_when_sparse(self):
+        """某类候选不足时余量按景点优先补给；候选总数不足则全取。"""
+        from pipeline.candidates import select_verify_candidates
+
+        only_spots = [{"name": f"景{i}", "category": "景点"} for i in range(10)]
+        picked = select_verify_candidates(only_spots, 12)
+        self.assertEqual(len(picked), 10)
+        self.assertTrue(all(c["category"] == "景点" for c in picked))
+
 
 class TestHeatAndPitfall(unittest.TestCase):
     def _items(self):
@@ -518,6 +585,36 @@ class TestBudgetAndHtml(unittest.TestCase):
         b2 = build_budget_summary(self._profiles(), self._plan(), days=7, budget=100)
         self.assertEqual(b2["status"], "超支")
         self.assertIn("超出预算", b2["note"])
+
+    def test_food_per_person_threshold_and_baseline(self):
+        """F4.2/F4.6：单菜价(<下限)不当正餐人均；无可靠人均则基线兜底并标注。"""
+        from pipeline.planner import MEAL_BASELINE, budget_breakdown, build_budget_summary
+
+        plan = self._plan()
+        # 只提取到单菜价 7 元 → 剔除 → 基线兜底
+        prof_dish = {"某店": {"cost_items": [{"item": "香辣蟹", "type": "餐饮人均", "amount": 7.0}]}}
+        b1 = build_budget_summary(prof_dish, plan, days=2, budget=None)
+        self.assertTrue(b1["food_baseline"])
+        self.assertEqual(b1["food_avg"], float(MEAL_BASELINE))
+        self.assertEqual(b1["food_price_srcs"], [])
+        # 有可靠人均 35 → 采用，不用基线
+        prof_ok = {"某店": {"cost_items": [{"item": "人均", "type": "餐饮人均", "amount": 35.0}]}}
+        b2 = build_budget_summary(prof_ok, plan, days=2, budget=None)
+        self.assertFalse(b2["food_baseline"])
+        self.assertEqual(b2["food"], 35 * 2 * 2)
+        self.assertIn("某店 人均 35 元", b2["food_price_srcs"])
+        # 单菜价与可靠人均并存 → 只取可靠的
+        prof_mix = {"店A": {"cost_items": [{"item": "人均", "type": "餐饮人均", "amount": 40.0}]},
+                    "店B": {"cost_items": [{"item": "某菜", "type": "餐饮人均", "amount": 8.0}]}}
+        b3 = build_budget_summary(prof_mix, plan, days=1, budget=None)
+        self.assertFalse(b3["food_baseline"])
+        self.assertEqual(b3["food_avg"], 40.0)
+        self.assertEqual(b3["food_price_srcs"], ["店A 人均 40 元"])
+        # 明细渲染：基线场景标注、可靠场景列依据
+        d1 = next(r for r in budget_breakdown(prof_dish, b1, 2) if r["item"] == "餐饮")["detail"]
+        self.assertIn("基线估算", d1)
+        d2 = next(r for r in budget_breakdown(prof_ok, b2, 2) if r["item"] == "餐饮")["detail"]
+        self.assertIn("调研到的餐厅人均：某店 人均 35 元", d2)
 
     def test_render_trip_html(self):
         """HTML 渲染：关键区块（概览卡/预算图/地图/避坑/热度/免责声明）与离线降级脚本都在。"""
@@ -695,6 +792,15 @@ class TestPlanQualityGuards(unittest.TestCase):
 class TestCrawlSpeedUp(unittest.TestCase):
     """采集提速：全局令牌桶 / 评论 JSON 解析 / 条件等待 / 多 Tab 并发调度。"""
 
+    def setUp(self):
+        from crawler import base
+        self._base = base
+        self._saved_enabled = base.SOURCE_DOUYIN_ENABLED
+        base.SOURCE_DOUYIN_ENABLED = True   # 提速测试直接驱动 fetch_videos，需先过开源闸门
+
+    def tearDown(self):
+        self._base.SOURCE_DOUYIN_ENABLED = self._saved_enabled
+
     def test_rate_limiter_global_queue(self):
         """全局令牌桶：并发调用也排在同一条时间轴上（请求间隔不因并发缩短）。"""
         import time
@@ -775,6 +881,62 @@ class TestCrawlSpeedUp(unittest.TestCase):
         self.assertEqual(author_uid_of({"aweme_detail": {"author": {"uid": "u1"}}}), "u1")
         self.assertEqual(author_uid_of({"item_list": [{"author": {"sec_uid": "s2"}}]}), "s2")
         self.assertIsNone(author_uid_of({"other": 1}))
+
+    def test_detail_node(self):
+        """详情包取节点：aweme_detail / item_list / 裸节点三种结构都认，脏数据给空。"""
+        from crawler.douyin import author_uid_of, detail_node
+
+        self.assertEqual(detail_node({"aweme_detail": {"desc": "d"}}), {"desc": "d"})
+        self.assertEqual(detail_node({"item_list": [{"desc": "d2"}]}), {"desc": "d2"})
+        self.assertEqual(detail_node({"desc": "d3"}), {"desc": "d3"})
+        self.assertEqual(detail_node({}), {})
+        self.assertEqual(detail_node("不是字典"), {})
+        self.assertIsNone(detail_node({"item_list": []}).get("desc"))
+        # 作者 UID：整包与已取出的节点都认
+        self.assertEqual(author_uid_of({"aweme_detail": {"author": {"uid": "u1"}}}), "u1")
+        self.assertEqual(author_uid_of({"author": {"sec_uid": "s1"}}), "s1")
+        self.assertIsNone(author_uid_of({"aweme_detail": {}}))
+
+    def test_drain_detail_buffers_other_packets(self):
+        """详情环节：找到详情包即返回，期间到达的评论包进缓冲不丢。"""
+        from types import SimpleNamespace
+
+        from crawler.douyin import (AWEME_DETAIL_TARGET, COMMENT_API_TARGET,
+                                    DouyinCrawler, detail_node)
+
+        def mk(url_part, body):
+            return SimpleNamespace(url=f"https://www.douyin.com/aweme/v1/web/{url_part}/?a=1",
+                                   response=SimpleNamespace(body=body))
+
+        detail = mk(AWEME_DETAIL_TARGET, {"aweme_detail": {
+            "desc": "文案", "author": {"uid": "u9"},
+            "statistics": {"digg_count": 1200}, "create_time": 1767225600}})
+        comment = mk(COMMENT_API_TARGET, {"comments": [{"text": "好看", "digg_count": 3}],
+                                          "has_more": 0})
+
+        class Listen:
+            def __init__(self, packets): self.packets = packets
+            def start(self, targets): pass
+            def stop(self): pass
+            def wait(self, count=1, timeout=None, fit_count=True, raise_err=None):
+                return self.packets.pop(0) if self.packets else None
+
+        class Page:
+            def __init__(self, packets): self.listen = Listen(packets)
+            def ele(self, sel, timeout=None): return None
+
+        # 评论包先到、详情包后到：评论包必须留在缓冲里被后续环节消费
+        c = DouyinCrawler(Page([comment, detail]))
+        node = detail_node(c._drain_detail(timeout=1))
+        self.assertEqual(node.get("desc"), "文案")
+        self.assertEqual(node["statistics"]["digg_count"], 1200)
+        self.assertEqual(len(c._pkt_buf), 1)                        # 评论包被暂存
+        rows = c._comments_by_listen(max_n=10, container=None)
+        self.assertEqual([r["text"] for r in rows], ["好看"])        # 缓冲被消费，没丢包
+        self.assertEqual(c._pkt_buf, [])
+        # 根本没详情包（接口改版）：不卡死，超时给空 dict 让 DOM 降级接手
+        c2 = DouyinCrawler(Page([]))
+        self.assertEqual(c2._drain_detail(timeout=0.5), {})
 
     def test_rank_and_filter_shared(self):
         """两条采集路径共用的点赞排序+低质过滤+保底放宽。"""
@@ -1386,6 +1548,425 @@ class TestFoodsRender(unittest.TestCase):
         h = heat_index([FakeItem("点击左下角团购"), FakeItem("真实分享")])
         self.assertEqual(h["marketing"], 1)
         self.assertEqual(h["mkt_ratio"], 0.5)
+
+
+class TestSpotDecision(unittest.TestCase):
+    """M1-1 统一决策对象（pipeline.decision）：证据映射、组装、状态标注、排序。"""
+
+    def test_evidence_mapping(self):
+        from pipeline.decision import evidence_from_conf, spot_evidence
+        self.assertEqual(evidence_from_conf("高置信度", 3), "强")
+        self.assertEqual(evidence_from_conf("高置信度", 2), "中")   # 独立来源不足 3 降为中
+        self.assertEqual(evidence_from_conf("中置信度", 9), "中")
+        self.assertEqual(evidence_from_conf("低置信度", 1), "弱")
+        self.assertEqual(evidence_from_conf(None, None), "弱")      # 信息缺失保守给弱
+        self.assertEqual(spot_evidence("强", []), "强")             # 验证结论优先
+        self.assertEqual(spot_evidence(None, [{"conf_level": "高置信度"}, {"conf_level": "高置信度"}]), "强")
+        self.assertEqual(spot_evidence(None, [{"conf_level": "高置信度"}]), "中")
+        self.assertEqual(spot_evidence(None, [{"conf_level": "中置信度"}, {"conf_level": "中置信度"}]), "中")
+        self.assertEqual(spot_evidence(None, []), "弱")
+
+    def test_normalize_official_and_expiry(self):
+        from pipeline.decision import normalize_official, official_expired
+        f = normalize_official({"price": "120", "open_hours": "8:00-17:00", "close_day": "周一"})
+        self.assertEqual(f.price, 120.0)
+        self.assertEqual(f.close_day, "周一")
+        self.assertFalse(f.missing)
+        self.assertIsNone(normalize_official({"price": "免费"}).price)   # 无法解析保持 None，不退化成 0
+        self.assertTrue(normalize_official(None).missing)
+        self.assertTrue(official_expired(normalize_official({"price": 1, "valid_until": "2026-01-01"}), "2026-09-04"))
+        self.assertFalse(official_expired(normalize_official({"price": 1, "valid_until": "2026-12-01"}), "2026-09-04"))
+        self.assertFalse(official_expired(normalize_official({"price": 1}), "2026-09-04"))  # 无有效期不判过期
+
+    def test_build_decisions_union_states_and_order(self):
+        """F1.1：每个被圈定候选（含淘汰）都查得到结论；状态标注与排序正确。"""
+        from pipeline.decision import build_decisions
+        candidates = [
+            {"name": "环球影城", "category": "景点", "reason": "主题乐园"},
+            {"name": "冷门点", "category": "景点", "reason": "凑数"},
+        ]
+        verify = [
+            {"name": "环球影城", "verdict": "keep", "evidence": "强", "pitfall_risk": "低", "reason": "口碑好"},
+            {"name": "冷门点", "verdict": "drop", "evidence": "弱", "pitfall_risk": "高", "reason": "证据不足"},
+        ]
+        profiles = {"环球影城": {"best_time_slot": "全天"}, "什刹海": {"best_time_slot": "晚上"}}
+        heat = [{"spot": "环球影城", "score": 0.9, "videos": 5, "likes": 100,
+                 "comments": 50, "mkt_ratio": 0.1, "trend": "近期热度上升"}]
+        plan = {"days": [{"day": 1, "slots": [{"slot": "上午", "spot": "环球影城", "reasons": "必去"}]}],
+                "summary_note": "什刹海列为备选，距离远"}
+        decs = build_decisions(candidates=candidates, verify_results=verify, profiles=profiles,
+                               heat_rows=heat, sources_by_spot={"环球影城": ["u1"]}, plan=plan)
+        by = {d.name: d for d in decs}
+        self.assertEqual(by["环球影城"].decision.state, "入选")
+        self.assertEqual(by["环球影城"].decision.day, 1)
+        self.assertEqual(by["环球影城"].decision.slot, "上午")
+        self.assertEqual(by["环球影城"].heat.score, 0.9)
+        self.assertEqual(by["环球影城"].verify.evidence, "强")
+        self.assertEqual(by["什刹海"].decision.state, "备选")      # summary_note 点名
+        self.assertEqual(by["冷门点"].decision.state, "淘汰")      # verdict=drop 未排入
+        self.assertEqual(by["冷门点"].verify.reason, "证据不足")   # 淘汰理由必须保留
+        self.assertEqual(decs[0].name, "环球影城")                # 入选排最前
+        row = by["环球影城"].to_row()
+        self.assertEqual(row["state"], "入选")
+        self.assertEqual(row["evidence"], "强")
+
+    def test_unresearched_and_hard_reason(self):
+        from pipeline.decision import build_decisions, DecisionInfo
+        decs = build_decisions(candidates=[{"name": "被截断点", "category": "景点"}], plan={"days": []})
+        d = {x.name: x for x in decs}["被截断点"]
+        self.assertFalse(d.researched)                 # 无要点无来源
+        self.assertEqual(d.decision.state, "")         # 既不入选也不冒充淘汰
+        self.assertIn("未进入调研", d.decision.reason)
+        self.assertTrue(DecisionInfo(reason="闭馆日冲突，无法安排").has_hard_reason)
+        self.assertFalse(DecisionInfo(reason="就是不太想去").has_hard_reason)
+
+    def test_food_recommendation_marks_in(self):
+        """food 字段点名推荐的餐厅标入选（不误显示备选、不触发 R2）。"""
+        from pipeline.decision import build_decisions
+        plan = {"days": [{"day": 1, "slots": [
+            {"slot": "晚上", "spot": "什刹海", "reasons": "", "food": "四季民福：烤鸭（人均10）"}]}],
+            "summary_note": ""}
+        decs = build_decisions(profiles={"什刹海": {"best_time_slot": "全天"}},
+                               food_profiles={"四季民福": {"best_time_slot": "全天"}}, plan=plan)
+        by = {d.name: d for d in decs}
+        self.assertEqual(by["什刹海"].decision.state, "入选")
+        self.assertEqual(by["四季民福"].decision.state, "入选")     # 被推荐为餐食 → 入选
+        self.assertTrue(by["四季民福"].is_food)
+        self.assertIn("餐食推荐", by["四季民福"].decision.reason)
+
+
+class TestQualityGate(unittest.TestCase):
+    """M1-3 质量门禁（pipeline.qc）：R1~R10 逐条正反夹具 + 报告聚合。"""
+
+    def _dec(self, name, *, state="", evidence="弱", heat=0.0, videos=0,
+             sources=None, reason="", close_day="", official_price=None,
+             day=None, slot=""):
+        from pipeline.decision import SpotDecision, VerifyInfo, HeatInfo, DecisionInfo, OfficialFact
+        d = SpotDecision(name=name)
+        verdict = "keep" if state == "入选" else ("drop" if state == "淘汰" else "")
+        d.verify = VerifyInfo(evidence=evidence, verdict=verdict)
+        d.heat = HeatInfo(score=heat, videos=videos)
+        d.official = OfficialFact(close_day=close_day, price=official_price)
+        d.sources = list(sources or [])
+        d.decision = DecisionInfo(state=state, day=day, slot=slot, reason=reason)
+        return d
+
+    def _gate(self, **kw):
+        from pipeline.qc import run_quality_gate
+        kw.setdefault("decisions", [])
+        kw.setdefault("plan", {"days": []})
+        kw.setdefault("profiles", {})
+        kw.setdefault("days", 1)
+        return run_quality_gate(**kw)
+
+    def test_r1_coverage(self):
+        prof = {f"P{i}": {} for i in range(4)}
+        plan_few = {"days": [{"day": 1, "slots": [{"spot": "P0", "slot": "上午"}, {"spot": "P1", "slot": "下午"}]},
+                             {"day": 2, "slots": []}]}
+        self.assertEqual(self._gate(plan=plan_few, profiles=prof, days=2).get("R1").status, "fail")
+        plan_ok = {"days": [{"day": 1, "slots": [{"spot": f"P{i}", "slot": "上午"} for i in range(4)]}]}
+        self.assertEqual(self._gate(plan=plan_ok, profiles=prof, days=2).get("R1").status, "pass")
+        plan_many = {"days": [{"day": 1, "slots": [{"spot": f"P{i}", "slot": "上午"} for i in range(6)]}]}
+        self.assertEqual(self._gate(plan=plan_many, profiles={f"P{i}": {} for i in range(6)}, days=1).get("R1").status, "warn")
+
+    def test_r2_no_silent_drop(self):
+        self.assertEqual(self._gate(decisions=[self._dec("环球", state="备选", heat=0.95, videos=5, reason="")]).get("R2").status, "fail")
+        self.assertEqual(self._gate(decisions=[self._dec("环球", state="备选", heat=0.95, videos=5, reason="单日时长不足")]).get("R2").status, "pass")
+        self.assertEqual(self._gate(decisions=[self._dec("甲", state="淘汰", evidence="强", reason="证据不足")]).get("R2").status, "fail")
+        self.assertEqual(self._gate(decisions=[self._dec("环球", state="入选", heat=0.95, videos=5)]).get("R2").status, "pass")
+
+    def test_r2_skips_food(self):
+        """R2 只判行程骨架；强证据美食未入选交 R7，不误报 R2。"""
+        food = self._dec("某餐厅", state="备选", evidence="强", heat=0.9, videos=5)
+        food.category = "美食"
+        self.assertEqual(self._gate(decisions=[food]).get("R2").status, "pass")
+
+    def test_r3_time_slot_and_close_day(self):
+        prof = {"夜游A": {"best_time_slot": "晚上"}}
+        plan_bad = {"days": [{"day": 1, "slots": [{"spot": "夜游A", "slot": "下午"}]}]}
+        self.assertEqual(self._gate(plan=plan_bad, profiles=prof).get("R3").status, "fail")
+        plan_ok = {"days": [{"day": 1, "slots": [{"spot": "夜游A", "slot": "晚上"}]}]}
+        self.assertEqual(self._gate(plan=plan_ok, profiles=prof).get("R3").status, "pass")
+        decs = [self._dec("博物馆", state="入选", close_day="周一", day=1, slot="上午")]
+        plan_mu = {"days": [{"day": 1, "slots": [{"spot": "博物馆", "slot": "上午"}]}]}
+        self.assertEqual(self._gate(plan=plan_mu, decisions=decs, day_weekdays=["周一", "周二"]).get("R3").status, "fail")
+        self.assertEqual(self._gate(plan=plan_mu, decisions=decs, day_weekdays=["周二", "周三"]).get("R3").status, "pass")
+
+    def test_r4_time_feasible(self):
+        prof = {"A": {"duration_hours": 5}, "B": {"duration_hours": 5}, "C": {"duration_hours": 3}}
+        plan = {"days": [{"day": 1, "slots": [{"spot": "A", "slot": "上午"}, {"spot": "B", "slot": "下午"}, {"spot": "C", "slot": "晚上"}]}]}
+        self.assertEqual(self._gate(plan=plan, profiles=prof).get("R4").status, "fail")   # 13h > 11h
+        prof2 = {"A": {"duration_hours": 3}, "B": {"duration_hours": 3}}
+        plan2 = {"days": [{"day": 1, "slots": [{"spot": "A", "slot": "上午"}, {"spot": "B", "slot": "下午"}]}]}
+        self.assertEqual(self._gate(plan=plan2, profiles=prof2).get("R4").status, "pass")
+        plan3 = {"days": [{"day": 1, "slots": [{"spot": "X", "slot": "上午"}]}]}
+        self.assertEqual(self._gate(plan=plan3, profiles={"X": {"duration_hours": None}}).get("R4").status, "pass")
+
+    def test_r5_skip_in_m1(self):
+        self.assertEqual(self._gate().get("R5").status, "skip")
+
+    def test_r6_budget(self):
+        self.assertEqual(self._gate(budget_summary={"total_budget": 1500, "total": 2000, "status": "超支"}).get("R6").status, "fail")
+        self.assertEqual(self._gate(budget_summary={"total_budget": 1500, "total": 1000, "status": "结余"}).get("R6").status, "pass")
+        self.assertEqual(self._gate(budget_summary={"total_budget": 1500, "total": 1000, "status": "结余", "tickets_missing": ["甲"]}).get("R6").status, "warn")
+        self.assertEqual(self._gate(budget_summary=None).get("R6").status, "skip")
+
+    def test_r7_food(self):
+        plan = {"days": [{"day": 1, "slots": [{"spot": "A", "slot": "下午", "food": "全聚德：烤鸭"}]}]}
+        self.assertEqual(self._gate(plan=plan, food_profiles={"凤临阁": {}}).get("R7").status, "fail")   # 编造店名
+        self.assertEqual(self._gate(plan=plan, food_profiles=None).get("R7").status, "skip")            # 无候选无兜底
+        plan2 = {"days": [{"day": 1, "slots": [{"spot": "A", "slot": "下午", "food": ""}]}]}
+        self.assertEqual(self._gate(plan=plan2, food_profiles={"凤临阁": {}}).get("R7").status, "warn")   # 有候选却漏排
+        plan3 = {"days": [{"day": 1, "slots": [{"spot": "A", "slot": "下午", "food": "凤临阁：烧麦"}]}]}
+        self.assertEqual(self._gate(plan=plan3, food_profiles={"凤临阁": {}}).get("R7").status, "pass")
+
+    def test_r8_pitfall_attribution(self):
+        pit = [{"source": "u1", "claim": "人太多"}, {"source": "u2", "claim": "票难买"}]
+        decs_ok = [self._dec("A", state="入选", sources=["u1"]), self._dec("B", state="备选", sources=["u2"])]
+        self.assertEqual(self._gate(pitfall=pit, decisions=decs_ok).get("R8").status, "pass")
+        decs_bad = [self._dec("A", state="入选", sources=["u1"]), self._dec("B", state="淘汰", sources=["u2"])]
+        self.assertEqual(self._gate(pitfall=pit, decisions=decs_bad).get("R8").status, "fail")
+        self.assertEqual(self._gate(pitfall=[], decisions=decs_ok).get("R8").status, "skip")
+
+    def test_r9_timeliness(self):
+        from pipeline.decision import OfficialFact
+        self.assertEqual(self._gate().get("R9").status, "skip")                       # 无官方数据
+        decs = [self._dec("甲", official_price=100)]
+        self.assertEqual(self._gate(decisions=decs, today="2026-09-04").get("R9").status, "pass")
+        decs[0].official = OfficialFact(price=100, valid_until="2026-01-01")
+        self.assertEqual(self._gate(decisions=decs, today="2026-09-04").get("R9").status, "warn")
+
+    def test_r10_sources(self):
+        self.assertEqual(self._gate(decisions=[self._dec("A", state="入选", sources=[])]).get("R10").status, "fail")
+        self.assertEqual(self._gate(decisions=[self._dec("A", state="入选", sources=["u1"])]).get("R10").status, "pass")
+
+    def test_report_aggregation_and_finalize(self):
+        from pipeline.qc import run_quality_gate, finalize
+        decs = [self._dec("环球", state="备选", heat=0.95, videos=5, reason="", sources=["u1"])]
+        plan = {"days": [{"day": 1, "slots": [{"spot": "环球", "slot": "下午"}]}]}
+        rep = run_quality_gate(decisions=decs, plan=plan, profiles={"环球": {"best_time_slot": "全天"}},
+                               days=2, budget_summary={"total_budget": 1000, "total": 1500, "status": "超支"})
+        self.assertFalse(rep.passed)                                    # R2 静默丢弃 + R6 超支
+        self.assertGreater(len(rep.issues), 0)
+        self.assertLess(rep.score, 100)
+        self.assertIn("R2", [c.rule_id for c in rep.fails])
+        finalize(rep, repair_rounds=2)
+        self.assertEqual(rep.repair_rounds, 2)
+        self.assertTrue(any("R2" in u for u in rep.unresolved))         # fail 项进已知妥协
+        self.assertGreaterEqual(rep.problem_count(), 2 * len(rep.fails))
+        d = rep.to_dict()
+        self.assertEqual(len(d["checks"]), 10)                          # R1~R10 全部登记
+        self.assertIn("score", d)
+
+
+class TestGateWiringAndRender(unittest.TestCase):
+    """M1-4/M1-8：门禁接线（plan_itinerary 回炉）+ 选点决策表/质量分卡渲染。"""
+
+    def _fixture(self):
+        from pipeline.decision import build_decisions
+        from pipeline.qc import run_quality_gate, finalize
+        profiles = {
+            "环球影城": {"duration_hours": 6, "best_time_slot": "全天", "highlights": ["必玩"],
+                     "avoid": [], "food": [], "photo_spots": [], "tips": [],
+                     "cost_items": [{"item": "门票", "type": "门票", "amount": 650.0}]},
+            "什刹海": {"duration_hours": 2, "best_time_slot": "晚上", "highlights": [],
+                    "avoid": [], "food": [], "photo_spots": [], "tips": [], "cost_items": []},
+        }
+        plan = {"days": [{"day": 1, "slots": [
+            {"slot": "上午", "spot": "环球影城", "duration": "约6小时", "transport": "",
+             "cost": 650, "reasons": "必玩", "notes": [], "food": ""}]}],
+            "summary_note": "什刹海列为备选"}
+        decs = build_decisions(
+            candidates=[{"name": "环球影城", "category": "景点", "reason": "主题乐园"},
+                        {"name": "冷门点", "category": "景点", "reason": "凑数"}],
+            verify_results=[{"name": "冷门点", "verdict": "drop", "evidence": "弱",
+                             "pitfall_risk": "高", "reason": "证据不足"}],
+            profiles=profiles,
+            heat_rows=[{"spot": "环球影城", "score": 0.9, "videos": 5, "likes": 999,
+                        "comments": 50, "mkt_ratio": 0.1, "trend": "近期热度上升"}],
+            sources_by_spot={"环球影城": ["https://x/1"]}, plan=plan)
+        rep = run_quality_gate(decisions=decs, plan=plan, profiles=profiles, days=2,
+                               budget_summary={"total_budget": 1500, "total": 2000, "status": "超支"})
+        finalize(rep, repair_rounds=1)
+        return plan, profiles, decs, rep
+
+    def test_decision_rows_and_quality_dict(self):
+        from pipeline.planner import _decision_rows, _quality_dict
+        _, _, decs, rep = self._fixture()
+        rows = _decision_rows(decs)
+        gl = next(r for r in rows if r["name"] == "环球影城")
+        self.assertEqual(gl["state"], "入选")
+        self.assertEqual(gl["heat"], "0.90")
+        self.assertEqual(gl["mkt"], "10%")
+        self.assertEqual(gl["state_icon"], "✅")
+        self.assertTrue(any(r["name"] == "冷门点" and r["state"] == "淘汰" for r in rows))  # 淘汰点也在表内
+        q = _quality_dict(rep)
+        self.assertEqual(len(q["checks"]), 10)
+        self.assertIn("score", q)
+        self.assertIsNone(_quality_dict(None))
+        self.assertEqual(_quality_dict({"score": 1}), {"score": 1})
+
+    def test_render_md_sections(self):
+        from pipeline.planner import render_trip
+        plan, profiles, decs, rep = self._fixture()
+        md = render_trip("北京", 2, "三环", plan, profiles, {"环球影城": ["https://x/1"]}, False,
+                         decisions=decs, quality=rep)
+        self.assertIn("## 选点决策表", md)
+        self.assertIn("## 质量分卡", md)
+        self.assertIn("已知妥协", md)          # R1/R6 fail → unresolved
+        self.assertIn("冷门点", md)             # 淘汰点可见（F7.1）
+        self.assertIn("证据不足", md)           # 淘汰理由来自 verify.reason
+
+    def test_render_html_sections(self):
+        from pipeline.planner import render_trip_html
+        plan, profiles, decs, rep = self._fixture()
+        html = render_trip_html("北京", 2, "三环", plan, profiles, {"环球影城": ["https://x/1"]}, False,
+                                decisions=decs, quality=rep)
+        self.assertIn("选点决策表", html)
+        self.assertIn("质量分卡", html)
+        self.assertIn("decision-table", html)
+        self.assertIn("冷门点", html)
+
+    def test_backward_compat_no_sections(self):
+        """不传 decisions/quality 时（旧调用）不渲染新区块，保持兼容。"""
+        from pipeline.planner import render_trip
+        plan = {"days": [{"day": 1, "slots": [{"slot": "上午", "spot": "甲", "duration": "", "transport": "",
+                                              "cost": 0, "reasons": "", "notes": [], "food": ""}]}], "summary_note": ""}
+        prof = {"甲": {"duration_hours": None, "best_time_slot": "全天", "highlights": [],
+                    "avoid": [], "food": [], "photo_spots": [], "tips": [], "cost_items": []}}
+        md = render_trip("城", 1, "", plan, prof, {}, False)
+        self.assertNotIn("## 选点决策表", md)
+        self.assertNotIn("## 质量分卡", md)
+
+    def test_plan_itinerary_extra_issues_repair(self):
+        """extra_issues 触发回炉；覆盖率不变差即采纳重试版（无 extra 且达标时不回炉）。"""
+        import pipeline.planner as pp
+        profiles = {"甲": {"duration_hours": None, "best_time_slot": "全天", "highlights": [],
+                       "avoid": [], "food": [], "photo_spots": [], "tips": [], "cost_items": []}}
+        calls = {"n": 0}
+
+        def fake(system, user, **k):
+            calls["n"] += 1
+            if "本版必须修正" in user:      # 回炉调用
+                return {"days": [{"day": 1, "slots": [{"slot": "上午", "spot": "甲"}]}], "summary_note": "已按门禁修正"}
+            return {"days": [{"day": 1, "slots": [{"slot": "上午", "spot": "甲"}]}], "summary_note": "初版"}
+
+        orig = pp.chat_json
+        try:
+            pp.chat_json = fake
+            plan = pp.plan_itinerary("城", 1, "", profiles, [], "", extra_issues=["把说明写清"])
+            self.assertEqual(calls["n"], 2)                        # 初次 + 回炉
+            self.assertEqual(plan["summary_note"], "已按门禁修正")   # 覆盖率持平也采纳（extra 分支）
+            calls["n"] = 0
+            plan2 = pp.plan_itinerary("城", 1, "", profiles, [], "")   # 无 extra 且达标
+            self.assertEqual(calls["n"], 1)                        # 不触发回炉，省一次 LLM 调用
+            self.assertEqual(plan2["summary_note"], "初版")
+        finally:
+            pp.chat_json = orig
+
+
+class TestSourceGate(unittest.TestCase):
+    """开源合规闸门：UGC 源默认关闭、护栏校验、验证码检测停采（只停不绕）。"""
+
+    def setUp(self):
+        from crawler import base
+        self.base = base
+        self._saved = (base.SOURCE_DOUYIN_ENABLED, base.REQUEST_DELAY_MIN,
+                       base.REQUEST_DELAY_MAX, base._noticed, base._session_stopped)
+
+    def tearDown(self):
+        b = self.base
+        (b.SOURCE_DOUYIN_ENABLED, b.REQUEST_DELAY_MIN, b.REQUEST_DELAY_MAX,
+         b._noticed, b._session_stopped) = self._saved
+
+    def test_default_off_raises(self):
+        from crawler.base import SourceDisabled
+        self.base.SOURCE_DOUYIN_ENABLED = False
+        with self.assertRaises(SourceDisabled):
+            self.base.require_ugc_source()
+        self.assertFalse(self.base.douyin_enabled())
+
+    def test_enabled_passes_and_notices_once(self):
+        self.base.SOURCE_DOUYIN_ENABLED = True
+        logs = []
+        self.base.require_ugc_source(log=logs.append)
+        self.assertTrue(self.base.douyin_enabled())
+        self.assertEqual(len(logs), 1)                    # 免责告知打印一次
+        self.base.require_ugc_source(log=logs.append)
+        self.assertEqual(len(logs), 1)                    # 不重复打印
+
+    def test_guardrail_zero_delay_rejects(self):
+        self.base.SOURCE_DOUYIN_ENABLED = True
+        self.base.REQUEST_DELAY_MIN = 0.0
+        self.base.REQUEST_DELAY_MAX = 0.0
+        with self.assertRaises(RuntimeError):             # 频控为 0 拒绝启用
+            self.base.require_ugc_source()
+
+    def test_captcha_detected_and_session_stop(self):
+        class CaptchaPage:
+            title = "验证码中间页"
+            html = "<script>window.TTGCaptcha</script>"
+
+        class NormalPage:
+            title = "抖音"
+            html = "<html></html>"
+
+        self.assertTrue(self.base.captcha_detected(CaptchaPage()))
+        self.assertFalse(self.base.captcha_detected(NormalPage()))
+        self.base.stop_session()
+        self.assertTrue(self.base.session_stopped())
+        self.base.reset_session()
+        self.assertFalse(self.base.session_stopped())
+
+
+class TestAmapQuota(unittest.TestCase):
+    """高德用量护栏：按日计数 + 达上限自动降级（不烧配额、不发请求）。"""
+
+    def setUp(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from core import geo
+        self.geo = geo
+        self._saved = (geo.AMAP_API_KEY, geo.AMAP_DAILY_CAP, geo._USAGE_FILE)
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        self._tmp = Path(path)
+        geo._USAGE_FILE = Path(path)
+        geo._cap_warned = False
+
+    def tearDown(self):
+        import os
+        g = self.geo
+        (g.AMAP_API_KEY, g.AMAP_DAILY_CAP, g._USAGE_FILE) = self._saved
+        try:
+            os.remove(self._tmp)   # 只删临时计数文件，不碰真实 data/amap_usage.json
+        except OSError:
+            pass
+
+    def test_cap_zero_blocks_without_http(self):
+        g = self.geo
+        g.AMAP_API_KEY = "fake"
+        g.AMAP_DAILY_CAP = 0
+        self.assertTrue(g._quota_exhausted())
+        self.assertIsNone(g.geocode_poi("配额测试点", "北京"))   # 上限 0 → 不发请求直接降级
+        self.assertIsNone(g.route_advice("116,39", "116,40"))
+
+    def test_counter_increments_and_daily_reset(self):
+        import json
+        from datetime import date, timedelta
+        g = self.geo
+        g.AMAP_DAILY_CAP = 300
+        g._bump_usage()
+        g._bump_usage()
+        self.assertEqual(g.amap_usage()["today"], 2)
+        self.assertEqual(g.amap_usage()["cap"], 300)
+        # 跨日重置：计数文件写成昨天 → 今日归 0
+        g._USAGE_FILE.write_text(
+            json.dumps({"date": (date.today() - timedelta(days=1)).isoformat(), "count": 5}),
+            encoding="utf-8")
+        self.assertEqual(g.amap_usage()["today"], 0)
+        self.assertFalse(g._quota_exhausted())
 
 
 if __name__ == "__main__":

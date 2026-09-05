@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from config import CRAWL_TABS, MAX_COMMENTS_PER_VIDEO
 from core.rate_limiter import global_limiter
+from crawler import base
 
 FETCH_RETRIES = 2      # 单条视频采集失败自动重试次数（页面渲染/网络偶发抖动很常见）
 _RETRY_GAP = 3         # 重试前等待秒数
@@ -55,6 +56,7 @@ def fetch_videos(page, urls, *, comments: int = MAX_COMMENTS_PER_VIDEO, asr: boo
     workers=1 时不额外开 Tab、在当前线程串行执行，行为等价于旧的串行循环；
     log/cancelled/on_error 由调用方注入（进度日志、任务取消、失败存快照）。
     """
+    base.require_ugc_source()   # 开源合规闸门：UGC 源默认关闭，任何多 Tab 采集都先过闸
     from crawler.douyin import DouyinCrawler
 
     total = len(urls)

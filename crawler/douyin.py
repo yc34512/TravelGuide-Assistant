@@ -17,6 +17,7 @@ from config import MAX_COMMENTS_PER_VIDEO, MAX_SEARCH_SCROLLS
 from core.models import Comment, VideoItem
 from core.rate_limiter import RateLimiter
 from core.sanitize import clean_comment, parse_comment_block, parse_count, timestamp_to_date
+from crawler import base
 from crawler.browser import block_heavy_resources
 
 VIDEO_ID_RE = re.compile(r"/video/(\d+)")
@@ -53,6 +54,9 @@ AWEME_DETAIL_TARGET = "aweme/detail"    # 视频详情：取作者 UID，用于�
 MEDIA_TARGET = "douyinvod"              # 视频 CDN：ASR 取播放地址
 COMMENT_LISTEN_TIMEOUT = 25             # 单条视频评论监听的总时间预算（秒）
 COMMENT_IDLE_ROUNDS = 3                 # 连续几轮滚动后仍无新包就收工
+PACKET_WAIT = 3.0                       # 单次等包上限（实测翻页请求 2~3 秒到达）
+DETAIL_WAIT = 3.0                       # 等视频详情包的上限（页面加载时就发出，通常不到 1 秒）
+PACKET_BUF_MAX = 50                     # 详情环节暂存其他包的上限（防意外增长）
 
 # —— 条件等待（替代写死的 sleep：命中即返回，未命中才等满上限）——
 NAV_WAIT = 8.0             # 页面关键元素等待上限
@@ -161,12 +165,20 @@ def packet_json(pk) -> dict | None:
     return None
 
 
+def detail_node(body: dict) -> dict:
+    """从视频详情包里取出 aweme 节点（结构变动时返回空 dict）。纯函数可测。"""
+    if not isinstance(body, dict):
+        return {}
+    node = body.get("aweme_detail") or body.get("item_list") or body.get("aweme") or body
+    if isinstance(node, list):
+        node = node[0] if node else {}
+    return node if isinstance(node, dict) else {}
+
+
 def author_uid_of(body: dict) -> str | None:
-    """从视频详情包里取作者 UID（结构变动时返回 None，作者回复识别自动降级为不标）。"""
-    detail = body.get("aweme_detail") or body.get("item_list") or body
-    if isinstance(detail, list):
-        detail = detail[0] if detail else {}
-    author = (detail or {}).get("author") or {}
+    """从视频详情（整包或已取出的 aweme 节点）里取作者 UID；
+    结构变动时返回 None，作者回复识别自动降级为不标。"""
+    author = detail_node(body).get("author") or {}
     uid = author.get("uid") or author.get("sec_uid")
     return str(uid) if uid else None
 
@@ -189,6 +201,8 @@ class DouyinCrawler:
         self.limiter = limiter or RateLimiter()
         self._blocked = None       # 重资源拦截状态：None 未设置 / False 拦了视频 / True 放行视频
         self._media_urls: list[str] = []   # 评论监听期间顺带抓到的媒体地址（ASR 用）
+        self._pkt_buf: list = []           # 详情环节暂存的评论/媒体包（不丢包）
+        self._author_uid: str | None = None
 
     def _apply_block(self, keep_video: bool) -> None:
         """每个标签页只设置一次重资源拦截；ASR 需要视频时重设为放行。"""
@@ -202,10 +216,15 @@ class DouyinCrawler:
     # ---- 搜索：单次查询，返回候选列表（带尽力解析的点赞数）----
     def _search_one(self, keyword: str, max_n: int, scrolls: int | None = None) -> list[dict]:
         """搜索结果页采集。scrolls 可指定滚动轮数（补充查询用更少轮数省时间）。"""
+        if base.session_stopped():
+            return []   # 本会话已触发验证码风控：不再发新搜索请求（避免加重风控）
         url = f"https://www.douyin.com/search/{quote(keyword)}?type=video"
         self._apply_block(keep_video=False)
         self.limiter.wait()   # 搜索导航也是一次域名请求，同样过频控
         self.page.get(url)
+        if base.captcha_detected(self.page):
+            base.stop_session()   # 只停止、不绕过：后续候选回退缓存/LLM 基线
+            return []
         # 条件等待：结果卡片出现即开始收集（替代固定 sleep 4 秒）；没渲染出来直接返回
         if _wait_any(self.page, [SEL_SEARCH_LINKS], timeout=NAV_WAIT) is None:
             return []
@@ -267,6 +286,7 @@ class DouyinCrawler:
         减量策略：第一轮已凑足候选池就跳过第二轮（省一次完整搜索+滚动，约 20~30 秒）；
         不足时第二轮滚动轮数减半——避雷素材仍要有，但不必全量翻页。
         扩展查询失败静默跳过。"""
+        base.require_ugc_source()   # 开源合规闸门：UGC 源默认关闭
         pool = self._search_one(keyword, limit * 2)
         if len(pool) < limit * 2:
             try:
@@ -280,36 +300,51 @@ class DouyinCrawler:
     def fetch_video(self, url: str, max_comments: int = MAX_COMMENTS_PER_VIDEO,
                     with_asr: bool = False, collect_comments: bool = True) -> VideoItem:
         """collect_comments=False 为元数据模式（热度刷榜用）：只取文案/点赞/发布时间，
-        跳过评论滚动与解析，单条耗时降为完整采集的约三分之一。"""
+        跳过评论滚动与解析，单条耗时降为完整采集的约三分之一。
+
+        元数据优先取页面自身发出的详情接口 JSON，DOM 只作降级：多标签并发时
+        后台页渲染会被浏览器节流，等 DOM 常常取不到文案（实测约 1/3 视频文案为空）。"""
         self._apply_block(keep_video=with_asr)
         self.limiter.wait()
         m = VIDEO_ID_RE.search(url)
         item = VideoItem(video_id=m.group(1) if m else url, url=url)
         self._media_urls = []
+        self._pkt_buf = []
+        self._author_uid = None
 
-        # 监听必须在导航前开启：评论走接口 JSON（快且带精确时间戳），ASR 走视频 CDN 域
-        targets = []
+        # 监听必须在导航前开启：详情包给元数据，评论包给评论，ASR 另需视频 CDN 域
+        targets = [AWEME_DETAIL_TARGET]
         if with_asr:
             targets.append(MEDIA_TARGET)
         if collect_comments:
-            targets += [COMMENT_API_TARGET, AWEME_DETAIL_TARGET]
-        if targets:
-            try:
-                self.page.listen.start(targets[0] if len(targets) == 1 else tuple(targets))
-            except Exception:
-                pass
+            targets.append(COMMENT_API_TARGET)
+        try:
+            self.page.listen.start(targets[0] if len(targets) == 1 else tuple(targets))
+        except Exception:
+            pass
         self.page.get(url)
 
-        # 条件等待：文案元素出现即继续（替代固定 sleep 4 秒）
-        desc = _wait_any(self.page, SEL_VIDEO_DESC, timeout=NAV_WAIT)
-        if desc:
-            item.description = desc.text.strip()
-            item.tags = list(dict.fromkeys(TAG_RE.findall(item.description)))[:15]
-        like = _wait_any(self.page, SEL_VIDEO_LIKE, timeout=2)
-        if like:
-            item.like_count = parse_count(like.text)
+        node = detail_node(self._drain_detail())
+        self._author_uid = author_uid_of(node) if node else None
 
-        item.publish_time = self._extract_publish_time()
+        # 文案/点赞/发布时间：JSON 有就用，缺哪项才去等 DOM（条件等待，命中即返回）
+        item.description = str(node.get("desc") or "").strip()
+        if not item.description:
+            desc = _wait_any(self.page, SEL_VIDEO_DESC, timeout=NAV_WAIT)
+            if desc:
+                item.description = (desc.text or "").strip()
+        if item.description:
+            item.tags = list(dict.fromkeys(TAG_RE.findall(item.description)))[:15]
+
+        digg = (node.get("statistics") or {}).get("digg_count")
+        if isinstance(digg, int) and digg > 0:
+            item.like_count = digg
+        else:
+            like = _wait_any(self.page, SEL_VIDEO_LIKE, timeout=2)
+            if like:
+                item.like_count = parse_count(like.text)
+
+        item.publish_time = timestamp_to_date(node.get("create_time")) or self._extract_publish_time()
         item.comments = self._fetch_comments(max_comments) if collect_comments else []
 
         if with_asr:
@@ -321,6 +356,32 @@ class DouyinCrawler:
         except Exception:
             pass
         return item
+
+    def _drain_detail(self, timeout: float = DETAIL_WAIT) -> dict:
+        """在监听包里找视频详情包，返回其 JSON 体（找不到给空 dict）。
+
+        详情包由页面自身在加载时发出，比等 DOM 渲染可靠；期间到达的评论/媒体包
+        暂存进缓冲区交给后续环节，不丢包。
+
+        注意这里只从监听器取新包（不走缓冲区），否则会把刚暂存的包又取回来原地空转。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            pk = self._wait_packet(timeout=0.6)
+            if pk is None:
+                continue
+            body = packet_json(pk)
+            if AWEME_DETAIL_TARGET in (getattr(pk, "url", "") or "") and body:
+                return body
+            self._pkt_buf.append(pk)
+            if len(self._pkt_buf) >= PACKET_BUF_MAX:
+                break
+        return {}
+
+    def _next_packet(self, timeout: float = PACKET_WAIT):
+        """取下一个监听包：先消费缓冲区（详情环节暂存的），再等新的。"""
+        if self._pkt_buf:
+            return self._pkt_buf.pop(0)
+        return self._wait_packet(timeout=timeout)
 
     def _capture_play_urls(self) -> list[str]:
         """收集监听窗口内所有视频 CDN 地址（去重）。抖音是音视频分离流，
@@ -375,38 +436,43 @@ class DouyinCrawler:
         return rank_and_filter(self._comments_by_dom(max_n, container), max_n)
 
     def _comments_by_listen(self, max_n: int, container) -> list[dict]:
-        """消费监听窗口内的数据包攒评论：滚评论面板触发翻页请求，包到即解析。
+        """消费监听窗口内的数据包攒评论：每轮都滚一次评论面板触发翻页请求，包到即解析。
 
+        翻页请求靠滚动触发，所以不能"只在等不到包时才滚"（那样拿到首页就卡死）；
+        终止条件：够了 / 接口告知 has_more=0 / 连续空转几轮 / 超时间预算。
         返回脱敏前的字段字典列表；拿不到包时返回空列表，由调用方降级 DOM 路径。"""
         collected: dict[str, dict] = {}
-        author_uid: str | None = None
+        author_uid: str | None = self._author_uid   # 详情环节已拿到，作者回复识别不漏
         idle = 0
+        has_more = True
         deadline = time.time() + COMMENT_LISTEN_TIMEOUT
-        while time.time() < deadline and len(collected) < max_n and idle < COMMENT_IDLE_ROUNDS:
-            pk = self._wait_packet()
+        while (time.time() < deadline and len(collected) < max_n
+               and idle < COMMENT_IDLE_ROUNDS and has_more):
+            pk = self._next_packet(timeout=PACKET_WAIT)
             if pk is None:
                 idle += 1
-                if container is not None:
-                    self._scroll_comment_panel(container)   # 触发下一页评论请求
-                continue
-            url = getattr(pk, "url", "") or ""
-            if MEDIA_TARGET in url:
-                if url not in self._media_urls:
-                    self._media_urls.append(url)
-                continue
-            body = packet_json(pk)
-            if not body:
-                continue
-            if COMMENT_API_TARGET not in url:
-                author_uid = author_uid or author_uid_of(body)   # 视频详情：取作者 UID
-                continue
-            before = len(collected)
-            for row in parse_comment_payload(body.get("comments"), author_uid):
-                collected.setdefault(row["text"], row)
-            idle = 0 if len(collected) > before else idle + 1
+            else:
+                url = getattr(pk, "url", "") or ""
+                if MEDIA_TARGET in url:
+                    if url not in self._media_urls:
+                        self._media_urls.append(url)
+                else:
+                    body = packet_json(pk)
+                    if body:
+                        if COMMENT_API_TARGET not in url:
+                            author_uid = author_uid or author_uid_of(body)   # 视频详情：取作者 UID
+                        else:
+                            before = len(collected)
+                            for row in parse_comment_payload(body.get("comments"), author_uid):
+                                collected.setdefault(row["text"], row)
+                            has_more = bool(body.get("has_more", 0))
+                            idle = 0 if len(collected) > before else idle + 1
+            # 每轮都滚一下：翻页请求靠滚动触发，且滚动本身不产生额外域名请求
+            if container is not None and len(collected) < max_n and has_more:
+                self._scroll_comment_panel(container)
         return list(collected.values())[:max_n]
 
-    def _wait_packet(self, timeout: float = 2.0):
+    def _wait_packet(self, timeout: float = PACKET_WAIT):
         """取一个监听包；超时或监听未开启返回 None（不抛异常，由调用方决定降级）。"""
         try:
             return self.page.listen.wait(count=1, timeout=timeout, fit_count=False, raise_err=False)

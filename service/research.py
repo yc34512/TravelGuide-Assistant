@@ -62,6 +62,9 @@ def load_items_from_raw(raw_path: str) -> list[VideoItem]:
 def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | None, log) -> list[VideoItem]:
     """浏览器采集（搜索择优 + 单条重试）。浏览器阶段持锁：同一时刻只跑一个采集任务；
     转写在锁释放后进行。原始 JSON 落盘由调用方在缺口补全后统一做（含补采视频）。"""
+    from crawler import base
+    base.require_ugc_source(log=log)   # 开源合规闸门 + 免责告知；未启用抛 SourceDisabled
+    base.reset_session()               # 每次 _crawl 独立浏览器会话，清零风控停止标记
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     def cancelled() -> bool:
@@ -85,13 +88,17 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | Non
         try:
             if not ensure_login(page):
                 raise RuntimeError("未检测到抖音登录态：请在弹出的浏览器中用采集小号扫码后重试")
-            log(f"搜索关键词：{keyword}（多角度查询 + 按点赞择优）")
-            urls = crawler.search_and_rank(keyword, limit)
+            search_kw = knowledge.strip_qualifiers(keyword)
+            log(f"搜索关键词：{search_kw}（多角度查询 + 按点赞择优）")
+            urls = crawler.search_and_rank(search_kw, limit)
             log(f"搜到 {len(urls)} 条视频")
             if not urls:
-                # 0 结果大概率是选择器失效：存快照 + 明确告警，降低排查成本
-                dump_debug(page, f"svc_fail_{ts}_search")
-                log("搜索 0 结果：已保存页面快照到 data/debug/，请对照 crawler/douyin.py 顶部 SEL_* 常量排查")
+                if base.session_stopped():
+                    log("触发抖音验证码风控：本会话停止现采（不尝试绕过），未命中候选回退缓存/LLM 基线")
+                else:
+                    # 0 结果大概率是选择器失效：存快照 + 明确告警，降低排查成本
+                    dump_debug(page, f"svc_fail_{ts}_search")
+                    log("搜索 0 结果：已保存页面快照到 data/debug/，请对照 crawler/douyin.py 顶部 SEL_* 常量排查")
             # 多 Tab 并发：单条重试、进度日志、失败快照均在 fetch_videos 内统一处理；
             # 请求间隔由共享频控器兜底，并发只消除互相干等，不提高风控风险
             t0 = time.time()

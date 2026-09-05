@@ -19,11 +19,14 @@ from pipeline.candidates import (
     candidate_foods,
     generate_candidates,
     is_marketing,
+    select_verify_candidates,
     verify_candidates,
 )
 from pipeline.extract import extract_points
 from pipeline.heat import heat_index, pitfall_digest, sentiment_trend
 from pipeline.verify import annotate_confidence
+from pipeline.decision import build_decisions
+from pipeline.qc import finalize, run_quality_gate
 from pipeline.planner import (
     build_budget_summary,
     build_review_digest,
@@ -36,6 +39,7 @@ from pipeline.planner import (
     render_trip_html,
     transport_hints,
 )
+from crawler.base import SourceDisabled
 from service.research import (
     JOBS,
     _CRAWL_LOCK,
@@ -51,6 +55,23 @@ TRIP_SPOT_COMMENTS = 100
 MAX_SPOTS_PER_DAY = 3    # 候选景点上限 = 天数 × 3（简单路径）
 MIN_USABLE_SPOTS = 2     # 低于此数的可用调研结果无法排行程
 TRIP_FOOD_LIMIT = 3      # 餐厅调研数上限（午/晚餐推荐用，成本闸）
+QC_REPAIR_ROUNDS = 1     # 质量门禁不达标时的回炉轮次上限（F5.2；每轮多一次规划 LLM 调用，成本敏感故设 1）
+
+
+_UGC_WARNED = False
+
+
+def _try_crawl(name: str, job_id: str | None, log) -> list:
+    """现场采集的安全阀：UGC 源未启用（kernel-only）时不抛错，返回空并提示走缓存/LLM 基线。"""
+    global _UGC_WARNED
+    try:
+        return _crawl(name, TRIP_SPOT_LIMIT, TRIP_SPOT_COMMENTS, False, job_id, log)
+    except SourceDisabled:
+        if not _UGC_WARNED:
+            _UGC_WARNED = True
+            log("未启用 UGC 数据源（SOURCE_DOUYIN_ENABLED=false）：跳过现场采集，仅用缓存/LLM 基线"
+                "（kernel-only）；启用方法与责任见 README「合规与免责」")
+        return []
 
 
 def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
@@ -104,6 +125,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         # 1) 圈定候选：用户指定 > 混合候选验证（未指定清单时）> 简单圈定兜底
         job["stage"] = "圈定景点"
         categories: dict[str, str] = {}
+        cands: list[dict] = []           # 全量候选（含被截断未验证的），供选点决策表展示（F1.1/F2.1）
+        verify_results: list[dict] = []  # 交叉验证结论（含 drop），供决策表与门禁 R2
         pre: dict[str, tuple[list, list[dict]]] | None = None
         if user_spots:
             spots = [s.strip() for s in user_spots if s.strip()][:days * MAX_SPOTS_PER_DAY]
@@ -120,8 +143,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             spots = []
             try:
                 cands = generate_candidates(city, days, preferences)
-                log(f"大模型圈定 {len(cands)} 个候选，开始逐个验证采集（上限 {VERIFY_MAX} 个）")
-                verify_cands = cands[:VERIFY_MAX]
+                log(f"大模型圈定 {len(cands)} 个候选，按类别配额公平挑选验证（上限 {VERIFY_MAX} 个）")
+                verify_cands = select_verify_candidates(cands, VERIFY_MAX)
                 vstats: dict[str, dict] = {}
                 researched: dict[str, tuple[list, list[dict]]] = {}
                 for ci, cand in enumerate(verify_cands, 1):
@@ -134,7 +157,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                         items = load_items_from_raw(record["raw_path"])
                     else:
                         log(f"  验证[{ci}/{len(verify_cands)}] {name}：现场采集")
-                        items = _crawl(name, TRIP_SPOT_LIMIT, TRIP_SPOT_COMMENTS, False, job_id, log)
+                        items = _try_crawl(name, job_id, log)
                         if items:
                             raw_path = save_raw(name, items)
                             knowledge.record_crawl(
@@ -143,13 +166,24 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                     # 验证统计：营销号占比（文案正则）+ 预提取立场计数 + 评论摘录样本
                     mkt = sum(1 for it in items if is_marketing(it.description)) if items else 0
                     pts: list[dict] = []
+                    extract_fails = 0
                     if items:
+                        failed_items: list = []
                         with ThreadPoolExecutor(max_workers=3) as pool:
-                            for fut in as_completed({pool.submit(extract_points, it): it for it in items}):
+                            fut_map = {pool.submit(extract_points, it): it for it in items}
+                            for fut in as_completed(fut_map):
                                 try:
                                     pts.extend(fut.result())
                                 except Exception:
-                                    pass
+                                    failed_items.append(fut_map[fut])
+                        # 偶发 LLM 失败重试一次：避免"有视频却因提取失败被当无证据淘汰"（故宫式误杀）
+                        for it in failed_items:
+                            try:
+                                pts.extend(extract_points(it))
+                            except Exception:
+                                extract_fails += 1
+                        if extract_fails:
+                            log(f"    {name}：{extract_fails}/{len(items)} 条要点提取失败（已重试仍失败）")
                     pos = sum(1 for p in pts if p.get("stance") == "推荐")
                     neg = sum(1 for p in pts if p.get("stance") == "避雷")
                     # 置信度标注：同景点组内交叉验证 + 营销号来源降级（后续档案/避坑复用同一批要点）
@@ -164,6 +198,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                     researched[name] = (items, pts)
                     categories[name] = cand["category"]
                 results = verify_candidates(verify_cands, vstats)
+                verify_results = results
                 kept = [r["name"] for r in results if r["verdict"] == "keep" and r["name"] in researched]
                 dropped = [r["name"] for r in results if r["verdict"] == "drop"]
                 if dropped:
@@ -221,7 +256,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                     items = load_items_from_raw(record["raw_path"])
                 else:
                     log(f"[{label}{i}/{len(names)}] {name}：未命中，开始采集（fast 档）")
-                    items = _crawl(name, TRIP_SPOT_LIMIT, TRIP_SPOT_COMMENTS, False, job_id, log)
+                    items = _try_crawl(name, job_id, log)
                     if items:
                         raw_path = save_raw(name, items)
                         knowledge.record_crawl(
@@ -346,16 +381,14 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if _cancelled():
             raise Cancelled()
 
-        # 5) 规划生成（预算约束 + 每日午/晚餐餐厅推荐）+ 数据分析（预算/避坑/热度）
+        # 5) 规划生成（预算约束 + 每日午/晚餐餐厅推荐）
         job["stage"] = "生成规划"
         plan = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
                               budget, preference_mode, foods=food_profiles or None)
         if not plan["days"]:
             raise RuntimeError("规划生成失败：未产出有效行程，请重试或减少天数/景点")
 
-        # 预算：餐厅档案的"餐饮人均"一并计入人均基准（门票类餐厅通常没有）
-        budget_summary = build_budget_summary({**profiles, **food_profiles}, plan, days, budget)
-        # 避坑：景点与餐厅的避雷要点同榜（每条附评论原文）
+        # 数据分析中与 plan 无关的先算：避坑专题 + 热度榜（回炉改 plan 也不影响这两项）
         all_points = [p for pts in spot_points.values() for p in pts] \
             + [p for pts in food_points.values() for p in pts]
         pitfall = pitfall_digest(all_points)
@@ -368,9 +401,57 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 h["sentiment"] = sentiment_trend([c for it in items for c in it.comments])["trend"]
                 heat_rows.append(h)
         heat_rows.sort(key=lambda r: r["score"], reverse=True)
+
+        # 5.5) 统一决策对象 + 质量门禁 + 有限回炉（PRD Epic 5，M1 技术核心）：
+        #      生成与裁判分离——门禁是独立确定性规则，不达标带 issues 回炉，仍不达标进已知妥协
+        job["stage"] = "质量门禁"
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        def _build_decs(p: dict) -> list:
+            return build_decisions(
+                candidates=cands, verify_results=verify_results,
+                profiles=profiles, food_profiles=food_profiles,
+                points_by_spot={**spot_points, **food_points},
+                sources_by_spot={**spot_sources, **food_sources},
+                heat_rows=heat_rows, locs=locs, travel_lines=travel_lines, plan=p)
+
+        def _gate(p: dict, decs: list):
+            # 预算随 plan 变：门禁用当版 plan 现算预算（纯函数零成本），定稿后再算权威预算
+            bs = build_budget_summary({**profiles, **food_profiles}, p, days, budget)
+            return run_quality_gate(decisions=decs, plan=p, profiles=profiles, days=days,
+                                    budget_summary=bs, pitfall=pitfall,
+                                    food_profiles=food_profiles, locs=locs, today=today)
+
+        decisions = _build_decs(plan)
+        report = _gate(plan, decisions)
+        rounds = 0
+        while report.fails and rounds < QC_REPAIR_ROUNDS:
+            if _cancelled():
+                raise Cancelled()
+            rounds += 1
+            fails = "、".join(c.rule_id for c in report.fails)
+            log(f"质量门禁 {report.score} 分，{len(report.fails)} 项不达标（{fails}），回炉重排第 {rounds} 轮")
+            plan2 = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
+                                   budget, preference_mode, foods=food_profiles or None,
+                                   extra_issues=report.issues)
+            if not plan2["days"]:
+                break
+            decs2 = _build_decs(plan2)
+            report2 = _gate(plan2, decs2)
+            if report2.problem_count() < report.problem_count():   # 只采纳问题数严格变少的版本
+                plan, decisions, report = plan2, decs2, report2
+                log(f"回炉第 {rounds} 轮采纳：质量分升至 {report.score}，问题数降至 {report.problem_count()}")
+            else:
+                log(f"回炉第 {rounds} 轮未变好（问题数 {report2.problem_count()} ≥ {report.problem_count()}），保留上一版")
+                break
+        finalize(report, repair_rounds=rounds)
+
+        # 预算：以最终 plan 为准重算（餐厅档案的"餐饮人均"一并计入人均基准）
+        budget_summary = build_budget_summary({**profiles, **food_profiles}, plan, days, budget)
         log(f"预算明细：预估 {budget_summary['total']:.0f} 元"
             + (f"（用户预算 {budget_summary['total_budget']:.0f}，{budget_summary['status']}）" if budget else "（未设预算）")
-            + f"；避坑 {len(pitfall)} 条；热度榜 {len(heat_rows)} 个")
+            + f"；避坑 {len(pitfall)} 条；热度榜 {len(heat_rows)} 个；质量分 {report.score}"
+            + (f"；已知妥协 {len(report.unresolved)} 项" if report.unresolved else ""))
         if _cancelled():
             raise Cancelled()
 
@@ -382,7 +463,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                          digests=digests, foods=food_profiles or None,
                          food_sources=food_sources or None,
                          preferences=preferences, preference_mode=preference_mode,
-                         user_spots=user_spots)
+                         user_spots=user_spots, decisions=decisions, quality=report)
         report_path = REPORT_DIR / f"行程_{city}_{ts:%Y%m%d_%H%M%S}.md"
         report_path.write_text(md, encoding="utf-8")
         # 行程报告无采集档案，单独登记进报告表，网页历史列表才不会遗漏
@@ -399,7 +480,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                                  pitfall=pitfall, heat=heat_rows, digests=digests,
                                  foods=food_profiles or None, food_sources=food_sources or None,
                                  preferences=preferences, preference_mode=preference_mode,
-                                 user_spots=user_spots),
+                                 user_spots=user_spots, decisions=decisions, quality=report),
                 encoding="utf-8",
             )
             log(f"行程已保存：{report_path.name}（含 HTML 可视化版 {html_path.name}）")
@@ -416,6 +497,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             "budget_summary": budget_summary,
             "pitfall_digest": pitfall,
             "heat_rank": heat_rows,
+            "quality": report.to_dict(),
+            "decision_table": [d.to_row() for d in decisions],
             "stats": {
                 "spots": len(spot_points),
                 "foods": len(food_points),

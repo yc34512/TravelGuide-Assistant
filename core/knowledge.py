@@ -23,8 +23,18 @@ _DB_PATH = DATA_DIR / "knowledge.db"
 _NOISE_SUFFIXES = ("旅游攻略", "攻略", "旅游", "旅行", "游玩", "怎么玩", "游记", "自由行")
 
 
+def strip_qualifiers(name: str) -> str:
+    """剥离括号限定词（全角（…）/半角 (…)，如分店名、范围说明）。
+
+    缓存归一与抖音搜索词清洗共用：候选名常带"（含前海、后海、西海）""（故宫店）"
+    这类限定词，不剥则命不中干净缓存、或搜索词过具体返回 0 结果。剥空则回退原串。
+    """
+    s = re.sub(r"[（(][^）)]*[）)]", "", name).strip()
+    return s or name.strip()
+
+
 def normalize_keyword(keyword: str) -> str:
-    k = keyword.strip()
+    k = strip_qualifiers(keyword)
     for suf in _NOISE_SUFFIXES:
         if k.endswith(suf) and len(k) > len(suf):
             k = k[: -len(suf)]
@@ -150,16 +160,27 @@ def find_fresh(keyword: str, ttl_days: int) -> dict | None:
     """返回该关键词保鲜期内的最新一条记录；过期或不存在返回 None。
 
     同时用归一化形式与原始形式查询：旧版本入库的记录未经归一化（如存的是"东湖游玩"），
-    双形式兼容避免存量缓存失效。"""
+    双形式兼容避免存量缓存失效。精确匹配失败后再做一次保守前缀回退，命中变体名
+    （如"四季民福"↔"四季民福烤鸭店"）。仅认 video_count>0 的记录——空采集不算命中，
+    杜绝历史空数据被当保鲜命中复用（缓存投毒）。"""
     since = (datetime.now() - timedelta(days=ttl_days)).isoformat(timespec="seconds")
-    candidates = list(dict.fromkeys([normalize_keyword(keyword), keyword.strip()]))
+    norm = normalize_keyword(keyword)
+    candidates = list(dict.fromkeys([norm, keyword.strip()]))
     marks = ", ".join("?" for _ in candidates)
     with _conn() as conn:
         row = conn.execute(
             f"SELECT * FROM spot_cache WHERE keyword IN ({marks}) AND crawled_at >= ?"
-            " ORDER BY crawled_at DESC LIMIT 1",
+            " AND video_count > 0 ORDER BY crawled_at DESC LIMIT 1",
             (*candidates, since),
         ).fetchone()
+        if not row and len(norm) >= 3:
+            # 前缀回退：变体名也能命中健康缓存（≥3 字阈值避免过短查询误配，取最新）
+            row = conn.execute(
+                "SELECT * FROM spot_cache WHERE crawled_at >= ? AND video_count > 0"
+                " AND (keyword LIKE ? OR ? LIKE keyword || '%')"
+                " ORDER BY crawled_at DESC LIMIT 1",
+                (since, f"{norm}%", norm),
+            ).fetchone()
     if not row:
         return None
     raw = Path(row["raw_path"])

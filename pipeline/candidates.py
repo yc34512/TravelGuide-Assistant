@@ -21,6 +21,9 @@ MARKETING_RE = re.compile(
 CATEGORY_QUOTA = {"景点": 10, "美食": 5, "体验": 3, "购物": 2}
 TOTAL_CANDIDATES_MAX = 20
 VERIFY_MAX = 12          # 验证采集的候选数硬上限（成本控制闸）
+# 验证阶段的类别配额：景点是行程骨架占大头，但美食/体验/购物保底进验证，
+# 避免 LLM 返回顺序靠后的类别被 [:VERIFY_MAX] 整体截断成"未定"（F2.1 公平截断）
+VERIFY_QUOTA = {"景点": 6, "美食": 3, "体验": 2, "购物": 1}
 KEEP_MIN, KEEP_MAX = 8, 12
 
 GEN_SYSTEM = """你是旅行候选圈定专家。为指定城市生成值得实地验证的候选清单。
@@ -100,6 +103,33 @@ def generate_candidates(city: str, days: int, preferences: str) -> list[dict]:
         if len(picked) >= TOTAL_CANDIDATES_MAX:
             break
     return picked
+
+
+def select_verify_candidates(cands: list[dict], verify_max: int = VERIFY_MAX) -> list[dict]:
+    """按类别配额公平挑选进入验证采集的候选，取代"按返回顺序硬截断 [:verify_max]"。
+
+    先按 VERIFY_QUOTA 给每类保底名额（取 min(配额, 实际数)），名额有剩再把余量
+    按"景点→美食→体验→购物"优先补给还有候选的类别，直到用满 verify_max。
+    类别内保持 LLM 原始顺序（靠前通常更值得验证）。纯函数，独立可测。
+    """
+    by_cat: dict[str, list[dict]] = {}
+    for c in cands:
+        by_cat.setdefault(c.get("category") or "景点", []).append(c)
+    picked: list[dict] = []
+    remaining: dict[str, list[dict]] = {}
+    for cat, quota in VERIFY_QUOTA.items():
+        avail = by_cat.get(cat, [])
+        picked.extend(avail[:quota])
+        if avail[quota:]:
+            remaining[cat] = avail[quota:]
+    for cat, avail in by_cat.items():  # 未知类别整体进剩余池
+        if cat not in VERIFY_QUOTA and avail:
+            remaining[cat] = avail
+    if len(picked) < verify_max:  # 名额有剩：景点优先补，再按配额顺序补
+        for cat in ["景点", "美食", "体验", "购物", *list(remaining)]:
+            while len(picked) < verify_max and remaining.get(cat):
+                picked.append(remaining[cat].pop(0))
+    return picked[:verify_max]
 
 
 def _normalize_result(x: dict, known: set[str]) -> dict | None:

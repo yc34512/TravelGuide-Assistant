@@ -90,6 +90,9 @@ def _run_heat(job_id: str, city: str) -> None:
         job["stage"] = "采集热度数据"
         collected: dict[str, list] = {}
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        from crawler import base
+        base.require_ugc_source(log=log)   # 开源合规闸门：热度刷榜也属 UGC 采集，默认关闭
+        base.reset_session()
         with _CRAWL_LOCK:
             if _cancelled():
                 raise Cancelled()

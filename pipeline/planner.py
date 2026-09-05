@@ -12,10 +12,15 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from config import LLM_WEB_SEARCH
 from core.llm import chat_json
+from pipeline.decision import STATE_ALT, STATE_IN, STATE_OUT
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 ALLOWED_SLOTS = {"上午", "下午", "晚上"}
+
+# 选点决策表状态图标（F7.1）与质量门禁状态图标（§5.3）
+_STATE_ICONS = {STATE_IN: "✅", STATE_ALT: "⏸", STATE_OUT: "❌", "": "❔"}
+_QC_ICONS = {"pass": "✅", "warn": "⚠️", "fail": "❌", "skip": "➖"}
 
 CANDIDATE_SYSTEM = """你是旅行规划师。根据城市与出行天数，列出该城市最值得去的景点名单。
 规则：
@@ -34,6 +39,8 @@ PROFILE_SYSTEM = """你是旅游数据分析师。给定某景点的编号信息
 5. cost_items：从要点提取的确定花费，每条 {"item": "名称", "type": "门票|餐饮人均|交通|其他", "amount": 数字}；
    只收录要点中有明确数字的花费，估算与无依据的一律不写；无则空数组；
    门票/入园/预约类费用（含第三方渠道预约费）一律 type="门票"，价格给区间时取最低明确数字；
+   type="餐饮人均" 仅当要点明确给出"人均/每人/一位"的整餐花费时才写；单个菜品或小吃单价
+   （如"香辣蟹7元""一碗面12元"）不是人均，归 type="其他"，切勿当成餐饮人均；
 6. 每条文本一句话，保留具体事实（数字、地名、时间），不要空泛概括；
 7. 输出严格 JSON：{"duration_hours": 数字或null, "best_time_slot": "上午|下午|晚上|全天",
    "highlights": ["..."], "avoid": ["..."], "food": ["..."], "photo_spots": ["..."], "tips": ["..."],
@@ -325,9 +332,14 @@ def transport_hints(city: str, hotel: str, spots: list[str], max_routes: int = 1
 def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
                    travel_lines: list[str], preferences: str,
                    budget: float | None = None, preference_mode: str = "均衡",
-                   foods: dict[str, dict] | None = None) -> dict:
+                   foods: dict[str, dict] | None = None,
+                   extra_issues: list[str] | None = None) -> dict:
     """一次 LLM 调用生成行程 JSON，随后做防御性规范化。传入预算时启用预算约束规则；
-    传入 foods（餐厅档案）时启用每日午/晚餐推荐规则。"""
+    传入 foods（餐厅档案）时启用每日午/晚餐推荐规则。
+
+    extra_issues：来自 pipeline.qc 权威门禁的修正指令（F5.2 有限回炉）。传入时连同覆盖率
+    问题一起写进回炉提示；采纳条件放宽为"覆盖率不变差即返回重试版"，最终是否采纳由调用方
+    用 qc.problem_count 权威判定（无 extra_issues 时保持原有"严格变少才采纳"行为）。"""
     profile_lines = []
     for name, p in profiles.items():
         dur = f"约{p['duration_hours']}小时" if p["duration_hours"] else "时长未知"
@@ -363,14 +375,19 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         user += "\n\n餐厅候选（每日午餐/晚餐从中推荐，每家最多推荐一次）：\n" + "\n".join(food_lines)
     data = chat_json(PLAN_SYSTEM, user)
     plan = _normalize_plan(data, set(profiles.keys()), days)
-    # 覆盖率兜底：排点过少/晚上型景点错位/未排景点无备选说明时，
-    # 带问题清单重试一次（仅多一次 LLM 调用），变好才采纳，防止地标景点被静默丢弃
-    issues = _coverage_issues(plan, profiles, days)
-    if issues:
-        fix_note = "\n\n上一版规划存在以下问题，本版必须修正：\n" + "\n".join(f"- {x}" for x in issues)
+    # 覆盖率兜底 + 质量门禁回炉：排点过少/晚上型错位/未排景点无备选说明（_coverage_issues），
+    # 以及来自 pipeline.qc 的权威门禁指令（extra_issues），一起写进回炉提示重试一次。
+    base_issues = _coverage_issues(plan, profiles, days)
+    extra = [str(x).strip() for x in (extra_issues or []) if str(x).strip()]
+    if base_issues or extra:
+        fix_note = ("\n\n上一版规划存在以下问题，本版必须修正：\n"
+                    + "\n".join(f"- {x}" for x in base_issues + extra))
         data2 = chat_json(PLAN_SYSTEM, user + fix_note)
         plan2 = _normalize_plan(data2, set(profiles.keys()), days)
-        if len(_coverage_issues(plan2, profiles, days)) < len(issues):
+        base2 = len(_coverage_issues(plan2, profiles, days))
+        # 无外部门禁指令：覆盖率问题必须严格变少才采纳（原有行为）；
+        # 有门禁指令：覆盖率不变差即返回重试版，权威采纳交调用方（qc.problem_count 比较）
+        if base2 < len(base_issues) or (extra and base2 <= len(base_issues)):
             plan = plan2
     # 餐厅防编造：food 推荐必须命中候选店名，否则清空（没调研过的店不能写进路书）
     plan = _filter_fabricated_food(plan, set(foods or {}))
@@ -411,6 +428,12 @@ def _coverage_issues(plan: dict, profiles: dict[str, dict], days: int) -> list[s
     return issues
 
 
+# F4.2/F4.6 餐饮人均口径：单菜/小吃单价（如"香辣蟹7元"）常被误标成"餐饮人均"，
+# 低于正餐人均下限的剔除；无可靠调研人均时用城市正餐基线兜底并标注"基线估算"
+MIN_MEAL_PER_PERSON = 12
+MEAL_BASELINE = 50
+
+
 def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
                          budget: float | None) -> dict:
     """预算明细汇总：门票（只计已排入行程的景点，多源去重后求和）/餐饮（人均×天数×2 正餐）
@@ -425,6 +448,7 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
     tickets = []
     ticket_detail_items: list[str] = []   # 与总额同口径的门票明细，渲染层直接复用
     food_prices = []
+    food_price_srcs: list[str] = []   # 可靠正餐人均来源（店名+金额），供明细列依据
     tickets_missing = []
     for name, p in profiles.items():
         has_ticket = False
@@ -434,8 +458,10 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
                 if name in planned:  # 调研了但没排进行程的，门票不计入预算
                     tickets.append(round(c["amount"]))
                     ticket_detail_items.append(f"{name} {c['item']} {c['amount']:.0f} 元")
-            elif c["type"] == "餐饮人均":
+            elif c["type"] == "餐饮人均" and c["amount"] >= MIN_MEAL_PER_PERSON:
+                # F4.2：低于正餐人均下限的多是单菜/小吃单价（如"香辣蟹7元"），剔除不当人均
                 food_prices.append(c["amount"])
+                food_price_srcs.append(f"{name} 人均 {c['amount']:.0f} 元")
         if name in planned and not has_ticket:
             if slot_cost.get(name, 0) > 0:
                 tickets.append(round(slot_cost[name]))
@@ -443,7 +469,12 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
             else:
                 tickets_missing.append(name)
     ticket_total = float(sum(dict.fromkeys(tickets)))  # 同价位门票去重（多个来源说同一票价）
-    avg_meal = round(sum(food_prices) / len(food_prices)) if food_prices else 50
+    if food_prices:
+        avg_meal = round(sum(food_prices) / len(food_prices))
+        food_baseline = False
+    else:
+        avg_meal = MEAL_BASELINE   # F4.6：无可靠调研人均时用城市正餐基线兜底
+        food_baseline = True
     food_total = float(avg_meal * days * 2)
     slot_count = sum(len(d["slots"]) for d in plan.get("days", []))
     transport = float(max(slot_count, 1) * 15)  # 估算值：每点位市内交通约 15 元（无实测数据时的保守占位）
@@ -456,6 +487,8 @@ def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
         "tickets_missing": tickets_missing,
         "food": food_total,
         "food_avg": float(avg_meal),
+        "food_baseline": food_baseline,
+        "food_price_srcs": food_price_srcs,
         "transport": transport,
         "flex": flex,
         "total": total,
@@ -510,25 +543,57 @@ def budget_breakdown(profiles: dict[str, dict], budget_summary: dict | None,
     """预算明细行：门票逐点列明 / 餐饮 / 交通 / 弹性。纯函数可测。"""
     if not budget_summary:
         return []
-    food_items = []
-    for name, p in profiles.items():
-        for c in p.get("cost_items", []):
-            if c["type"] == "餐饮人均":
-                food_items.append(f"{name} 人均 {c['amount']:.0f} 元")
     # 门票明细直接用汇总层同口径的结果，避免"列了未排入景点门票但总额为 0"的矛盾
     ticket_detail = "；".join(budget_summary.get("tickets_detail") or []) or "已排入景点均无票价数据"
     missing = (budget_summary or {}).get("tickets_missing") or []
     if missing:
         ticket_detail += f"（{'、'.join(missing)} 无票价数据，可能免费或未被提及，出发前请核实）"
+    # 餐饮人均依据用汇总层过滤后的可靠来源（单菜价已剔除），口径与总额一致；
+    # 兼容未含 food_price_srcs 的旧汇总：按同一下限从 profiles 现算
+    food_srcs = budget_summary.get("food_price_srcs")
+    if food_srcs is None:
+        food_srcs = [f"{name} 人均 {c['amount']:.0f} 元"
+                     for name, p in profiles.items() for c in p.get("cost_items", [])
+                     if c.get("type") == "餐饮人均" and c.get("amount", 0) >= MIN_MEAL_PER_PERSON]
     food_detail = f"人均 {budget_summary['food_avg']:.0f} 元 × 2 正餐 × {days} 天"
-    if food_items:
-        food_detail += "（调研到的餐厅人均：" + "；".join(food_items) + "）"
+    if budget_summary.get("food_baseline"):
+        food_detail += "（无可靠调研人均，按城市正餐基线估算，出发前请核实）"
+    elif food_srcs:
+        food_detail += "（调研到的餐厅人均：" + "；".join(food_srcs) + "）"
     return [
         {"item": "门票", "detail": ticket_detail, "amount": budget_summary["tickets"]},
         {"item": "餐饮", "detail": food_detail, "amount": budget_summary["food"]},
         {"item": "市内交通", "detail": "估算（每行程点约 15 元）", "amount": budget_summary["transport"]},
         {"item": "弹性预留", "detail": "前几项小计的 10%", "amount": budget_summary["flex"]},
     ]
+
+
+def _decision_rows(decisions) -> list[dict]:
+    """选点决策表数据行（F7.1）。接受 SpotDecision 列表，格式化成可直接渲染的字段。纯函数可测。"""
+    rows = []
+    for d in decisions or []:
+        r = d.to_row()
+        state = r.get("state") or ""
+        rows.append({
+            "name": r["name"], "category": r["category"], "sources": r["sources"],
+            "evidence": r["evidence"], "state": state or "未定",
+            "state_icon": _STATE_ICONS.get(state, "❔"),
+            "heat": f"{r['heat_score']:.2f}" if r.get("heat_score") else "—",
+            "trend": r.get("heat_trend") or "—",
+            "mkt": f"{r['mkt_ratio']:.0%}" if r.get("mkt_ratio") else "—",
+            "reason": r.get("reason") or "—",
+        })
+    return rows
+
+
+def _quality_dict(quality) -> dict | None:
+    """质量报告规范化成 dict（接受 QualityReport 对象或已是 dict）。纯函数可测。"""
+    if quality is None:
+        return None
+    if isinstance(quality, dict):
+        return quality
+    to_dict = getattr(quality, "to_dict", None)
+    return to_dict() if callable(to_dict) else None
 
 
 def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str, dict],
@@ -538,7 +603,8 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
                 foods: dict[str, dict] | None = None,
                 food_sources: dict[str, list[str]] | None = None,
                 preferences: str = "", preference_mode: str = "",
-                user_spots: list[str] | None = None) -> str:
+                user_spots: list[str] | None = None,
+                decisions: list | None = None, quality=None) -> str:
     """把行程 JSON 渲染成 Markdown 路书（逐日卡片 + 预算 + 避坑专题 + 热度榜 + 景点详情 + 来源链接）。"""
     plan = _plan_with_note_lists(plan)
     total_slots = sum(len(d["slots"]) for d in plan["days"])
@@ -581,6 +647,35 @@ def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str
     day_costs = day_subtotals(plan, budget_summary)
     if plan.get("summary_note"):
         lines += [f"- 规划说明：{plan['summary_note']}", ""]
+    # 质量分卡（§5.3 / F5.1）：总分 + 各规则状态 + 回炉轮次 + 已知妥协
+    q = _quality_dict(quality)
+    if q:
+        lines += ["## 质量分卡", "",
+                  f"- 质量总分 **{q.get('score', 0)}** / 100 ｜ 回炉 **{q.get('repair_rounds', 0)}** 轮"
+                  f" ｜ 已知妥协 **{len(q.get('unresolved') or [])}** 项", ""]
+        for c in q.get("checks", []):
+            icon = _QC_ICONS.get(c.get("status"), "")
+            note = f" — {c['note']}" if c.get("note") else ""
+            lines.append(f"- {icon} **{c['rule_id']} {c['name']}**：{c.get('status')}"
+                         f"（{c.get('actual', '')}）{note}")
+        lines.append("")
+        if q.get("unresolved"):
+            lines += ["### 已知妥协 / 待你定夺", "",
+                      "> 以下是回炉后仍未能完全满足的项，如实列出而非静默掩盖：", ""]
+            lines += [f"- {u}" for u in q["unresolved"]]
+            lines.append("")
+    # 选点决策表（F7.1，最重要的展示位）：淘汰点也展示，回答"为什么没带你去 X"
+    rows = _decision_rows(decisions)
+    if rows:
+        lines += ["## 选点决策表", "",
+                  "> 每个被圈定的候选都有明确结论——包括没带你去的点及原因。", "",
+                  "| 状态 | 名称 | 类别 | 来源 | 证据 | 热度（趋势） | 营销号 | 理由 |",
+                  "|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            lines.append(f"| {r['state_icon']} {r['state']} | {r['name']} | {r['category']} "
+                         f"| {r['sources']} | {r['evidence']} | {r['heat']}（{r['trend']}） "
+                         f"| {r['mkt']} | {r['reason']} |")
+        lines.append("")
     if pitfall:
         lines += ["## 避坑专题（附评论原文 · 高置信度排前）", ""]
         for i, row in enumerate(pitfall, 1):
@@ -715,7 +810,8 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
                      foods: dict[str, dict] | None = None,
                      food_sources: dict[str, list[str]] | None = None,
                      preferences: str = "", preference_mode: str = "",
-                     user_spots: list[str] | None = None) -> str:
+                     user_spots: list[str] | None = None,
+                     decisions: list | None = None, quality=None) -> str:
     """渲染 HTML 可视化路书（Jinja2 模板 + ECharts/Leaflet CDN，离线时模板内置文本版降级）。"""
     plan = _plan_with_note_lists(plan)
     env = Environment(
@@ -742,6 +838,8 @@ def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dic
         overview=build_overview(days, plan, profiles, budget_summary, pitfall, foods),
         day_costs=day_subtotals(plan, budget_summary),
         breakdown=budget_breakdown({**profiles, **(foods or {})}, budget_summary, days),
+        decision_rows=_decision_rows(decisions),
+        quality=_quality_dict(quality),
         generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
         total_slots=sum(len(d["slots"]) for d in plan["days"]),
     )

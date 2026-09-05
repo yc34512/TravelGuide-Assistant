@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from config import KB_TTL_DAYS, REPORT_DIR
-from core import knowledge
+from core import geo, knowledge
 from service import heatrefresh, research, trip
 
 app = FastAPI(
@@ -90,7 +90,8 @@ def index():
 
 @app.get("/api/health", summary="健康检查 + 知识库概览")
 def health():
-    return {"status": "ok", "kb": knowledge.stats(), "kb_ttl_days": KB_TTL_DAYS}
+    return {"status": "ok", "kb": knowledge.stats(), "kb_ttl_days": KB_TTL_DAYS,
+            "amap": geo.amap_usage()}
 
 
 @app.post("/api/research", summary="发起攻略研究任务")

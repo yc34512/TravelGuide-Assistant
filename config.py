@@ -32,6 +32,12 @@ CRAWL_TABS = int(os.getenv("CRAWL_TABS", "3"))
 # ASR 开启时自动放行视频域（否则捕获不到播放地址）
 BLOCK_MEDIA = os.getenv("BLOCK_MEDIA", "true").lower() == "true"
 
+# —— 数据源开关（开源合规：分析内核平台中立，UGC 采集源插件化 + 默认关闭）——
+# 抖音适配器默认关闭。全新 clone 不启用 = 仅 kernel 能力（LLM 基线 + 高德），不发起任何平台采集；
+# 本地知识库缓存（已采过的数据）仍可读取，不启用不等于清空已有成果。
+# 启用即表示已阅读 README「合规与免责」：仅个人/研究用途、遵守平台 ToS、使用者自担责任。
+SOURCE_DOUYIN_ENABLED = os.getenv("SOURCE_DOUYIN_ENABLED", "false").lower() == "true"
+
 # —— LLM（OpenAI 兼容接口，任选 DeepSeek / 智谱 / 通义 等）——
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
@@ -41,9 +47,11 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 # 默认关闭（快速迭代用）；要出高质量最终报告时在 .env 里设 true。
 VERIFY_ENABLE_THINKING = os.getenv("VERIFY_ENABLE_THINKING", "false").lower() == "true"
 
-# 候选圈定是否启用 LLM 服务商的联网搜索能力（候选清单更贴近近期真实热度）：
-# 服务商不支持时自动降级为纯基线知识，不影响功能可用。
-LLM_WEB_SEARCH = os.getenv("LLM_WEB_SEARCH", "true").lower() == "true"
+# 候选圈定/交通估算是否启用 LLM 服务商的联网搜索能力。
+# 默认关闭：联网搜索在部分服务商（如阿里云百炼）会额外计费、且不在文本模型抵扣范围内，
+# 而本项目的"近期真实热度"已由抖音实地采集的热度指数提供，联网搜索收益有限。
+# 需要时可在 .env 设 LLM_WEB_SEARCH=true（服务商不支持联网参数时会自动降级为纯基线知识）。
+LLM_WEB_SEARCH = os.getenv("LLM_WEB_SEARCH", "false").lower() == "true"
 
 # —— 知识库与服务 ——
 # 景点采集结果的保鲜天数：期内再次查询直接复用，不重新采集
@@ -60,3 +68,6 @@ ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "small")
 # —— 高德地图（行程规划师用：POI 定位 + 通行时间，"顺路"排线的真保障）——
 # 个人开发者免费额度每日 5000 次；留空则行程规划降级为纯 LLM 按区域排线（可用但精度弱）
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
+# 高德用量护栏：个人免费额度 5000 次/日；此处默认 300 次/日 作安全上限，
+# 防 bug/死循环烧光配额。达上限后地理查询自动降级为 LLM 估算（不阻断）。
+AMAP_DAILY_CAP = int(os.getenv("AMAP_DAILY_CAP", "300"))
