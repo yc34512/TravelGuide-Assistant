@@ -210,10 +210,16 @@ def render_markdown(plan: dict) -> str:
         lines.append("")
 
     # 4 逐日行程（How）+ 分段交通
+    poi_cat = (plan.get("catalog") or {}).get("poi") or {}
+    if plan.get("itinerary") and poi_cat:
+        lines += ["> 提示：点击景点名会弹出详情卡（介绍 / 避雷 / 贴士与来源），关闭即可回到原位。", ""]
     for d in plan.get("itinerary") or []:
         lines += [f"## 第 {d.get('day')} 天", ""]
         for s in d.get("blocks") or []:
-            lines.append(f"### {s.get('slot')} · {s.get('spot')}")
+            spot = str(s.get("spot") or "")
+            # 行程点做成锚点链接：行程 ↔ 详情互相直达（避雷/介绍在详情卡里）
+            head = f"[{spot}](#spot-{spot})" if spot in poi_cat else spot
+            lines.append(f"### {s.get('slot')} · {head}")
             if s.get("duration"):
                 lines.append(f"- 游玩时长：{s['duration']}")
             price_md, _ = slot_price_labels(s)

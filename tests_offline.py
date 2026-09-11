@@ -415,7 +415,8 @@ class TestPlanner(unittest.TestCase):
                              decisions=decs, plan=plan,
                              snap={"profiles": profiles, "foods": {}, "heat": []}).to_dict()
         md = render_markdown(tp)
-        for expect in ("《大同》1 天行程规划", "上午 · 云冈石窟", "游玩时长：约2.5小时",
+        for expect in ("《大同》1 天行程规划", "上午 · [云冈石窟](#spot-云冈石窟)",   # 行程点直达详情卡
+                       "> 提示：点击景点名会弹出详情卡", "游玩时长：约2.5小时",
                        "交通：公交约40分钟", "值得去：大佛震撞", "💡 提示：全程两万步",
                        "别踩坑：两万步劝退", "[来源1]", "LLM 交通估算",
                        "你的需求：目的地 **大同**", "住宿 **大同站**",
@@ -644,7 +645,12 @@ class TestOverviewAndHtml(unittest.TestCase):
                        "两万步勝退", "走到腳断", "近期热度上升", "信息溯源",
                        "仅供参考", "timeline", "pit-card", "echo-bar", "heat-bar", "heat-note",
                        'id="detail-云冈石窟"', '#detail-云冈石窟',
-                       "已剔除重复排入的点位：华严寺", "已均衡排布：第1天"):
+                       "已剔除重复排入的点位：华严寺", "已均衡排布：第1天",
+                       # 点击行程中的景点直达介绍/避雷（新交互）
+                       "top-nav", 'class="spot-link"', 'class="jump-chip"',
+                       'id="day-1"', 'class="back-link"',
+                       # 弹层（点开/关闭，不再页内滚动）
+                       'id="modalMask"', 'data-modal="1"', "modal-close"):
             self.assertIn(expect, html)
         # 预算/地图区块已退役：不得再出现图表脚本、金额估算或坐标芯片
         for gone in ("budget-chart", "echarts", "leaflet", "景点分布", "预算明细",

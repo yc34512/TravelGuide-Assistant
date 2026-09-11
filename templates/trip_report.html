@@ -5,149 +5,333 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>《{{ city }}》{{ days }} 天行程规划 · 避坑版</title>
 <style>
-  :root { --green: #1f7a5c; --red: #c0392b; --amber: #b9770e; --ink: #2c3e50; --muted: #7f8c8d; }
+  :root {
+    --brand-900:#0a4f3a; --brand-700:#0e6b4e; --brand-500:#17a077; --brand-200:#8fd8bd;
+    --brand-50:#eaf6f0; --gold:#d9a441; --gold-soft:#fbf3e2;
+    --ink:#17231e; --ink-2:#43584f; --muted:#71857c;
+    --bg:#f4f6f3; --card:#ffffff; --line:#e4ebe6; --line-2:#eff4f1;
+    --red:#c0392b; --red-soft:#fdf1ef; --amber:#b9770e; --amber-soft:#fdf6e8; --sky:#2471a3;
+    --r-lg:22px; --r-md:16px; --r-sm:12px;
+    --sh-1:0 1px 2px rgba(10,40,30,.04), 0 12px 32px -22px rgba(10,40,30,.28);
+    --sh-2:0 2px 6px rgba(10,40,30,.05), 0 28px 64px -32px rgba(10,40,30,.4);
+    --font:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; background: #f4f6f7; color: var(--ink); line-height: 1.65; }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 20px 16px 60px; }
-  header { background: linear-gradient(135deg, #1f7a5c, #2e9e77); color: #fff; border-radius: 14px; padding: 26px 24px; margin-bottom: 18px; }
-  header h1 { font-size: 24px; margin-bottom: 10px; }
-  .meta { display: flex; flex-wrap: wrap; gap: 8px; }
-  .meta span { background: rgba(255,255,255,.18); border-radius: 20px; padding: 3px 12px; font-size: 13px; }
-  /* 输入参数回显条：让用户确认报告是按他的需求生成的 */
-  .echo-bar { margin-top: 12px; font-size: 13px; background: rgba(255,255,255,.14);
-              border-radius: 10px; padding: 8px 12px; }
-  .echo-bar b { color: #ffe9a8; }
-  .echo-tip { display: block; margin-top: 3px; font-size: 12px; opacity: .75; }
-  section { background: #fff; border-radius: 14px; padding: 20px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-  h2 { font-size: 18px; color: var(--green); margin-bottom: 14px; border-left: 4px solid var(--green); padding-left: 10px; }
-  .day-title { font-size: 16px; font-weight: 600; margin: 18px 0 10px; color: var(--ink); }
-  .slot { border-left: 3px solid var(--green); border-radius: 8px; background: #f8faf9; padding: 12px 14px; margin-bottom: 10px; }
-  .slot.pitfall { border-left-color: var(--red); background: #fdf3f2; }
-  .slot-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-  .slot-head .time { font-size: 12px; color: #fff; background: var(--green); border-radius: 4px; padding: 1px 8px; }
-  .slot.pitfall .slot-head .time { background: var(--red); }
-  .slot-head .name { font-weight: 600; font-size: 15px; }
-  .slot-head .cost { font-size: 13px; color: var(--amber); }
-  .slot p { font-size: 14px; margin-top: 3px; }
-  .slot .quote { font-size: 13px; color: var(--red); background: #fff; border-radius: 6px; padding: 5px 10px; margin-top: 6px; border: 1px dashed #e6b0aa; }
-  .quote::before { content: "避坑引用："; font-weight: 600; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { padding: 8px 10px; border-bottom: 1px solid #eef1f3; text-align: left; }
-  th { background: #f4f8f6; color: var(--green); }
-  /* 质量分卡（§5.3）：总分条 + 各规则状态色 */
+  html { scroll-behavior: smooth; }
+  body { font-family: var(--font); color: var(--ink); line-height: 1.72;
+         background:
+           radial-gradient(1100px 480px at 88% -6%, #ddefe6 0%, transparent 60%),
+           radial-gradient(900px 420px at -10% 12%, #eef4ea 0%, transparent 55%),
+           var(--bg);
+         -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 16px 16px 76px; }
+
+  /* ══ 吸顶导航（玻璃质感） ══ */
+  .top-nav { position: sticky; top: 0; z-index: 60;
+             background: rgba(250,252,251,.82); backdrop-filter: blur(14px) saturate(1.4);
+             border-bottom: 1px solid var(--line-2); }
+  .nav-inner { max-width: 1020px; margin: 0 auto; padding: 9px 16px; display: flex; gap: 6px;
+               overflow-x: auto; scrollbar-width: none; }
+  .nav-inner::-webkit-scrollbar { display: none; }
+  .nav-chip { flex: 0 0 auto; font-size: 13px; color: var(--ink-2); text-decoration: none;
+              padding: 6px 14px; border-radius: 999px; border: 1px solid transparent;
+              transition: all .18s ease; white-space: nowrap; }
+  .nav-chip:hover { background: var(--brand-50); color: var(--brand-700); border-color: #d8ece2; }
+  .nav-chip.active { background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+                     color: #fff; border-color: transparent;
+                     box-shadow: 0 6px 16px -8px rgba(14,107,78,.65); }
+  .nav-chip.right { margin-left: auto; color: var(--muted); }
+
+  /* ══ 头图 ══ */
+  .hero { position: relative; overflow: hidden; border-radius: var(--r-lg); padding: 34px 30px 26px;
+          background:
+            radial-gradient(560px 300px at 108% -20%, rgba(255,255,255,.16), transparent 62%),
+            radial-gradient(420px 260px at -8% 118%, rgba(217,164,65,.22), transparent 60%),
+            linear-gradient(132deg, #083f2e 0%, #0c5c43 42%, #128a63 100%);
+          color: #fff; box-shadow: var(--sh-2); margin-bottom: 18px; }
+  .hero::after { content: ""; position: absolute; right: -90px; top: -120px; width: 340px; height: 340px;
+                 border-radius: 50%; border: 1px solid rgba(255,255,255,.14); }
+  .hero h1 { font-size: 29px; font-weight: 700; letter-spacing: .4px; line-height: 1.3;
+             margin-bottom: 6px; position: relative; }
+  .hero h1 .accent { color: #ffd98a; }
+  .hero .subtitle { font-size: 13px; opacity: .8; position: relative; margin-bottom: 16px; }
+  .hero .stats { display: flex; flex-wrap: wrap; gap: 10px; position: relative; margin-bottom: 14px; }
+  .stat { min-width: 108px; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16);
+          border-radius: var(--r-md); padding: 10px 16px; }
+  .stat .num { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+  .stat .lab { font-size: 11.5px; opacity: .78; margin-top: 1px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 7px; position: relative; }
+  .meta span { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.13);
+               border-radius: 999px; padding: 3px 13px; font-size: 12px; }
+  .echo-bar { margin-top: 14px; font-size: 13px; background: rgba(255,255,255,.10);
+              border: 1px solid rgba(255,255,255,.2); border-radius: var(--r-md); padding: 11px 15px;
+              position: relative; }
+  .echo-bar b { color: #ffd98a; }
+  .echo-tip { display: block; margin-top: 4px; font-size: 12px; opacity: .72; }
+
+  /* ══ 板块 ══ */
+  section { background: var(--card); border-radius: var(--r-lg); padding: 24px 26px;
+            margin-bottom: 16px; box-shadow: var(--sh-1);
+            border: 1px solid rgba(12,60,44,.05); scroll-margin-top: 76px; }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+  .sec-no { font-size: 12px; font-weight: 800; letter-spacing: 1px; color: var(--gold);
+            font-variant-numeric: tabular-nums; }
+  .sec-head h2 { font-size: 18.5px; font-weight: 700; color: var(--brand-900); letter-spacing: .2px; }
+  .sec-head .sec-note { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .note-bar { font-size: 13px; background: var(--amber-soft); border: 1px solid #f3e3bd;
+              border-radius: var(--r-sm); padding: 10px 14px; margin-top: 10px; }
+  .note-bar + .note-bar { margin-top: 8px; }
+
+  /* ══ 概览 ══ */
+  .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
+  .ov-item { background: linear-gradient(180deg, #fbfdfc, var(--brand-50)); border: 1px solid #dcefe6;
+             border-radius: var(--r-md); padding: 15px 8px; text-align: center;
+             transition: transform .18s ease, box-shadow .18s ease; }
+  .ov-item:hover { transform: translateY(-2px); box-shadow: var(--sh-1); }
+  .ov-num { font-size: 21px; font-weight: 800; color: var(--brand-700); font-variant-numeric: tabular-nums; }
+  .ov-lab { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* ══ 质量分卡 ══ */
   .qc-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; margin-bottom: 12px; }
-  .qc-score { font-size: 15px; }
-  .qc-score b { font-size: 22px; color: var(--green); }
-  .qc-meta { font-size: 13px; color: var(--muted); background: #f4f8f6; border-radius: 12px; padding: 2px 10px; }
+  .qc-score { font-size: 14px; color: var(--ink-2); }
+  .qc-score b { font-size: 26px; color: var(--brand-700); font-variant-numeric: tabular-nums; }
+  .qc-meta { font-size: 12.5px; color: var(--muted); background: var(--brand-50);
+             border: 1px solid #dcefe6; border-radius: 999px; padding: 2px 12px; }
   .qc-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
-  .qc-list li { font-size: 13px; border-radius: 6px; padding: 5px 10px; border: 1px solid #e8ecee; background: #fff; }
-  .qc-list li.qc-pass { border-left: 3px solid var(--green); }
-  .qc-list li.qc-warn { border-left: 3px solid var(--amber); background: #fef9e7; }
-  .qc-list li.qc-fail { border-left: 3px solid var(--red); background: #fdf3f2; }
-  .qc-list li.qc-skip { border-left: 3px solid #d5d8dc; color: var(--muted); }
+  .qc-list li { font-size: 13px; border-radius: 10px; padding: 7px 12px; border: 1px solid var(--line);
+                background: #fff; }
+  .qc-list li.qc-pass { border-left: 4px solid var(--brand-500); }
+  .qc-list li.qc-warn { border-left: 4px solid var(--amber); background: var(--amber-soft); }
+  .qc-list li.qc-fail { border-left: 4px solid var(--red); background: var(--red-soft); }
+  .qc-list li.qc-skip { border-left: 4px solid #d5d8dc; color: var(--muted); }
   .qc-actual, .qc-note { color: var(--muted); margin-left: 6px; }
-  .qc-unresolved { margin-top: 14px; background: #fef9e7; border: 1px solid #f8d9a8; border-radius: 10px; padding: 12px 14px; }
+  .qc-unresolved { margin-top: 14px; background: var(--amber-soft); border: 1px solid #f3e3bd;
+                   border-radius: var(--r-md); padding: 13px 16px; }
   .qc-unresolved h3 { font-size: 14px; color: #9c640c; margin-bottom: 6px; }
   .qc-unresolved .qc-tip { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   .qc-unresolved ul { margin-left: 18px; font-size: 13px; }
-  /* 选点决策表（F7.1）：状态行配色 */
-  .decision-table td { font-size: 13px; }
-  .decision-table tr.st-in td:first-child { color: var(--green); font-weight: 600; }
+
+  /* ══ 表格 ══ */
+  .tbl-scroll { overflow-x: auto; border-radius: var(--r-sm); border: 1px solid var(--line-2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; background: #fff; }
+  th, td { padding: 9px 11px; border-bottom: 1px solid var(--line-2); text-align: left; vertical-align: top; }
+  th { background: var(--brand-50); color: var(--brand-900); font-weight: 700; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td, table tr:hover td { background: #fafcfb; }
+  .decision-table tr.st-in td:first-child { color: var(--brand-700); font-weight: 700; }
   .decision-table tr.st-alt td:first-child { color: var(--amber); }
   .decision-table tr.st-out td:first-child { color: var(--red); }
-  .decision-table tr.st-out { opacity: .82; }
+  .decision-table tr.st-out { opacity: .78; }
   .risk-high { color: var(--red); font-weight: 600; }
-  /* 避坑警示卡：红橙渐变 + 左侧粗边 + 图标，一眼识别风险 */
-  .pit-card { position: relative; background: linear-gradient(135deg, #fff7ef, #fdeeee); border: 1px solid #f2c4bd;
-              border-left: 5px solid var(--red); border-radius: 12px; padding: 13px 16px 12px 46px;
-              margin-bottom: 12px; font-size: 14px; box-shadow: 0 2px 8px rgba(192, 57, 43, .08); }
-  .pit-card::before { content: "⚠️"; position: absolute; left: 14px; top: 12px; font-size: 18px; }
-  .pit-card .claim { font-weight: 700; color: #922b21; }
-  .pit-card .conf { display: inline-block; font-size: 11px; color: var(--amber); background: #fef5e7;
-                    border: 1px solid #f8d9a8; border-radius: 10px; padding: 0 8px; margin-left: 8px; }
-  .pit-card .conf.c-high { color: #1e8449; background: #eafaf1; border-color: #a9dfbf; }
-  .pit-card .conf.c-mid { color: var(--amber); background: #fef5e7; border-color: #f8d9a8; }
-  .pit-card .conf.c-low { color: #707b7c; background: #f2f3f4; border-color: #d5d8dc; }
-  .pit-card blockquote { margin: 8px 0 0; padding: 6px 12px; background: #fff; border-radius: 8px;
-                         border-left: 3px solid #e6b0aa; color: #7b241c; font-size: 13px; }
-  .pit-card .src-btn { display: inline-block; margin-top: 8px; font-size: 12px; color: #fff; background: var(--red);
-                       border-radius: 12px; padding: 2px 12px; text-decoration: none; }
-  .pit-card .src-btn:hover { background: #922b21; }
-  .card { border: 1px solid #e8ecee; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; font-size: 14px; }
-  .card h3 { font-size: 15px; margin-bottom: 6px; }
-  .card .src { font-size: 12px; }
-  .card .src a { color: var(--green); text-decoration: none; margin-right: 8px; }
-  .digest-box { background: #f8faf9; border-radius: 8px; padding: 8px 12px; margin-top: 8px; font-size: 13px; }
-  .digest-box blockquote { margin: 4px 0 0; padding: 3px 10px; background: #fff; border-radius: 6px; color: var(--muted); font-size: 12px; }
-  .tag { display: inline-block; font-size: 12px; border-radius: 4px; padding: 0 8px; margin-right: 6px; background: #eaf4f0; color: var(--green); }
-  footer { font-size: 12px; color: var(--muted); text-align: center; padding: 10px 20px; }
-  .note-bar { font-size: 13px; background: #fef9e7; border-radius: 8px; padding: 8px 12px; margin-top: 10px; }
-  .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-  .ov-item { background: #f4f8f6; border-radius: 10px; padding: 12px 8px; text-align: center; }
-  .ov-num { font-size: 18px; font-weight: 700; color: var(--green); }
-  .ov-lab { font-size: 12px; color: var(--muted); margin-top: 2px; }
-  /* 注意事项分点列表：避坑红/费用橙/时间蓝/提示灰，每点一句话 */
-  .note-list { list-style: none; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-  .note-list li { font-size: 13px; border-radius: 6px; padding: 4px 10px; background: #fff; border: 1px solid #e8ecee; }
-  .note-list li.nt-pit { color: #922b21; background: #fdf3f2; border-color: #f2c4bd; font-weight: 600; }
-  .note-list li.nt-cost { color: #9c640c; background: #fef9e7; border-color: #f8d9a8; }
-  .note-list li.nt-time { color: #2471a3; background: #ebf5fb; border-color: #aed6f1; }
-  .note-list li.nt-tip { color: var(--ink); }
-  /* 每日行程可视化时间线：竖线 + 节点圆点 + 时段气泡，避坑节点变红 */
-  .timeline { position: relative; padding-left: 30px; margin-top: 4px; }
-  .timeline::before { content: ""; position: absolute; left: 9px; top: 10px; bottom: 10px; width: 3px;
-                      border-radius: 3px; background: linear-gradient(180deg, #2e9e77, #a9dfbf); }
+
+  /* ══ 逐日行程 ══ */
+  .day-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; padding: 6px;
+             background: var(--brand-50); border: 1px solid #dcefe6; border-radius: 999px; width: fit-content; }
+  .day-chip { font-size: 13px; text-decoration: none; color: var(--brand-700); background: transparent;
+              border-radius: 999px; padding: 5px 16px; transition: all .18s ease; }
+  .day-chip:hover { background: #fff; box-shadow: var(--sh-1); }
+  .day-block { scroll-margin-top: 76px; }
+  .day-block + .day-block { margin-top: 22px; padding-top: 20px; border-top: 1px dashed var(--line); }
+  .day-title { font-size: 16px; font-weight: 800; margin: 2px 0 14px; display: flex; align-items: center; gap: 9px; }
+  .day-title .badge { font-size: 12px; font-weight: 700; color: #fff; border-radius: 9px; padding: 2px 11px;
+                      background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+                      box-shadow: 0 4px 12px -6px rgba(14,107,78,.6); }
+  .day-title .cnt { font-size: 12px; color: var(--muted); font-weight: 400; }
+  .timeline { position: relative; padding-left: 32px; }
+  .timeline::before { content: ""; position: absolute; left: 10px; top: 14px; bottom: 14px; width: 2px;
+                      border-radius: 2px;
+                      background: linear-gradient(180deg, var(--brand-500), var(--brand-200)); }
   .tl-item { position: relative; margin-bottom: 14px; }
-  .tl-item::before { content: ""; position: absolute; left: -28px; top: 16px; width: 11px; height: 11px;
-                     border-radius: 50%; background: #fff; border: 3px solid var(--green); box-shadow: 0 0 0 4px #eaf4f0; }
-  .tl-item.pitfall::before { border-color: var(--red); box-shadow: 0 0 0 4px #fdecea; }
-  .tl-item .slot { margin-bottom: 0; }
-  /* 热度榜进度条：热度分按榜首归一化，趋势四态配色 */
-  .heat-list { display: flex; flex-direction: column; gap: 12px; }
-  .heat-row { display: flex; align-items: center; gap: 10px; }
-  .heat-rank { flex: 0 0 26px; height: 26px; border-radius: 50%; background: #eaf4f0; color: var(--green);
-               font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; }
-  .heat-row:first-child .heat-rank { background: #f9e79f; color: #7d6608; }
+  .tl-item:last-child { margin-bottom: 0; }
+  .tl-item::before { content: ""; position: absolute; left: -28px; top: 19px; width: 12px; height: 12px;
+                     border-radius: 50%; background: #fff; border: 3px solid var(--brand-500);
+                     box-shadow: 0 0 0 4px var(--brand-50); }
+  .tl-item.pitfall::before { border-color: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
+  .slot { border: 1px solid var(--line); border-left: 4px solid var(--brand-200); border-radius: var(--r-md);
+          background: #fcfefd; padding: 14px 18px;
+          transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease; }
+  .slot:hover { box-shadow: var(--sh-1); transform: translateY(-1px); border-left-color: var(--brand-500); }
+  .slot.pitfall { border-left-color: var(--red); background: #fffbfa; }
+  .slot-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .slot-head .time { font-size: 12px; color: #fff; border-radius: 8px; padding: 2px 11px; font-weight: 700;
+                     letter-spacing: .3px; background: linear-gradient(135deg, var(--brand-500), var(--brand-700)); }
+  .slot-head .time.sl-morning { background: linear-gradient(135deg, #f0b357, #d98c1f); }
+  .slot-head .time.sl-afternoon { background: linear-gradient(135deg, #4aa3d8, #2471a3); }
+  .slot-head .time.sl-evening { background: linear-gradient(135deg, #8577cb, #5b4aa0); }
+  .slot-head .time.sl-allday { background: linear-gradient(135deg, #2fb389, #0e6b4e); }
+  .slot.pitfall .slot-head .time { background: linear-gradient(135deg, #d9544a, #a93226); }
+  .spot-link { font-weight: 800; font-size: 16px; color: var(--ink); text-decoration: none;
+               border-bottom: 2px solid transparent; transition: color .15s ease, border-color .15s ease; }
+  .spot-link:hover { color: var(--brand-700); border-bottom-color: var(--brand-200); }
+  .jump-chip { font-size: 11.5px; color: var(--brand-700); background: var(--brand-50); text-decoration: none;
+               border: 1px solid #d5ece1; border-radius: 999px; padding: 2px 11px; transition: all .16s ease; }
+  .jump-chip:hover { background: var(--brand-700); border-color: var(--brand-700); color: #fff;
+                     box-shadow: 0 6px 14px -8px rgba(14,107,78,.7); }
+  .tag { display: inline-block; font-size: 12px; border-radius: 7px; padding: 1px 10px; margin-right: 6px;
+         background: var(--brand-50); color: var(--brand-700); border: 1px solid #dcefe6; }
+  .slot-head .cost { font-size: 13px; color: var(--amber); font-weight: 700; }
+  .slot p { font-size: 14px; margin-top: 4px; }
+  .slot .quote { font-size: 13px; color: #8c2d21; background: #fff; border-radius: 9px; padding: 7px 12px;
+                 margin-top: 8px; border: 1px dashed #e6b0aa; }
+  .quote::before { content: "避坑引用："; font-weight: 700; }
+  .note-list { list-style: none; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .note-list li { font-size: 13px; border-radius: 8px; padding: 5px 12px; background: #fff; border: 1px solid var(--line); }
+  .note-list li.nt-pit { color: #922b21; background: var(--red-soft); border-color: #f2c4bd; font-weight: 600; }
+  .note-list li.nt-cost { color: #9c640c; background: var(--amber-soft); border-color: #f3e3bd; }
+  .note-list li.nt-time { color: var(--sky); background: #ebf5fb; border-color: #c8e0f2; }
+
+  /* ══ 避坑卡 ══ */
+  .pit-card { position: relative; background: linear-gradient(135deg, #fffaf3, #fdeeec);
+              border: 1px solid #f2c4bd; border-left: 5px solid var(--red); border-radius: var(--r-md);
+              padding: 15px 18px 14px 48px; margin-bottom: 12px; font-size: 14px;
+              box-shadow: 0 10px 26px -20px rgba(192,57,43,.55); }
+  .pit-card::before { content: "⚠️"; position: absolute; left: 15px; top: 14px; font-size: 18px; }
+  .pit-card .claim { font-weight: 800; color: #922b21; }
+  .pit-card .conf { display: inline-block; font-size: 11px; color: var(--amber); background: var(--amber-soft);
+                    border: 1px solid #f3e3bd; border-radius: 999px; padding: 0 10px; margin-left: 8px; }
+  .pit-card .conf.c-high { color: #1e8449; background: #eafaf1; border-color: #a9dfbf; }
+  .pit-card .conf.c-mid { color: var(--amber); background: var(--amber-soft); border-color: #f3e3bd; }
+  .pit-card .conf.c-low { color: #707b7c; background: #f2f3f4; border-color: #d5d8dc; }
+  .pit-card blockquote { margin: 9px 0 0; padding: 8px 13px; background: #fff; border-radius: 10px;
+                         border-left: 3px solid #e6b0aa; color: #7b241c; font-size: 13px; }
+  .pit-card .src-btn { display: inline-block; margin-top: 9px; font-size: 12px; color: #fff; background: var(--red);
+                       border-radius: 999px; padding: 3px 14px; text-decoration: none; transition: background .18s ease; }
+  .pit-card .src-btn:hover { background: #922b21; }
+
+  /* ══ 热度榜 ══ */
+  .heat-list { display: flex; flex-direction: column; gap: 14px; }
+  .heat-row { display: flex; align-items: center; gap: 12px; }
+  .heat-rank { flex: 0 0 30px; height: 30px; border-radius: 50%; background: var(--brand-50); color: var(--brand-700);
+               font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .heat-row:nth-child(1) .heat-rank { background: linear-gradient(135deg,#f7df9a,#e0b64f); color: #6d5308; }
+  .heat-row:nth-child(2) .heat-rank { background: linear-gradient(135deg,#eceef0,#c9ced3); color: #4c565e; }
+  .heat-row:nth-child(3) .heat-rank { background: linear-gradient(135deg,#f5dcc6,#dcaf85); color: #6d4a24; }
   .heat-main { flex: 1; min-width: 0; }
-  .heat-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-  .heat-bar { height: 10px; background: #eef1f3; border-radius: 6px; overflow: hidden; }
-  .heat-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #58d68d, #1f7a5c); }
+  .heat-name { font-size: 14.5px; font-weight: 700; margin-bottom: 5px; }
+  .heat-drill { font-size: 11.5px; margin-left: 6px; color: var(--brand-700); background: var(--brand-50);
+                text-decoration: none; border: 1px solid #d5ece1; border-radius: 999px; padding: 1px 10px; }
+  .heat-drill:hover { background: var(--brand-700); color: #fff; }
+  .heat-bar { height: 9px; background: #eef3f0; border-radius: 999px; overflow: hidden; }
+  .heat-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #5ed3a4, var(--brand-700)); }
   .heat-meta { flex: 0 0 auto; font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
-  .heat-note { font-size: 12px; color: var(--muted); background: #f8faf9; border-radius: 8px;
-               padding: 8px 12px; margin-bottom: 12px; line-height: 1.7; }
-  .mkt-warn { color: var(--red); font-weight: 700; }
+  .heat-note { font-size: 12.5px; color: var(--ink-2); background: var(--brand-50); border: 1px solid #dcefe6;
+               border-radius: var(--r-sm); padding: 10px 14px; margin-bottom: 14px; line-height: 1.75; }
+  .mkt-warn { color: var(--red); font-weight: 800; }
   .senti-up { color: #1e8449; }
   .senti-down { color: var(--red); font-weight: 600; }
-  .trend-tag { font-size: 11px; border-radius: 10px; padding: 1px 8px; margin-left: 6px; white-space: nowrap; }
+  .trend-tag { font-size: 11px; border-radius: 999px; padding: 1px 10px; margin-left: 6px; white-space: nowrap; }
   .t-hot { background: #fdedec; color: #c0392b; border: 1px solid #f5b7b1; }
-  .t-ever { background: #fef9e7; color: #b7950b; border: 1px solid #f7dc6f; }
-  .t-cool { background: #ebf5fb; color: #2471a3; border: 1px solid #aed6f1; }
+  .t-ever { background: var(--amber-soft); color: #b7950b; border: 1px solid #f7dc6f; }
+  .t-cool { background: #ebf5fb; color: var(--sky); border: 1px solid #aed6f1; }
   .t-flat { background: #f2f3f4; color: #7f8c8d; border: 1px solid #d5d8dc; }
+
+  /* ══ 详情卡（列表 + 弹层复用） ══ */
+  .card { border: 1px solid var(--line); border-radius: var(--r-md); padding: 17px 19px; margin-bottom: 12px;
+          font-size: 14px; background: #fff; scroll-margin-top: 76px; transition: box-shadow .22s ease; }
+  .card:hover { box-shadow: var(--sh-1); }
+  .detail-card { cursor: default; }
+  .card h3 { font-size: 15.5px; margin-bottom: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .back-link { font-size: 11.5px; color: var(--muted); text-decoration: none; border: 1px solid var(--line);
+               border-radius: 999px; padding: 1px 10px; font-weight: 400; transition: all .18s ease; }
+  .back-link:hover { color: var(--brand-700); border-color: var(--brand-200); background: var(--brand-50); }
+  .card .src { font-size: 12px; margin-top: 6px; }
+  .card .src a { color: var(--brand-700); text-decoration: none; margin-right: 8px; }
+  .card .src a:hover { text-decoration: underline; }
+  .digest-box { background: #f8fbf9; border: 1px solid var(--line-2); border-radius: var(--r-sm);
+                padding: 10px 14px; margin-top: 10px; font-size: 13px; }
+  .digest-box blockquote { margin: 5px 0 0; padding: 5px 12px; background: #fff; border-radius: 8px;
+                           color: var(--muted); font-size: 12px; border-left: 3px solid var(--brand-200); }
+
+  footer { font-size: 12px; color: var(--muted); text-align: center; padding: 12px 20px; line-height: 1.9; }
+
+  /* ══ 弹层：点开即看，关掉即回（页面位置不动）；默认 visibility+pointer-events 双保险，不遮挡点击 ══ */
+  .modal-mask { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
+                justify-content: center; padding: 22px;
+                background: rgba(9,26,20,.52); backdrop-filter: blur(7px); opacity: 0;
+                visibility: hidden; pointer-events: none;
+                transition: opacity .2s ease, visibility .2s ease; }
+  .modal-mask.open { opacity: 1; visibility: visible; pointer-events: auto; }
+  .modal { width: min(780px, 100%); max-height: 84vh; display: flex; flex-direction: column;
+           background: #fff; border-radius: var(--r-lg); box-shadow: var(--sh-2); overflow: hidden;
+           transform: translateY(14px) scale(.985); transition: transform .22s cubic-bezier(.2,.9,.3,1.2); }
+  .modal-mask.open .modal { transform: translateY(0) scale(1); }
+  .modal-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; flex: 0 0 auto;
+                border-bottom: 1px solid var(--line-2); background: linear-gradient(180deg, #fbfdfc, #fff); }
+  .modal-head .m-title { font-size: 16px; font-weight: 800; color: var(--brand-900); }
+  .modal-head .m-tip { font-size: 12px; color: var(--muted); margin-left: 2px; }
+  .modal-close { margin-left: auto; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line);
+                 background: #fff; color: var(--ink-2); font-size: 15px; line-height: 1; cursor: pointer;
+                 display: flex; align-items: center; justify-content: center; transition: all .16s ease; }
+  .modal-close:hover { background: var(--red-soft); border-color: #f2c4bd; color: var(--red); transform: rotate(90deg); }
+  .modal-body { padding: 18px 22px 22px; overflow-y: auto; }
+  .modal-body .card { border: 0; box-shadow: none; padding: 0; margin: 0; }
+  .modal-body .back-link { display: none; }
+  .modal-foot { padding: 12px 20px 16px; flex: 0 0 auto; border-top: 1px solid var(--line-2);
+                display: flex; justify-content: flex-end; background: #fbfdfc; }
+  .modal-foot .btn-close { font-size: 13px; padding: 8px 22px; border-radius: 999px; border: 0; cursor: pointer;
+                           background: linear-gradient(135deg, var(--brand-500), var(--brand-700)); color: #fff;
+                           font-weight: 600; box-shadow: 0 8px 18px -10px rgba(14,107,78,.7); transition: all .16s ease; }
+  .modal-foot .btn-close:hover { transform: translateY(-1px); box-shadow: 0 12px 24px -10px rgba(14,107,78,.75); }
+  body.modal-open { overflow: hidden; }
+
+  .to-top { position: fixed; right: 22px; bottom: 22px; width: 44px; height: 44px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--brand-500), var(--brand-700)); color: #fff;
+            text-decoration: none; display: flex; align-items: center; justify-content: center; font-size: 18px;
+            box-shadow: var(--sh-2); opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease; z-index: 70; }
+  .to-top.show { opacity: 1; pointer-events: auto; }
+  .to-top:hover { transform: translateY(-2px); }
+
+  @media (max-width: 700px) {
+    .hero { padding: 26px 20px 20px; } .hero h1 { font-size: 22px; }
+    section { padding: 19px 17px; }
+    .heat-row { flex-wrap: wrap; } .heat-meta { text-align: left; }
+    .modal-mask { padding: 10px; } .modal { max-height: 92vh; }
+  }
+  @media print { .top-nav, .to-top, .modal-mask, .jump-chip { display: none !important; } }
 </style>
 </head>
-<body>
+<body id="top">
+<nav class="top-nav" id="topNav">
+  <div class="nav-inner">
+    <a class="nav-chip" href="#sec-overview">概览</a>
+    {% if plan.days %}<a class="nav-chip" href="#sec-days">逐日行程</a>{% endif %}
+    {% if pitfall %}<a class="nav-chip" href="#sec-pitfall">避坑专题</a>{% endif %}
+    {% if heat %}<a class="nav-chip" href="#sec-heat">热度榜</a>{% endif %}
+    {% if foods %}<a class="nav-chip" href="#sec-food">美食榜</a>{% endif %}
+    <a class="nav-chip" href="#sec-detail">详情库</a>
+    {% if legs %}<a class="nav-chip" href="#sec-legs">分段交通</a>{% endif %}
+    {% if quality %}<a class="nav-chip" href="#sec-quality">质量分卡</a>{% endif %}
+    <a class="nav-chip right" href="#top">↑ 顶部</a>
+  </div>
+</nav>
+
 <div class="wrap">
-  <header>
-    <h1>《{{ city }}》{{ days }} 天行程规划 · 避坑版</h1>
+  <header class="hero">
+    <div class="stats">
+      <div class="stat"><div class="num">{{ days }} 天</div><div class="lab">行程天数</div></div>
+      <div class="stat"><div class="num">{{ overview.spots }}</div><div class="lab">调研景点</div></div>
+      <div class="stat"><div class="num">{{ total_slots }}</div><div class="lab">行程点</div></div>
+      <div class="stat"><div class="num">{{ overview.pitfalls }}</div><div class="lab">避坑提示</div></div>
+    </div>
+    <h1>《{{ city }}》<span class="accent">{{ days }} 天</span>行程规划 · 避坑版</h1>
+    <div class="subtitle">抖音真实评论 + 高赞攻略编排 · 每个结论都能溯源</div>
     <div class="meta">
       <span>生成于 {{ generated }}</span>
       <span>住宿：{{ hotel or '未指定' }}</span>
-      <span>{{ profiles|length }} 个景点{% if foods %} + {{ foods|length }} 家餐厅{% endif %}实地调研 · {{ total_slots }} 个行程点</span>
-      <span>{{ '路线依据：高德实测（公交线路/耗时）' if geo_on else '路线依据：LLM 交通估算（未配置地图 Key，出发前以地图 App 为准）' }}</span>
+      <span>{{ profiles|length }} 个景点{% if foods %} + {{ foods|length }} 家餐厅{% endif %}实地调研</span>
+      <span>{{ '路线依据：高德实测' if geo_on else '路线依据：LLM 交通估算' }}</span>
     </div>
     <div class="echo-bar">📋 你的需求：目的地 <b>{{ city }}</b> · 天数 <b>{{ days }} 天</b>
       {% if hotel %} · 住宿 <b>{{ hotel }}</b>{% endif %}
       {% if preference_mode %} · 消费偏好 <b>{{ preference_mode }}</b>{% endif %}
       {% if preferences %} · 特别偏好 <b>{{ preferences }}</b>{% endif %}
       {% if user_spots %} · 指定景点 <b>{{ user_spots|join('、') }}</b>{% endif %}
-      <span class="echo-tip">如与预期不符，可在网页调整参数后重新生成</span>
+      <span class="echo-tip">点击行程里的景点名，会弹出它的介绍与避雷；看完点「关闭」回到原位置。{% if not geo_on %}未配高德 Key，交通为估算，出发前以地图 App 为准。{% endif %}</span>
     </div>
   </header>
 
-  <section>
-    <h2>行程概览</h2>
+  <section id="sec-overview">
+    <div class="sec-head"><span class="sec-no">01</span><h2>行程概览</h2></div>
     <div class="ov-grid">
       <div class="ov-item"><div class="ov-num">{{ overview.days }} 天</div><div class="ov-lab">总天数</div></div>
       <div class="ov-item"><div class="ov-num">{{ overview.spots }} 个</div><div class="ov-lab">景点</div></div>
@@ -164,8 +348,9 @@
   </section>
 
   {% if quality %}
-  <section>
-    <h2>质量分卡</h2>
+  <section id="sec-quality">
+    <div class="sec-head"><span class="sec-no">02</span><h2>质量分卡</h2>
+      <span class="sec-note">生成与自动校验分离，问题如实列出</span></div>
     <div class="qc-head">
       <span class="qc-score">质量总分 <b>{{ quality.score }}</b> / 100</span>
       <span class="qc-meta">回炉 {{ quality.repair_rounds }} 轮</span>
@@ -193,9 +378,10 @@
   {% endif %}
 
   {% if decision_rows %}
-  <section>
-    <h2>选点决策表</h2>
+  <section id="sec-decision">
+    <div class="sec-head"><span class="sec-no">03</span><h2>选点决策表</h2></div>
     <div class="heat-note">每个被圈定的候选都有明确结论——包括没带你去的点及原因。「证据」为多源交叉验证强度，「营销号」占比高需谨慎。</div>
+    <div class="tbl-scroll">
     <table class="decision-table">
       <tr><th>状态</th><th>名称</th><th>类别</th><th>来源</th><th>证据</th><th>热度（趋势）</th><th>营销号</th><th>理由</th></tr>
       {% for r in decision_rows %}
@@ -211,44 +397,64 @@
       </tr>
       {% endfor %}
     </table>
+    </div>
   </section>
   {% endif %}
 
-  {% for d in plan.days %}
-  <section>
-    <h2>第 {{ d.day }} 天</h2>
-    <div class="timeline">
-    {% for s in d.slots %}
-    <div class="tl-item {{ 'pitfall' if s.pitfall_quotes else '' }}">
-    <div class="slot {{ 'pitfall' if s.pitfall_quotes else '' }}">
-      <div class="slot-head">
-        <span class="time">{{ {'上午': '🌅 ', '下午': '☀️ ', '晚上': '🌙 ', '全天': '🗓️ '}.get(s.slot, '') }}{{ s.slot }}</span>
-        <span class="name">{{ s.spot }}</span>
-        {% if s.duration %}<span class="tag">{{ s.duration }}</span>{% endif %}
-        {# 票价文案由 trip_render.slot_price_labels 算好（与 MD、详情卡同一口径），模板不做计算 #}
-        {% if s.cost_label %}<span class="cost">{{ s.cost_label }}</span>{% endif %}
-      </div>
-      {% if s.transport %}<p>🚗 {{ s.transport }}</p>{% endif %}
-      {% if s.reasons %}<p>✅ {{ s.reasons }}</p>{% endif %}
-      {% if s.notes %}
-      <ul class="note-list">
-        {% for nt in s.notes %}
-        <li class="nt-{{ {'避坑': 'pit', '费用': 'cost', '时间': 'time'}.get(nt.type, 'tip') }}">{{ {'避坑': '❌', '费用': '💰', '时间': '🕐'}.get(nt.type, '💡') }} <b>{{ nt.type }}</b>：{{ nt.text }}</li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-      {% for q in s.pitfall_quotes %}<div class="quote">“{{ q }}”</div>{% endfor %}
-      {% if s.food %}<p>🍜 {{ s.food }}</p>{% endif %}
+  {% if plan.days %}
+  <section id="sec-days">
+    <div class="sec-head"><span class="sec-no">04</span><h2>逐日行程</h2>
+      <span class="sec-note">点击景点名弹窗看介绍与避雷</span></div>
+    <div class="day-nav">
+      {% for d in plan.days %}
+      <a class="day-chip" href="#day-{{ d.day }}">第 {{ d.day }} 天 · {{ d.slots|length }} 个时段</a>
+      {% endfor %}
     </div>
+    {% for d in plan.days %}
+    <div class="day-block" id="day-{{ d.day }}">
+      <div class="day-title"><span class="badge">第 {{ d.day }} 天</span>
+        <span class="cnt">{{ d.slots|length }} 个时段</span></div>
+      <div class="timeline">
+      {% for s in d.slots %}
+      {% set slot_cls = {'上午':'sl-morning','下午':'sl-afternoon','晚上':'sl-evening','全天':'sl-allday'}.get(s.slot,'') %}
+      <div class="tl-item {{ 'pitfall' if s.pitfall_quotes else '' }}">
+      <div class="slot {{ 'pitfall' if s.pitfall_quotes else '' }}">
+        <div class="slot-head">
+          <span class="time {{ slot_cls }}">{{ {'上午': '🌅 ', '下午': '☀️ ', '晚上': '🌙 ', '全天': '🗓️ '}.get(s.slot, '') }}{{ s.slot }}</span>
+          {% if s.spot in profiles %}
+          <a class="spot-link" href="#detail-{{ s.spot }}" data-modal="1" title="点开看介绍与避雷">{{ s.spot }}</a>
+          <a class="jump-chip" href="#detail-{{ s.spot }}" data-modal="1">介绍 · 避雷</a>
+          {% else %}
+          <span class="spot-link">{{ s.spot }}</span>
+          {% endif %}
+          {% if s.duration %}<span class="tag">{{ s.duration }}</span>{% endif %}
+          {# 票价文案由 trip_render.slot_price_labels 算好（与 MD、详情卡同一口径），模板不做计算 #}
+          {% if s.cost_label %}<span class="cost">{{ s.cost_label }}</span>{% endif %}
+        </div>
+        {% if s.transport %}<p>🚗 {{ s.transport }}</p>{% endif %}
+        {% if s.reasons %}<p>✅ {{ s.reasons }}</p>{% endif %}
+        {% if s.notes %}
+        <ul class="note-list">
+          {% for nt in s.notes %}
+          <li class="nt-{{ {'避坑': 'pit', '费用': 'cost', '时间': 'time'}.get(nt.type, 'tip') }}">{{ {'避坑': '❌', '费用': '💰', '时间': '🕐'}.get(nt.type, '💡') }} <b>{{ nt.type }}</b>：{{ nt.text }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% for q in s.pitfall_quotes %}<div class="quote">“{{ q }}”</div>{% endfor %}
+        {% if s.food %}<p>🍜 {{ s.food }}</p>{% endif %}
+      </div>
+      </div>
+      {% endfor %}
+      </div>
     </div>
     {% endfor %}
-    </div>
   </section>
-  {% endfor %}
+  {% endif %}
 
   {% if pitfall %}
-  <section>
-    <h2>避坑专题（附评论原文 · 高置信度排前）</h2>
+  <section id="sec-pitfall">
+    <div class="sec-head"><span class="sec-no">05</span><h2>避坑专题</h2>
+      <span class="sec-note">每条附评论原文 · 高置信度排前</span></div>
     {% for row in pitfall %}
     <div class="pit-card">
       <span class="claim">{{ loop.index }}. {{ row.claim }}</span><span class="conf {{ {'高置信度': 'c-high', '中置信度': 'c-mid'}.get(row.conf_level, 'c-low') }}">{{ row.conf_level or row.confidence }}{% if row.n_sources and row.n_sources > 1 %} · {{ row.n_sources }}来源{% endif %}</span>
@@ -260,8 +466,9 @@
   {% endif %}
 
   {% if heat %}
-  <section>
-    <h2>热度榜（近 90 天抖音数据）</h2>
+  <section id="sec-heat">
+    <div class="sec-head"><span class="sec-no">06</span><h2>热度榜</h2>
+      <span class="sec-note">近 90 天抖音数据 · 点击「详情」弹窗</span></div>
     <div class="heat-note">热度指数 = 点赞热度 40%（对数归一）+ 评论密度 30% + 新鲜度 30%（近 90 天发布占比）；
       营销号占比 = 文案命中营销话术的视频占比，<b>≥50% 需谨慎看待</b>；
       情感趋势 = 近 30 天评论好评率与更早对比（判断是不是越做越差）。</div>
@@ -274,7 +481,7 @@
         <span class="heat-rank">{{ loop.index }}</span>
         <div class="heat-main">
           <div class="heat-name">{{ h.spot }}<span class="trend-tag {{ tcls }}">{{ ticon }} {{ h.trend }}</span>
-            <a class="heat-drill" href="#detail-{{ h.spot }}" style="font-size:12px;margin-left:6px;">详情↓</a></div>
+            <a class="heat-drill" href="#detail-{{ h.spot }}" data-modal="1">详情</a></div>
           <div class="heat-bar"><div class="heat-fill" style="width: {{ '%.0f'|format((h.score / top * 100) if top else 0) }}%;"></div></div>
         </div>
         <div class="heat-meta">热度 {{ '%.2f'|format(h.score) }}<br>视频 {{ h.videos }} · 赞 {{ h.likes }} · 评 {{ h.comments }}<br>
@@ -286,11 +493,17 @@
   </section>
   {% endif %}
 
-  <section>
-    <h2>景点详情卡</h2>
+  <section id="sec-detail">
+    <div class="sec-head"><span class="sec-no">07</span><h2>详情库</h2>
+      <span class="sec-note">介绍 · 避雷 · 贴士 · 来源（行程里点景点名也可弹窗查看）</span></div>
     {% for name, p in profiles.items() %}
-    <div class="card">
-      <h3 id="detail-{{ name }}">{{ name }}</h3>
+    {% set back = namespace(day=0) %}
+    {% for dd in plan.days %}{% for ss in dd.slots %}{% if ss.spot == name and not back.day %}{% set back.day = dd.day %}{% endif %}{% endfor %}{% endfor %}
+    <div class="card detail-card" id="detail-{{ name }}">
+      <h3>{{ name }}
+        {% if back.day %}<a class="back-link" href="#day-{{ back.day }}">↩ 返回第 {{ back.day }} 天行程</a>
+        {% else %}<a class="back-link" href="#sec-days">↩ 返回行程</a>{% endif %}
+      </h3>
       <p>
         <span class="tag">建议时长 {{ (p.duration_hours ~ ' 小时') if p.duration_hours else '见要点' }}</span>
         <span class="tag">最佳时段 {{ p.best_time_slot }}</span>
@@ -319,8 +532,9 @@
   </section>
 
   {% if foods %}
-  <section>
-    <h2>美食榜候选（餐厅调研 · 未排入行程时间线）</h2>
+  <section id="sec-food">
+    <div class="sec-head"><span class="sec-no">08</span><h2>美食榜候选</h2>
+      <span class="sec-note">餐厅调研 · 未排入行程时间线</span></div>
     {% for name, p in foods.items() %}
     <div class="card">
       <h3>🍜 {{ name }}</h3>
@@ -347,8 +561,9 @@
   {% endif %}
 
   {% if legs %}
-  <section>
-    <h2>分段交通</h2>
+  <section id="sec-legs">
+    <div class="sec-head"><span class="sec-no">09</span><h2>分段交通</h2></div>
+    <div class="tbl-scroll">
     <table>
       <tr><th>日</th><th>路段</th><th>方式</th><th>时长</th><th>性质</th></tr>
       {% for lg in legs %}
@@ -361,7 +576,8 @@
       </tr>
       {% endfor %}
     </table>
-    <p style="color:#888;font-size:13px">交通时长为市内点对点估算，实际以地图 App 为准。</p>
+    </div>
+    <p style="color:#888;font-size:13px;margin-top:8px">交通时长为市内点对点估算，实际以地图 App 为准。</p>
   </section>
   {% endif %}
 
@@ -370,5 +586,82 @@
     评论内容为匿名摘录，不含任何用户身份信息。
   </footer>
 </div>
+
+<!-- 弹层：点开详情、关闭即回，全程不需要滚动页面 -->
+<div class="modal-mask" id="modalMask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <span class="m-title" id="modalTitle">详情</span>
+      <span class="m-tip">介绍 · 避雷 · 贴士 · 来源</span>
+      <button class="modal-close" id="modalClose" title="关闭（Esc）" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot"><button class="btn-close" id="modalFootClose">关闭，回到行程</button></div>
+  </div>
+</div>
+
+<a class="to-top" id="toTop" href="#top" title="回到顶部">↑</a>
+<script>
+(function () {
+  /* —— 吸顶导航高亮 + 回顶按钮 —— */
+  var chips = [].slice.call(document.querySelectorAll('.nav-chip[href^="#sec-"]'));
+  var secs = chips.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  var toTop = document.getElementById('toTop');
+  function onScroll() {
+    var y = window.scrollY + 96, cur = -1;
+    secs.forEach(function (s, i) { if (s && s.offsetTop <= y) cur = i; });
+    chips.forEach(function (a, i) { a.classList.toggle('active', i === cur); });
+    if (toTop) toTop.classList.toggle('show', window.scrollY > 700);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  /* —— 详情弹层：点开即看，关闭即回（页面滚动位置不变） —— */
+  var mask = document.getElementById('modalMask');
+  var body = document.getElementById('modalBody');
+  var title = document.getElementById('modalTitle');
+  var lastFocus = null;
+
+  function openModal(id) {
+    var node = document.getElementById(id);
+    if (!node) return false;
+    lastFocus = document.activeElement;
+    var clone = node.cloneNode(true);
+    clone.removeAttribute('id');
+    body.innerHTML = '';
+    body.appendChild(clone);
+    var nameEl = node.querySelector('h3');
+    title.textContent = nameEl ? nameEl.textContent.replace(/↩.*$/, '').trim() : '详情';
+    mask.classList.add('open');
+    document.body.classList.add('modal-open');
+    body.scrollTop = 0;
+    var btn = document.getElementById('modalClose');
+    if (btn) btn.focus();
+    return true;
+  }
+  function closeModal() {
+    if (!mask.classList.contains('open')) return;
+    mask.classList.remove('open');
+    document.body.classList.remove('modal-open');
+    setTimeout(function () { if (!mask.classList.contains('open')) body.innerHTML = ''; }, 200);
+    if (lastFocus && lastFocus.focus) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} }
+  }
+
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest ? e.target.closest('a[data-modal]') : null;
+    if (a) {
+      var id = (a.getAttribute('href') || '').slice(1);
+      if (openModal(id)) { e.preventDefault(); }
+      return;
+    }
+    if (e.target === mask) closeModal();   // 点背景关闭
+  });
+  document.getElementById('modalClose').addEventListener('click', closeModal);
+  document.getElementById('modalFootClose').addEventListener('click', closeModal);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeModal();
+  });
+})();
+</script>
 </body>
 </html>
