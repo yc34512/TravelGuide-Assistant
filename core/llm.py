@@ -2,8 +2,18 @@
 
 Key/接入点/模型通过 core.credentials 动态解析（系统凭据管理器优先），
 模块内不出现任何硬编码密钥。
+
+成本约束（用户硬要求：只花免费额度与代金券，绝不扣现金余额）：
+1. 联网搜索默认关闭（config.LLM_WEB_SEARCH=False）——百炼的搜索插件在
+   节省计划/资源包里被明确排除抵扣，免费额度能否抵扣官方口径模糊，
+   风险不对称（一旦不被抵扣就是扣现金），故不开；
+2. 识别「免费额度用完即停」（安心模式）的 403 AllocationQuota.FreeTierOnly：
+   这是防扣现金的保护而非故障，重试无意义，直接给可操作提示；
+3. 进程级 Token 用量账本（usage_note）：每个任务如实报消耗，
+   用户可对照百炼控制台「免费额度」页的余量自己算还能跑几次。
 """
 import json
+import threading
 import time
 
 from openai import AuthenticationError, OpenAI
@@ -18,6 +28,19 @@ _BILLING_HINT = (
     "LLM 账户欠费或免费额度已用尽：请到服务商控制台充值/领取额度后重试，"
     "或运行 python run_cli.py setup 换一家服务商。"
 )
+# 百炼「免费额度用完即停」（安心模式）额度耗尽时返回 403 + 该错误码。
+# 开了它就不会转按量付费，也就不可能扣到现金余额——这正是用户要的保护。
+_FREE_TIER_CODE = "AllocationQuota.FreeTierOnly"
+_FREE_TIER_HINT = (
+    "本模型的百炼免费额度已用尽，且控制台开着「免费额度用完即停」（安心模式），"
+    "所以直接拒绝调用——这是防止扣你现金余额的保护，不是故障。\n"
+    "两条出路：\n"
+    "  ① 换一个仍有免费额度的模型（每个模型各有独立 100 万 Token，"
+    "百炼控制台「免费额度」页可查余量与到期时间），"
+    "执行 python run_cli.py setup 重新配置；\n"
+    "  ② 若你愿意用代金券/余额付费，到控制台「免费额度」页关掉该模型的用完即停开关"
+    "（生效有延迟，约半小时）。"
+)
 
 
 def _is_billing(e: Exception) -> bool:
@@ -25,12 +48,76 @@ def _is_billing(e: Exception) -> bool:
     return "Arrearage" in m or "overdue" in m.lower() or "欠费" in m
 
 
+def _is_free_tier_exhausted(e: Exception) -> bool:
+    """免费额度耗尽且开了用完即停（403）。与欠费区分开：后者要充值，前者只要换模型。"""
+    s = str(e)
+    return _FREE_TIER_CODE in s or "FreeTierOnly" in s
+
+
+def _is_account_fatal(e: Exception) -> bool:
+    """账户/额度态错误：重试没有意义（只会白等三次），必须直接翻译成可操作提示。"""
+    return isinstance(e, AuthenticationError) or _is_billing(e) or _is_free_tier_exhausted(e)
+
+
 def _raise_friendly(e: Exception) -> None:
     """把账户类错误翻译成可操作的中文提示（这类错误重试没有意义）。"""
     if isinstance(e, AuthenticationError):
         raise RuntimeError(_AUTH_HINT) from e
+    if _is_free_tier_exhausted(e):
+        raise RuntimeError(_FREE_TIER_HINT) from e
     if _is_billing(e):
         raise RuntimeError(_BILLING_HINT) from e
+
+
+# —— 进程级 Token 用量账本（成本可见性）——
+# 并发采集下多个线程同时调用，所以记账加锁；只统计成功调用（失败不耗额度）。
+_USAGE_LOCK = threading.Lock()
+_USAGE: dict = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "by_model": {}}
+
+
+def _record_usage(model: str, usage) -> None:
+    """累加一次调用的 token 消耗。usage 为 None（个别服务商不返）时只计次数。"""
+    p = int(getattr(usage, "prompt_tokens", 0) or 0)
+    c = int(getattr(usage, "completion_tokens", 0) or 0)
+    with _USAGE_LOCK:
+        _USAGE["calls"] += 1
+        _USAGE["prompt_tokens"] += p
+        _USAGE["completion_tokens"] += c
+        m = _USAGE["by_model"].setdefault(model, {"calls": 0, "tokens": 0})
+        m["calls"] += 1
+        m["tokens"] += p + c
+
+
+def usage_summary() -> dict:
+    """本进程累计的 LLM 调用与 token 消耗（供任务日志与报告 meta 使用）。"""
+    with _USAGE_LOCK:
+        return {
+            "calls": _USAGE["calls"],
+            "prompt_tokens": _USAGE["prompt_tokens"],
+            "completion_tokens": _USAGE["completion_tokens"],
+            "total_tokens": _USAGE["prompt_tokens"] + _USAGE["completion_tokens"],
+            "by_model": {k: dict(v) for k, v in _USAGE["by_model"].items()},
+        }
+
+
+def usage_note() -> str:
+    """一行可读的用量汇总（写进任务日志，让用户能自己核额度）。"""
+    s = usage_summary()
+    if not s["calls"]:
+        return "LLM 用量：本次未调用"
+    per = "、".join(f"{k} {v['tokens']} token/{v['calls']} 次"
+                   for k, v in sorted(s["by_model"].items()))
+    return (f"LLM 用量（本进程累计）：{s['calls']} 次调用、共 {s['total_tokens']} token"
+            f"（输入 {s['prompt_tokens']} + 输出 {s['completion_tokens']}）｜{per}")
+
+
+def reset_usage() -> None:
+    """清零用量账本（离线测试用；服务进程不需要，累计值就是全量成本）。"""
+    with _USAGE_LOCK:
+        _USAGE["calls"] = 0
+        _USAGE["prompt_tokens"] = 0
+        _USAGE["completion_tokens"] = 0
+        _USAGE["by_model"] = {}
 
 
 def _client_and_model() -> tuple[OpenAI, str]:
@@ -97,10 +184,11 @@ def chat_json(system: str, user: str, retries: int = 3, enable_thinking: bool = 
                     {"role": "user", "content": user},
                 ],
             )
+            _record_usage(model, getattr(resp, "usage", None))
             return json.loads(resp.choices[0].message.content)
         except Exception as e:
-            if isinstance(e, AuthenticationError) or _is_billing(e):
-                _raise_friendly(e)
+            if _is_account_fatal(e):
+                _raise_friendly(e)      # 鉴权/欠费/免费额度耗尽：不重试，直接给可操作提示
             if use_ws and _is_param_err(e):
                 # 服务商不认联网参数：记下降级标记，去参立即重试（不消耗重试配额）
                 _WEB_SEARCH_UNSUPPORTED = True
@@ -124,8 +212,9 @@ def chat_text(system: str, user: str, temperature: float = 0.3) -> str:
                 {"role": "user", "content": user},
             ],
         )
+        _record_usage(model, getattr(resp, "usage", None))
         return resp.choices[0].message.content
     except Exception as e:
-        if isinstance(e, AuthenticationError) or _is_billing(e):
+        if _is_account_fatal(e):
             _raise_friendly(e)
         raise

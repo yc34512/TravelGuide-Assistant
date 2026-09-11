@@ -133,6 +133,22 @@ def _conn() -> sqlite3.Connection:
         )
         """
     )
+    # 城市攻略层缓存（M6-B）："{城市}旅游攻略/N天N夜"高赞视频的采集与提炼成果。
+    # 独立成表而不复用 spot_cache：①keyword 归一会把"攻略"当噪音后缀剥掉；
+    # ②find_fresh 的前缀回退（LIKE keyword||'%'）会让"北京·城市攻略"误命中"北京"的景点缓存。
+    # guide_json 存已提炼的候选与编排建议，二次请求连 LLM 提取都省（TTL 也比景点长）。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS city_guide (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            city TEXT NOT NULL,
+            raw_path TEXT NOT NULL,
+            video_count INTEGER DEFAULT 0,
+            guide_json TEXT DEFAULT '',
+            crawled_at TEXT NOT NULL
+        )
+        """
+    )
     return conn
 
 
@@ -187,6 +203,48 @@ def find_fresh(keyword: str, ttl_days: int) -> dict | None:
     if not raw.exists():  # 缓存文件被清理则视为未命中
         return None
     return dict(row)
+
+
+def record_guide(city: str, raw_path: str, video_count: int, guide: dict | None = None) -> int:
+    """登记城市攻略层采集（M6-B），返回记录 id。
+
+    提炼结果（候选 + 编排建议）一并入库：保鲜期内再次规划同城行程时，
+    既免重采也免重复调 LLM 提炼。"""
+    with _conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO city_guide (city, raw_path, video_count, guide_json, crawled_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (city.strip(), raw_path, video_count,
+             json.dumps(guide or {}, ensure_ascii=False),
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        return cur.lastrowid
+
+
+def find_guide(city: str, ttl_days: int) -> dict | None:
+    """该城保鲜期内最新的攻略层记录（含已提炼的 guide 字典）；过期/不存在返回 None。
+
+    只按城市名精确匹配（不做前缀回退，避免误命景点缓存），且要求 video_count>0
+    ——空采集不算命中，杜绝历史空数据被当保鲜命中复用（缓存投毒）。"""
+    since = (datetime.now() - timedelta(days=ttl_days)).isoformat(timespec="seconds")
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM city_guide WHERE city = ? AND crawled_at >= ? AND video_count > 0"
+            " ORDER BY crawled_at DESC LIMIT 1",
+            (city.strip(), since),
+        ).fetchone()
+    if not row:
+        return None
+    raw = Path(row["raw_path"])
+    if not raw.exists():  # 缓存文件被清理则视为未命中
+        return None
+    try:
+        guide = json.loads(row["guide_json"] or "{}")
+    except (ValueError, TypeError):
+        guide = {}
+    out = dict(row)
+    out["guide"] = guide if isinstance(guide, dict) else {}
+    return out
 
 
 def stats() -> dict:

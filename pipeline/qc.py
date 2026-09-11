@@ -8,7 +8,7 @@ QualityReport。生成与裁判分离——门禁只读统一决策对象（pipe
 纯函数、可离线断言：所有规则对缺失数据保守处理——无数据一律标 skip（不冒充
 pass，也不无端 fail），绝不抛异常中断主流程。
 
-M1 落地 R1/R2/R3/R4/R6/R7/R8/R10（当前数据即可判定）；R5（动线，F3.3）与
+M1 落地 R1/R2/R3/R4/R7/R8/R10（当前数据即可判定）；R5（动线，F3.3）与
 R9（时效，Epic 6）依赖 M2 数据，无数据时如实标 skip，接数据后自动生效。
 """
 from __future__ import annotations
@@ -33,6 +33,8 @@ MAX_SLOTS_PER_DAY = 4       # 体力上限：单日超过判 warn
 DAY_AVAILABLE_HOURS = 11.0  # 单日游玩可用时间窗（上午 4 + 下午 4 + 晚上 3）
 MEAL_HOURS = 1.0            # 每餐占用小时
 TOP_N_HEAT = 3              # 热度前 N 视为高价值点（R2）
+R5_RATIO = 1.9             # 单日绕行比超此值判折返（实际路径/首尾直达）
+R5_MIN_EXCESS_KM = 3.0     # 绕行绝对超出下限，避免近距离抖动误报
 
 
 @dataclass
@@ -119,12 +121,39 @@ def _planned_slots(plan: dict) -> list[dict]:
     return [s for d in (plan or {}).get("days", []) for s in d.get("slots", [])]
 
 
-# —— R1 覆盖密度：入选点过少（P-1 地标静默丢弃）或过密（体力透支）——
+# —— R1 覆盖密度：天数不完整 / 入选点过少（地标静默丢弃）/ 过密（体力透支）；全天型独占一天为合法（F-D1）——
 def _r1_coverage(plan: dict, profiles: dict, days: int) -> Check:
-    n = len(_planned_slots(plan))
+    from pipeline.planner import is_all_day
     d = max(1, int(days or 1))
+    plan_days = (plan or {}).get("days") or []
+    slots = _planned_slots(plan)
+    # 入选点数按去重点位计：同一点被重复排入不应虚增覆盖密度（曾把 6 槽报成“入选 6 点”）
+    n = len({str(s.get("spot") or "") for s in slots if s.get("spot")})
+    # 天数完整性优先于点位数判定：用户要 N 天就必须有 N 天安排。素材不足可以降低
+    # 每日点数（下方 min_slots 已按档案数放宽），但绝不能静默少一整天——实测出现过
+    # “要 3 天只排 2 天”而本规则因点位总数达标报 pass（门禁全绿不等于没问题）。
+    empty_days = [i + 1 for i, dd in enumerate(plan_days) if not (dd.get("slots") or [])]
+    if len(plan_days) < d or empty_days:
+        miss = (f"仅输出 {len(plan_days)} 天" if len(plan_days) < d
+                else f"第 {'、'.join(str(x) for x in empty_days)} 天无任何安排")
+        return Check("R1", "覆盖密度", FAIL, f"要求 {d} 天，{miss}（已排 {n} 点）",
+                     "行程天数不完整：存在整天空白，用户拿到的天数少于要求",
+                     f"必须输出全部 {d} 天的 days 数组、每天至少一个时段有安排；"
+                     f"点位不足时把已调研点分散到每一天（如 2+1+1），不得空整天")
+    drops = (plan or {}).get("duplicate_drops") or []   # _normalize_plan 剔除的重复排入记录
     n_profiles = len(profiles or {})
-    min_slots = min(MIN_SLOTS_PER_DAY * d, n_profiles) if n_profiles else MIN_SLOTS_PER_DAY * d
+    all_day_days = 0        # 合法“1 点独占整天”的天数
+    shared_all_day: list[str] = []   # 全天型点却与其他点同日（未独占）
+    for day in (plan or {}).get("days", []):
+        spots = [s.get("spot") for s in day.get("slots", []) if s.get("spot")]
+        ad = [sp for sp in spots if is_all_day((profiles or {}).get(sp))]
+        if len(spots) == 1 and ad:
+            all_day_days += 1
+        elif ad and len(spots) >= 2:
+            shared_all_day.extend(ad)
+    # 下限：非全天日按 2/天、全天独占日按 1/天（扣除全天日数）
+    expected = max(1, MIN_SLOTS_PER_DAY * d - all_day_days)
+    min_slots = min(expected, n_profiles) if n_profiles else expected
     max_slots = MAX_SLOTS_PER_DAY * d
     if n < min_slots:
         return Check("R1", "覆盖密度", FAIL, f"入选 {n} 点 / 下限 {min_slots}",
@@ -134,7 +163,33 @@ def _r1_coverage(plan: dict, profiles: dict, days: int) -> Check:
         return Check("R1", "覆盖密度", WARN, f"入选 {n} 点 / 上限 {max_slots}",
                      "行程过密，可能体力透支",
                      "适当减少每日点位，为通勤与休息留出余量")
-    return Check("R1", "覆盖密度", PASS, f"入选 {n} 点（合理区间 {min_slots}~{max_slots}）",
+    if drops:
+        return Check("R1", "覆盖密度", WARN,
+                     f"入选 {n} 点；已剔除重复排入 {len(drops)} 处：{'、'.join(drops[:3])}",
+                     "同一点位被排进了多天/多时段（每点全程只应排一次）",
+                     "重复槽位已按首次出现保留、其余剔除；如某天因此变空，请补排其他已调研景点")
+    # 排布过空（实测出现过“第 2 天只有上午”）：除全天型独占日外每天至少两个时段；
+    # 只在素材够分（去重入选点 ≥ 2×天数 − 全天独占日数）时判 FAIL，点数本不够摊时留已知妥协
+    thin_days: list[int] = []
+    for i, dd in enumerate(plan_days, start=1):
+        sl = dd.get("slots") or []
+        if len(sl) == 1 and is_all_day((profiles or {}).get(str(sl[0].get("spot") or ""))):
+            continue   # 全天型点独占一天：单条 slot="全天" 为合法排法
+        if len(sl) <= 1:
+            thin_days.append(i)
+    if thin_days and n >= 2 * len(plan_days) - all_day_days:
+        return Check("R1", "覆盖密度", FAIL,
+                     f"第 {'、'.join(str(x) for x in thin_days)} 天仅 1 个时段（共 {n} 点）",
+                     "排布过空：存在只有单个时段的日子",
+                     f"把排布过满天里的点位匀给第 {'、'.join(str(x) for x in thin_days)} 天，"
+                     f"使每天至少两个时段有安排（全天型独占日除外）")
+    if shared_all_day:
+        return Check("R1", "覆盖密度", WARN, f"全天型未独占：{'、'.join(shared_all_day[:3])}",
+                     "建议独占一整天的全天型点与其他点排在同一天",
+                     "把全天型点（如主题乐园）单独安排一整天，避免与其他景点同日挤占")
+    return Check("R1", "覆盖密度", PASS,
+                 f"入选 {n} 点（合理区间 {min_slots}~{max_slots}）"
+                 + (f"，含 {all_day_days} 个全天独占日" if all_day_days else ""),
                  "覆盖密度合理")
 
 
@@ -190,8 +245,12 @@ def _r3_time_slot(plan: dict, profiles: dict, decisions: list[SpotDecision],
                  "晚上型已排晚上" + ("，闭馆日已校验" if day_weekdays else ""))
 
 
-# —— R4 时间可行：单日已知游玩时长 + 用餐超出可用时间窗 ——
-def _r4_time_feasible(plan: dict, profiles: dict) -> Check:
+# —— R4 时间可行：单日已知游玩时长 + 用餐 + 实测通勤超出可用时间窗 ——
+def _r4_time_feasible(plan: dict, profiles: dict, legs: list[dict] | None = None) -> Check:
+    leg_min: dict = {}
+    for lg in legs or []:
+        if lg.get("nature") == "实测" and lg.get("minutes"):
+            leg_min[lg.get("day")] = leg_min.get(lg.get("day"), 0.0) + float(lg["minutes"])
     over = []
     for day in (plan or {}).get("days", []):
         total, known, meals = 0.0, 0, 0
@@ -206,43 +265,52 @@ def _r4_time_feasible(plan: dict, profiles: dict) -> Check:
             if str(s.get("food") or "").strip():
                 meals += 1
         total += MEAL_HOURS * min(meals, 2)
+        commute = leg_min.get(day.get("day"), 0.0) / 60.0   # 只计实测通勤，无实测不臆造
+        total += commute
         if known and total > DAY_AVAILABLE_HOURS:
-            over.append(f"第{day.get('day')}天约{total:.1f}h")
+            over.append(f"第{day.get('day')}天约{total:.1f}h" + (f"（含通勤{commute:.1f}h）" if commute else ""))
     if over:
         return Check("R4", "时间可行", FAIL, "；".join(over),
-                     "单日游玩+用餐超出可用时间窗",
+                     "单日游玩+用餐（+实测通勤）超出可用时间窗",
                      f"单日安排不超过约 {DAY_AVAILABLE_HOURS:.0f} 小时，请精简当天点位：{'；'.join(over)}")
     return Check("R4", "时间可行", PASS, "各日时长可行", "未超出单日可用时间窗")
 
 
-# —— R5 动线：折返检测（F3.3）在 M2 落地，本期如实标 skip ——
+# —— R5 动线：同日折返/绕路检测（F-D3）——需坐标；无坐标如实 skip（不假 pass/fail）——
 def _r5_route(plan: dict, locs: dict | None = None) -> Check:
-    return Check("R5", "动线", SKIP,
-                 "已提供坐标" if locs else "无坐标数据",
-                 "同日折返检测属 F3.3 动线优化（M2），本期不判定")
+    if not locs:
+        return Check("R5", "动线", SKIP, "无坐标数据",
+                     "未启用高德/无坐标，无法判定动线折返（配 Key 后自动生效）")
+    from core import geo
+    warnings = []
+    for day in (plan or {}).get("days", []):
+        pts = [locs[s.get("spot")] for s in day.get("slots", []) if locs.get(s.get("spot"))]
+        if len(pts) < 3:
+            continue
+        path = 0.0
+        for a, b in zip(pts, pts[1:]):
+            dd = geo.distance_km(a, b)
+            if dd is None:
+                path = -1.0
+                break
+            path += dd
+        if path < 0:
+            continue
+        net = geo.distance_km(pts[0], pts[-1]) or 0.0
+        if net < 0.3:        # 首尾近乎重合（环线）不判折返
+            continue
+        excess = path - net
+        if path > R5_RATIO * net and excess > R5_MIN_EXCESS_KM:
+            warnings.append(f"第{day.get('day')}天绕行{path:.1f}km（直达仅{net:.1f}km）")
+    if warnings:
+        return Check("R5", "动线", WARN, "；".join(warnings),
+                     "同日存在明显折返/绕路",
+                     "按地理就近串联同日点位，减少来回穿越市区：" + "；".join(warnings))
+    return Check("R5", "动线", PASS, "同日动线无明显折返", "动线顺序与地理一致")
 
 
-# —— R6 预算：超支且未调整判 fail；有票价缺口判 warn；未设预算 skip ——
-def _r6_budget(budget_summary: dict | None) -> Check:
-    bs = budget_summary or {}
-    if not bs.get("total_budget"):
-        return Check("R6", "预算", SKIP, "未设用户预算", "无预算约束，不判定超支")
-    total = float(bs.get("total") or 0)
-    tb = float(bs.get("total_budget") or 0)
-    if bs.get("status") == "超支":
-        return Check("R6", "预算", FAIL, f"预估 {total:.0f} / 预算 {tb:.0f}",
-                     f"估算超预算约 {total - tb:.0f} 元且未做调整",
-                     f"预估 {total:.0f} 元超出预算 {tb:.0f} 元，请减少付费景点、选免费替代或降低餐饮标准")
-    missing = bs.get("tickets_missing") or []
-    if missing:
-        return Check("R6", "预算", WARN, f"预估 {total:.0f} / 预算 {tb:.0f}",
-                     f"{'、'.join(missing[:4])} 无票价数据，总额可能偏低",
-                     "出发前核实这些景点票价，预算总额可能上调")
-    return Check("R6", "预算", PASS, f"预估 {total:.0f} / 预算 {tb:.0f}", "预算内，口径自洽")
-
-
-# —— R7 餐饮：编造店名直接 fail；有候选却漏排 warn；无候选且无兜底 skip ——
-def _r7_food(plan: dict, food_profiles: dict | None, food_fallback: str | None = None) -> Check:
+# —— R7 餐饮：编造店名直接 fail（餐厅调研与时间线解耦，时间线一律不排店名）——
+def _r7_food(plan: dict, food_profiles: dict | None) -> Check:
     slots = _planned_slots(plan)
     candidates = set(food_profiles or {})
     fabricated = []
@@ -253,22 +321,11 @@ def _r7_food(plan: dict, food_profiles: dict | None, food_fallback: str | None =
     if fabricated:
         return Check("R7", "餐饮", FAIL, f"疑似编造：{'、'.join(fabricated[:3])}",
                      "餐食推荐含候选清单外的店名",
-                     "只能从已调研餐厅候选中推荐，或给'品类+人均区间'兜底，严禁编造店名")
-    if not candidates and not food_fallback:
-        return Check("R7", "餐饮", SKIP, "无餐厅调研数据",
-                     "F4.6 基线兜底未接入时无从推荐午/晚餐")
-    empty_days = []
-    for day in (plan or {}).get("days", []):
-        if not day.get("slots"):
-            continue
-        has_food = any(str(s.get("food") or "").strip() for s in day.get("slots", []))
-        if not has_food and not food_fallback:
-            empty_days.append(f"第{day.get('day')}天")
-    if empty_days:
-        return Check("R7", "餐饮", WARN, f"{len(empty_days)} 天缺餐食推荐：{'、'.join(empty_days[:3])}",
-                     "有餐厅候选却未排入当天午/晚餐",
-                     f"为有行程的当天补午/晚餐推荐或基线兜底：{'、'.join(empty_days[:3])}")
-    return Check("R7", "餐饮", PASS, "餐食推荐完备", "各日午/晚餐已推荐或有兜底说明")
+                     "只能从已调研餐厅候选中推荐，严禁编造店名")
+    if not candidates:
+        return Check("R7", "餐饮", SKIP, "无餐厅调研数据", "未调研到餐厅，本期无从校验餐饮推荐")
+    return Check("R7", "餐饮", PASS,
+                 f"已调研 {len(candidates)} 家餐厅；时间线不排餐厅（解耦），未发现编造店名", "")
 
 
 # —— R8 避坑归属：避坑条目的来源视频不属于任何入选/备选点则 fail ——
@@ -322,17 +379,70 @@ def _r10_sources(decisions: list[SpotDecision]) -> Check:
     return Check("R10", "来源完备", PASS, f"{n_in} 个入选点均有来源", "溯源完备")
 
 
+# —— R11 榜单无死链 / R12 两处同源：catalog 驱动的一致性（F-C4，M4 接真实判定）——
+def _r11_no_dead_link(trip_plan: dict | None = None) -> Check:
+    """R11（§6.8/§11）：每个 RankItem.ref_id 必须在 catalog 有唯一详情；无 trip_plan 则 skip。"""
+    if not trip_plan:
+        return Check("R11", "榜单无死链", SKIP, "未传 trip_plan（M4a 契约就绪，待 service 接线）",
+                     "榜单→详情映射未接入，本期不判定；传入 trip_plan 后自动生效")
+    cat = trip_plan.get("catalog") or {}
+    poi_cat = cat.get("poi") or {}
+    food_cat = cat.get("food") or {}
+    ranks = (trip_plan.get("heat_ranking") or []) + (trip_plan.get("food_ranking") or [])
+    if not ranks:
+        return Check("R11", "榜单无死链", SKIP, "无榜单项", "本期无榜单数据，不判定")
+    dead = [str(r.get("ref_id") or "") for r in ranks
+            if not ((r.get("kind") == "food" and r.get("ref_id") in food_cat)
+                    or (r.get("kind") != "food" and r.get("ref_id") in poi_cat))]
+    if dead:
+        return Check("R11", "榜单无死链", FAIL, f"{len(dead)} 个榜单项无详情：{'、'.join(dead[:4])}",
+                     fix="为榜单项补 catalog 详情或从榜单移除该项（死链）")
+    refs = {r.get("ref_id") for r in ranks}
+    orphans = [k for k in list(poi_cat) + list(food_cat) if k not in refs]
+    if orphans:
+        return Check("R11", "榜单无死链", WARN, f"{len(ranks)} 榜项均有详情；{len(orphans)} 个详情无对应榜单项",
+                     "详情库多出（可能榜单已截断），不算死链")
+    return Check("R11", "榜单无死链", PASS, f"{len(ranks)} 个榜单项与详情一一对应", "无死链")
+
+
+def _r12_triple_consistency(trip_plan: dict | None = None) -> Check:
+    """R12（§6.9/宪法第 4 条）：同一事实（票价）在行程槽位与 catalog 详情取值一致；无则 skip。
+
+    预算模块退役后本规则由“三处同源”收敛为“行程 ↔ 详情”两处同源。"""
+    if not trip_plan:
+        return Check("R12", "两处同源", SKIP, "未传 trip_plan",
+                     "行程/详情尚未共享同一 catalog，本次不判定；接入后自动生效")
+    cat = (trip_plan.get("catalog") or {}).get("poi") or {}
+    mismatches = []
+    n_blocks = 0
+    for day in trip_plan.get("itinerary") or []:
+        for b in day.get("blocks") or []:
+            n_blocks += 1
+            det = cat.get(str(b.get("spot") or ""))
+            if not det:
+                continue
+            if b.get("ticket_price") != det.get("ticket_price"):
+                mismatches.append(f"{b.get('spot')}（行程 {b.get('ticket_price')} vs 详情 {det.get('ticket_price')}）")
+    if mismatches:
+        return Check("R12", "两处同源", FAIL, f"{len(mismatches)} 处票价不一致：{'；'.join(mismatches[:3])}",
+                     fix="行程槽位与详情卡均读同一 catalog 票价值，不得任一处单独改写或另起口径")
+    return Check("R12", "两处同源", PASS,
+                 f"行程/详情同一票价事实一致（{n_blocks} 槽）", "同源")
+
+
 def run_quality_gate(*, decisions: list[SpotDecision], plan: dict, profiles: dict,
-                     days: int, budget_summary: dict | None = None,
+                     days: int,
                      pitfall: list[dict] | None = None,
                      food_profiles: dict | None = None,
                      day_weekdays: list[str] | None = None,
-                     today: str | None = None, food_fallback: str | None = None,
-                     locs: dict | None = None, top_n: int = TOP_N_HEAT) -> QualityReport:
+                     today: str | None = None,
+                     locs: dict | None = None, top_n: int = TOP_N_HEAT,
+                     legs: list[dict] | None = None,
+                     trip_plan: dict | None = None) -> QualityReport:
     """对一份规划跑完整门禁，产出 QualityReport。纯函数、只读、不调 LLM。
 
-    入参全部来自 service.trip 在'生成规划'后已有的数据（profiles/plan/budget_summary/
-    heat_rows/pitfall/sources）与 build_decisions 的统一对象；缺什么对应规则就 skip。"""
+    入参全部来自 service.trip 在'生成规划'后已有的数据（profiles/plan/heat_rows/
+    pitfall/sources）与 build_decisions 的统一对象；缺什么对应规则就 skip。"""
     decisions = decisions or []
     plan = plan or {}
     profiles = profiles or {}
@@ -340,12 +450,30 @@ def run_quality_gate(*, decisions: list[SpotDecision], plan: dict, profiles: dic
         _r1_coverage(plan, profiles, days),
         _r2_no_silent_drop(decisions, top_n),
         _r3_time_slot(plan, profiles, decisions, day_weekdays),
-        _r4_time_feasible(plan, profiles),
+        _r4_time_feasible(plan, profiles, legs),
         _r5_route(plan, locs),
-        _r6_budget(budget_summary),
-        _r7_food(plan, food_profiles, food_fallback),
+        _r7_food(plan, food_profiles),
         _r8_pitfall_attribution(pitfall, decisions),
         _r9_timeliness(decisions, today),
         _r10_sources(decisions),
+        _r11_no_dead_link(trip_plan),
+        _r12_triple_consistency(trip_plan),
     ]
     return QualityReport(checks=checks)
+
+
+def apply_trip_plan_checks(report: QualityReport, trip_plan: dict | None) -> QualityReport:
+    """定稿后用唯一 TripPlan 补判 R11/R12（输出完整性，不参与回炉循环），按 rule_id 就地替换。
+
+    service 在 finalize 之后调用：把两条 skip 接口位换成真实结果，保留 repair_rounds；
+    R11/R12 由构造不 fail（榜单 ref 只取 catalog 内同名、行程价回填自 catalog），但 fail 仍会同步进 unresolved。"""
+    for c in (_r11_no_dead_link(trip_plan), _r12_triple_consistency(trip_plan)):
+        for i, old in enumerate(report.checks):
+            if old.rule_id == c.rule_id:
+                report.checks[i] = c
+                break
+        else:
+            report.checks.append(c)
+    report.unresolved = [f"[{x.rule_id} {x.name}] {x.note}" for x in report.checks
+                         if x.status == FAIL]
+    return report

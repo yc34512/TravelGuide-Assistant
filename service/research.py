@@ -13,9 +13,12 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from config import CRAWL_TABS, DEBUG_DIR, KB_TTL_DAYS, RAW_DIR, REPORT_DIR
+from config import (CRAWL_TABS, DEBUG_DIR, KB_TTL_DAYS, QUALITY_LEVEL, RAW_DIR, REPORT_DIR,
+                    SEARCH_POOL_SIZE)
 from core import knowledge
+from core.llm import usage_note
 from core.models import Comment, VideoItem
+from core.quality import filter_note
 
 JOBS: dict[str, dict] = {}
 _LOCK = threading.Lock()        # JOBS 字典读写保护
@@ -42,7 +45,10 @@ def dump_debug(page, name: str) -> None:
 
 
 def load_items_from_raw(raw_path: str) -> list[VideoItem]:
-    """把知识库/原始文件里的 JSON 还原成统一数据模型。"""
+    """把知识库/原始文件里的 JSON 还原成统一数据模型。
+
+    质量指标（收藏/分享/时长/质量分）用 .get() 读：旧缓存 JSON 无这些键时为 None，
+    质量闸对 None 不生效，存量数据不会因新字段而被误杀。"""
     data = json.loads(Path(raw_path).read_text(encoding="utf-8"))
     return [
         VideoItem(
@@ -50,18 +56,29 @@ def load_items_from_raw(raw_path: str) -> list[VideoItem]:
             url=d["url"],
             description=d.get("description", ""),
             tags=d.get("tags", []),
+            play_count=d.get("play_count"),
             like_count=d.get("like_count"),
+            comment_count=d.get("comment_count"),
+            collect_count=d.get("collect_count"),
+            share_count=d.get("share_count"),
+            duration=d.get("duration"),
             publish_time=d.get("publish_time"),
             transcript=d.get("transcript", ""),  # deep 模式的转写成果随原始 JSON 复用
             comments=[Comment(**c) for c in d.get("comments", [])],
+            quality_score=d.get("quality_score"),
+            quality_reject=d.get("quality_reject", ""),
         )
         for d in data
     ]
 
 
-def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | None, log) -> list[VideoItem]:
-    """浏览器采集（搜索择优 + 单条重试）。浏览器阶段持锁：同一时刻只跑一个采集任务；
-    转写在锁释放后进行。原始 JSON 落盘由调用方在缺口补全后统一做（含补采视频）。"""
+def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | None, log,
+           queries: list[str] | None = None) -> list[VideoItem]:
+    """浏览器采集（多角度扩池 + 质量闸择优 + 候补补采）。浏览器阶段持锁：同一时刻只跑一个采集任务；
+    转写在锁释放后进行。原始 JSON 落盘由调用方在缺口补全后统一做（含补采视频）。
+
+    queries（M6-B）：自定义搜索查询矩阵，城市攻略层用它发"{城市}旅游攻略／N天N夜／避雷"；
+    不传则用默认三角度 [原词, 原词+攻略, 原词+避雷]。"""
     from crawler import base
     base.require_ugc_source(log=log)   # 开源合规闸门 + 免责告知；未启用抛 SourceDisabled
     base.reset_session()               # 每次 _crawl 独立浏览器会话，清零风控停止标记
@@ -78,40 +95,49 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | Non
             raise Cancelled()
         from crawler.browser import create_page, ensure_login
         from crawler.douyin import DouyinCrawler
-        from crawler.tabs import fetch_videos
+        from crawler.tabs import fetch_videos_gated
         from core.rate_limiter import global_limiter
 
         page = create_page()
-        # 搜索阶段用主页面；视频阶段交给 fetch_videos 开多 Tab 并发（共享全局频控）
+        # 搜索阶段用主页面；视频阶段交给 fetch_videos_gated 开多 Tab 并发（共享全局频控）
         crawler = DouyinCrawler(page, global_limiter())
         items: list[VideoItem] = []
         try:
             if not ensure_login(page):
                 raise RuntimeError("未检测到抖音登录态：请在弹出的浏览器中用采集小号扫码后重试")
             search_kw = knowledge.strip_qualifiers(keyword)
-            log(f"搜索关键词：{search_kw}（多角度查询 + 按点赞择优）")
-            urls = crawler.search_and_rank(search_kw, limit)
-            log(f"搜到 {len(urls)} 条视频")
-            if not urls:
+            qs = [str(q).strip() for q in (queries or []) if str(q).strip()] \
+                or [search_kw, f"{search_kw} 攻略", f"{search_kw} 避雷"]
+            log(f"搜索关键词：{'／'.join(qs)}（多角度扩池 + 质量闸择优，门槛档 {QUALITY_LEVEL}）")
+            # 一次导航收满候选池（滚动不产生新域名请求），再本地筛选：
+            # 风控成本与从前相同，但采回来的一定是高质视频
+            pool = crawler.search_pool(qs, pool_size=max(SEARCH_POOL_SIZE, limit * 3))
+            # 先给"为何没结果"的因果诊断，再打筛选明细（日志顺序要与因果一致）
+            if not pool:
                 if base.session_stopped():
                     log("触发抖音验证码风控：本会话停止现采（不尝试绕过），未命中候选回退缓存/LLM 基线")
                 else:
                     # 0 结果大概率是选择器失效：存快照 + 明确告警，降低排查成本
                     dump_debug(page, f"svc_fail_{ts}_search")
                     log("搜索 0 结果：已保存页面快照到 data/debug/，请对照 crawler/douyin.py 顶部 SEL_* 常量排查")
-            # 多 Tab 并发：单条重试、进度日志、失败快照均在 fetch_videos 内统一处理；
-            # 请求间隔由共享频控器兜底，并发只消除互相干等，不提高风控风险
+            screened = crawler.rank_pool(pool, limit)
+            log(f"搜索页筛选：{filter_note(screened, limit)}")
+            # 质量闸候补补采：详情页逐条校验，不达标的从候补队列顶上；
+            # 导航次数受 MAX_DETAIL_FETCH 硬上限约束（抖音会话级风控红线）；
+            # 单条重试/进度日志/失败快照均在 fetch_videos 内统一处理
             t0 = time.time()
-            for _i, item, _err in fetch_videos(
-                    page, urls, comments=comments, asr=asr, workers=CRAWL_TABS,
-                    log=log, cancelled=cancelled,
-                    on_error=lambda idx, _e, tab: dump_debug(tab, f"svc_fail_{ts}_{idx + 1}")):
-                if item is not None:
-                    items.append(item)
+            gated = fetch_videos_gated(
+                page, screened["kept"], limit, comments=comments, asr=asr,
+                level=None if screened["level"] == "deferred" else screened["level"],
+                workers=CRAWL_TABS, log=log, cancelled=cancelled,
+                on_error=lambda idx, _e, tab: dump_debug(tab, f"svc_fail_{ts}_{idx + 1}"))
+            items = gated["items"]
             if cancelled():
                 raise Cancelled()
-            if urls:
-                log(f"采集完成 {len(items)}/{len(urls)} 条，耗时 {time.time() - t0:.0f} 秒"
+            # 筛选明细全部如实进日志：淘汰了多少、为何淘汰、是否降档，绝不静默
+            log(f"质量闸：{gated['note']}")
+            if pool:
+                log(f"采集完成 {len(items)} 条达标视频，耗时 {time.time() - t0:.0f} 秒"
                     f"（最多 {CRAWL_TABS} 个标签页并发）")
         finally:
             try:
@@ -393,6 +419,8 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
         )
         knowledge.update_report(record_id, str(report_path))
         log(f"报告已保存：{report_path.name}")
+        # 成本可见：如实报本次 LLM 消耗（用户硬要求：只花免费额度与券，不扣现金）
+        log(usage_note() + "（余量请到百炼控制台「免费额度」页核对，本项目不发联网搜索请求）")
 
         job["result"] = {
             "report_path": str(report_path),

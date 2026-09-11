@@ -4,7 +4,7 @@
     GET  /                     网页界面
     GET  /api/health           健康检查 + 知识库概览
     POST /api/research         发起攻略研究任务 {keyword, mode, force} -> {job_id}
-    POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?, budget?, preference_mode?} -> {job_id}
+    POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?, preference_mode?, start_date?} -> {job_id}
     POST /api/heat/refresh     发起城市热度刷榜任务 {city} -> {job_id}（元数据轻量采集）
     GET  /api/heat/{city}      查询城市实时热度榜（本周最火/长盛不衰/正在降温/平稳）
     GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
@@ -50,8 +50,8 @@ class TripIn(BaseModel):
     hotel: str = ""
     spots: list[str] | None = None  # 指定景点清单；缺省时自动圈定（混合候选验证）
     preferences: str = ""
-    budget: float | None = None  # 总预算（元，不含大交通）；缺省不做预算控制
-    preference_mode: str = "均衡"  # 省钱优先 / 体验优先 / 均衡
+    preference_mode: str = "均衡"  # 省钱优先 / 体验优先 / 均衡（影响选点倾向，不参与预算计算）
+    start_date: str | None = None  # 出发日 YYYY-MM-DD（选填）：提供后 R3 按官方闭馆日真校行程
 
 
 class HeatRefreshIn(BaseModel):
@@ -103,21 +103,20 @@ def start_research(body: ResearchIn):
     return {"job_id": job_id}
 
 
-@app.post("/api/trip", summary="发起行程规划任务（候选验证/调研/预算控制/排行程）")
+@app.post("/api/trip", summary="发起行程规划任务（候选验证/调研/排行程）")
 def start_trip_api(body: TripIn):
     city = body.city.strip()
     if not city:
         raise HTTPException(status_code=400, detail="城市不能为空")
     if not 1 <= body.days <= 7:
         raise HTTPException(status_code=400, detail="天数需在 1~7 之间")
-    if body.budget is not None and not 0 < body.budget <= 10_000_000:
-        raise HTTPException(status_code=400, detail="预算需在 0~1000 万元之间")
     mode = body.preference_mode.strip() or "均衡"
     if mode not in ("省钱优先", "体验优先", "均衡"):
         raise HTTPException(status_code=400, detail="消费偏好仅支持：省钱优先 / 体验优先 / 均衡")
     job_id = trip.start_trip(
         city, body.days, body.hotel.strip(), body.spots, body.preferences.strip(),
-        budget=body.budget, preference_mode=mode,
+        preference_mode=mode,
+        start_date=(body.start_date or "").strip() or None,
     )
     return {"job_id": job_id}
 

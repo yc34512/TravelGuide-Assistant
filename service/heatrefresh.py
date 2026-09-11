@@ -12,6 +12,8 @@ from datetime import datetime
 
 from config import CRAWL_TABS
 from core import knowledge
+from core.llm import usage_note
+from core.quality import filter_note
 from pipeline.candidates import candidate_foods
 from pipeline.heat import heat_index, sentiment_trend, time_windows, trend_of
 from pipeline.planner import candidate_spots
@@ -19,6 +21,7 @@ from service.research import JOBS, _CRAWL_LOCK, _LOCK, Cancelled, dump_debug
 
 HEAT_SPOT_LIMIT = 6       # 每次刷榜的景点数硬上限（成本闸）
 HEAT_VIDEOS_PER_SPOT = 4  # 每个景点采的元数据视频数
+HEAT_POOL_SIZE = 12       # 每个景点的搜索页候选池（元数据模式便宜，但仍靠质量分择优）
 HEAT_FOOD_LIMIT = 2       # 美食榜并列：每次刷榜额外采的美食/餐厅数（成本闸）
 HEAT_SENTIMENT_VIDEOS = 1  # 每个对象采评论的视频数（仅首个，算情感趋势；其余纯元数据控成本）
 
@@ -111,15 +114,18 @@ def _run_heat(job_id: str, city: str) -> None:
                         raise Cancelled()
                     log(f"[{si}/{len(targets)}] 搜索：{spot}（{kinds[spot]}）")
                     try:
-                        found = crawler._search_one(spot, HEAT_VIDEOS_PER_SPOT)
+                        # 刷榜也走质量闸：热度榜只统计达标视频，低赞/营销号内容不再拉低榜单可信度
+                        pool = crawler.search_pool([spot], pool_size=HEAT_POOL_SIZE)
+                        screened = crawler.rank_pool(pool, HEAT_VIDEOS_PER_SPOT)
+                        urls = screened["urls"]
                     except Exception as e:
                         log(f"  搜索失败：{e}")
                         continue
-                    urls = [c["url"] for c in found[:HEAT_VIDEOS_PER_SPOT]]
                     if not urls:
                         dump_debug(page, f"heat_fail_{ts}_{si}")
                         log("  搜索 0 结果：已存页面快照到 data/debug/")
                         continue
+                    log(f"  {filter_note(screened, HEAT_VIDEOS_PER_SPOT)}")
                     # 多 Tab 并发取元数据；首个视频连评论一起采（情感趋势原料），其余控成本
                     items = []
                     for _i, item, _err in fetch_videos(
@@ -159,6 +165,9 @@ def _run_heat(job_id: str, city: str) -> None:
             log(f"{spot}：热度 {h['score']:.2f} · {trend}"
                 f"（近7天 {w['fresh7']:.0%} / 60天以上 {w['old60']:.0%}）"
                 f"｜营销号 {h['marketing']}/{h['videos']}｜情感 {senti['trend']}{warn}")
+
+        # 成本可见：刷榜也调 LLM（候选圈定 + 美食候选），如实报消耗
+        log(usage_note())
 
         ranking = knowledge.load_heat_snapshots(city)
         job["result"] = {

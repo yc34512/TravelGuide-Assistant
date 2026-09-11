@@ -32,6 +32,43 @@ CRAWL_TABS = int(os.getenv("CRAWL_TABS", "3"))
 # ASR 开启时自动放行视频域（否则捕获不到播放地址）
 BLOCK_MEDIA = os.getenv("BLOCK_MEDIA", "true").lower() == "true"
 
+# —— 采集质量闸（M6：先筛后采，宁缺勿滥）——
+# 三档门槛：strict 只留头部内容；素材不足时按 QUALITY_RELAX_ORDER 自动降档，
+# 降档事实必须进日志与报告（绝不静默放宽）。质量分五维：播放量 20% + 点赞 35%
+# + 收藏 20% + 评论数 10% + 新鲜度 15%（详情接口 statistics 已实跑确认下发 play_count）。
+QUALITY_LEVELS = {
+    "strict": {"min_likes": 2000, "max_age_days": 365, "min_duration": 30.0},
+    "normal": {"min_likes": 500, "max_age_days": 730, "min_duration": 20.0},
+    # max_age_days / min_duration 为 0 表示该维度不设限
+    "loose": {"min_likes": 100, "max_age_days": 0, "min_duration": 0.0},
+}
+QUALITY_RELAX_ORDER = ("strict", "normal", "loose")
+QUALITY_LEVEL = os.getenv("QUALITY_LEVEL", "strict").strip().lower()
+if QUALITY_LEVEL not in QUALITY_LEVELS:
+    QUALITY_LEVEL = "strict"
+# env 显式给值时微调当前档（不给则用档内默认，避免两套来源打架）
+QUALITY_LEVELS[QUALITY_LEVEL] = {
+    "min_likes": int(os.getenv("MIN_VIDEO_LIKES", QUALITY_LEVELS[QUALITY_LEVEL]["min_likes"])),
+    "max_age_days": int(os.getenv("MAX_VIDEO_AGE_DAYS",
+                                  QUALITY_LEVELS[QUALITY_LEVEL]["max_age_days"])),
+    "min_duration": float(os.getenv("MIN_VIDEO_DURATION",
+                                    QUALITY_LEVELS[QUALITY_LEVEL]["min_duration"])),
+}
+# 达标条数低于此值即自动降档（防冷门点素材枯竭导致排行程失败）
+MIN_KEEP_BEFORE_RELAX = int(os.getenv("MIN_KEEP_BEFORE_RELAX", "3"))
+# 搜索页候选池大小：一次导航 + 多轮滚动收满（滚动不产生新域名请求，风控成本≈0）
+SEARCH_POOL_SIZE = int(os.getenv("SEARCH_POOL_SIZE", "30"))
+# 搜索地址是否带"最多点赞"排序参数（sort_type=1）。尽力而为：平台不认这个参数时
+# 会退回综合排序，两种情况都由 core.quality.screen_pool 本地筛选兜底，不影响正确性
+SEARCH_SORT_BY_LIKES = os.getenv("SEARCH_SORT_BY_LIKES", "true").lower() == "true"
+# 单个对象的详情页导航硬上限。抖音是会话级风控：连续 5~6 次视频页导航后弹 3D 验证码，
+# 之后整个会话返回 0 结果，所以"超额深采"不可行——质量筛选必须尽量前移到搜索页
+MAX_DETAIL_FETCH = int(os.getenv("MAX_DETAIL_FETCH", "10"))
+# 城市攻略层（M6-B）：搜"{城市}旅游攻略/N天N夜/避雷"取行程编排知识，按城市缓存
+CITY_GUIDE_VIDEOS = int(os.getenv("CITY_GUIDE_VIDEOS", "6"))     # 攻略层深采条数（成本闸）
+CITY_GUIDE_TTL_DAYS = int(os.getenv("CITY_GUIDE_TTL_DAYS", "14"))  # 攻略缓存保鲜期（比景点长：编排知识变化慢）
+CITY_GUIDE_ENABLED = os.getenv("CITY_GUIDE_ENABLED", "true").lower() == "true"
+
 # —— 数据源开关（开源合规：分析内核平台中立，UGC 采集源插件化 + 默认关闭）——
 # 抖音适配器默认关闭。全新 clone 不启用 = 仅 kernel 能力（LLM 基线 + 高德），不发起任何平台采集；
 # 本地知识库缓存（已采过的数据）仍可读取，不启用不等于清空已有成果。
@@ -48,8 +85,11 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 VERIFY_ENABLE_THINKING = os.getenv("VERIFY_ENABLE_THINKING", "false").lower() == "true"
 
 # 候选圈定/交通估算是否启用 LLM 服务商的联网搜索能力。
-# 默认关闭：联网搜索在部分服务商（如阿里云百炼）会额外计费、且不在文本模型抵扣范围内，
-# 而本项目的"近期真实热度"已由抖音实地采集的热度指数提供，联网搜索收益有限。
+# 默认关闭（成本约束：只花免费额度与代金券，绝不扣现金余额）：
+# 百炼的联网搜索插件属独立计费，官方「节省计划与资源包」明确将其排除在抵扣范围外；
+# 而新人免费额度的"不支持抵扣"清单（Batch/调优/部署/自定义模型/PAI-DSW/OSS）并未列它，
+# 两处口径不一致。风险不对称：一旦被判为独立计费就是直接扣现金，故不开。
+# 本项目的"近期真实热度"已由抖音实地采集的热度指数提供、交通由高德提供，搜索收益有限。
 # 需要时可在 .env 设 LLM_WEB_SEARCH=true（服务商不支持联网参数时会自动降级为纯基线知识）。
 LLM_WEB_SEARCH = os.getenv("LLM_WEB_SEARCH", "false").lower() == "true"
 

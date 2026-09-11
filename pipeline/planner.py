@@ -5,21 +5,22 @@
 结构不合法宁可降级也不把脏数据传下去。
 """
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from config import LLM_WEB_SEARCH
 from core.llm import chat_json
-from pipeline.decision import STATE_ALT, STATE_IN, STATE_OUT
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-ALLOWED_SLOTS = {"上午", "下午", "晚上"}
+ALLOWED_SLOTS = {"上午", "下午", "晚上", "全天"}
+# —— M2b 时间/交通模型常量（PRD F-D1/F-D5）——
+CN_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+ALL_DAY_HOURS = 5.0            # 建议时长 ≥ 此值视为“全天型”，宜独占一天（F-D1）
 
 # 选点决策表状态图标（F7.1）与质量门禁状态图标（§5.3）
-_STATE_ICONS = {STATE_IN: "✅", STATE_ALT: "⏸", STATE_OUT: "❌", "": "❔"}
 _QC_ICONS = {"pass": "✅", "warn": "⚠️", "fail": "❌", "skip": "➖"}
 
 CANDIDATE_SYSTEM = """你是旅行规划师。根据城市与出行天数，列出该城市最值得去的景点名单。
@@ -29,7 +30,7 @@ CANDIDATE_SYSTEM = """你是旅行规划师。根据城市与出行天数，列�
 3. 输出严格 JSON：{"spots": ["..."]}"""
 
 PROFILE_SYSTEM = """你是旅游数据分析师。给定某景点的编号信息要点（含置信度与立场标注），
-蒸馏出一份用于行程规划与预算控制的结构化档案。
+蒸馏出一份用于行程规划与详情展示的结构化档案。
 
 规则：
 1. 只使用给定要点中的信息，禁止用自己的知识补充；某字段没有依据就给空值；
@@ -38,7 +39,9 @@ PROFILE_SYSTEM = """你是旅游数据分析师。给定某景点的编号信息
 4. avoid 收录"避雷"立场的要点；时效敏感与其他注意事项归入 tips；
 5. cost_items：从要点提取的确定花费，每条 {"item": "名称", "type": "门票|餐饮人均|交通|其他", "amount": 数字}；
    只收录要点中有明确数字的花费，估算与无依据的一律不写；无则空数组；
-   门票/入园/预约类费用（含第三方渠道预约费）一律 type="门票"，价格给区间时取最低明确数字；
+   门票/入园/预约类费用一律 type="门票"，价格给区间时取最低明确数字；
+   第三方渠道的代抢/速通/套餐/跟团/包车加价（如“携程899直接买票”“优速通”）不是景区门票，
+   禁止写成 type="门票"；页面上的点赞/评论/收藏/分享数字不是价格，禁止当作花费；
    type="餐饮人均" 仅当要点明确给出"人均/每人/一位"的整餐花费时才写；单个菜品或小吃单价
    （如"香辣蟹7元""一碗面12元"）不是人均，归 type="其他"，切勿当成餐饮人均；
 6. 每条文本一句话，保留具体事实（数字、地名、时间），不要空泛概括；
@@ -49,7 +52,13 @@ PROFILE_SYSTEM = """你是旅游数据分析师。给定某景点的编号信息
 PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间数据，生成逐日分时段的行程规划。
 
 规则：
-1. 每天分上午/下午/晚上三个时段，每时段安排 0~2 个景点；每天至少两个时段有安排，不要把行程排得过空；
+1. 必须输出全部 N 天的 days 数组（N=用户要求的天数），一天都不能少：每天分上午/下午/晚上三个时段，
+   每时段最多 1 个景点；每天至少两个时段有安排（某点独占整天的“全天型”日子除外），
+   不要把行程排得过空，尤其禁止“某天只有一个时段有安排”而其他天很满；
+   可排点位不足时也要把它们分散到每一天（例如 3 天只有 4 个点位就排 2+1+1），
+   严禁只输出前几天而漏掉后面的整天；
+   建议时长 ≥5 小时的全天型景点（主题乐园、远郊大景区等）用唯一一条 slot="全天" 表示，
+   禁止把同一天拆成“上午+下午”两条重复点位（系统会按重复剔除，导致当天只剩一个时段）；
    档案 best_time_slot 为"晚上"的景点（夜景/夜游类）必须排在当天晚上时段；
 2. 顺路优先：同一天安排通行时间数据中相距近的景点（同区域聚类，避免来回折返）；每天从酒店出发，晚上回酒店附近；
 3. 尊重景点的 best_time_slot，尽量把景点排在它最佳的时段；
@@ -57,23 +66,20 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
    每条 {"type": "避坑|费用|时间|提示", "text": "一句话"}：avoid/警示类=避坑，
    票价/花费类=费用，开放时间/预约/排队类=时间，其余=提示；
    text 限一句话（不超过 30 字），长内容必须拆成多条；
-5. transport 必须具体：给出了交通方案数据的路段，直接引用其中的线路/时长/费用（保留"约""估算"字样）；
-   未给出的路段按距离给出大致方案（如"打车约X元/约X分钟，具体以地图App为准"），禁止只写"建议查地图"；
-6. 每天的午餐与晚餐各从给定餐厅候选中选一家推荐，写进当天对应时段的 food 字段
-   （午餐→下午时段，晚餐→晚上时段），格式："店名：推荐菜（人均X元）"；
-   同一家餐厅全程最多推荐一次；没给餐厅候选或当天时段没排点位时写空字符串，
-   严禁编造候选之外的店名或餐厅描述；
-7. spot 只能从给定景点名单中选择；每个景点全程只出现一次；与用户偏好相符的地标景点
-   （如主题乐园、偏好中点名的类型）必须排入行程，游玩时长长的可整天只排它一个；
+5. transport 必须具体：给出了交通方案数据的路段，直接引用其中的线路/时长（保留"约"字样）；
+   未给出的路段按距离给出大致方案（如"打车约X分钟，具体以地图App为准"），禁止只写"建议查地图"；
+6. 行程只规划“去哪玩/怎么去”，不把具体餐厅排进时间线：所有时段的 food 字段一律留空字符串；
+7. spot 只能从给定景点名单中选择；每个景点全程只出现一次（某时段没有合适景点就留空，
+   绝不能把已排过的景点再排一次，重复排入会被系统剔除）；与用户偏好相符的地标景点
+   （如主题乐园、偏好中点名的类型）必须排入行程；
 8. reasons 一句话说明为什么值得去（来自档案 highlights）；
-9. cost：该点位预估花费（元，数字）：门票类花费按档案 cost_items 计入；免费或未知写 0；
-10. pitfall_quotes：从该景点档案 avoid 对应的要点中挑最重要的 1~2 条评论原文引用（逐字，不改写）；没有则空数组；
-11. 预算约束：若给出了总预算，全部点位 cost 合计加上餐饮/交通估算不得显著超出；
-    超支时优先去掉"体验/购物"类点位并在 summary_note 说明；省钱优先模式下优先免费/低价点位；
-12. summary_note：说明预算匹配情况（结余/超支及调整建议）；若有调研过但未排入行程的景点，
-    必须把它们列为"备选"并一句话说明原因；无预算且无备选景点时为空字符串；
-13. 输出严格 JSON：{"summary_note": "...", "days": [{"day": 1, "slots": [{"slot": "上午|下午|晚上", "spot": "景点名",
-   "duration": "约X小时", "transport": "从上一地点至此的方式与耗时", "cost": 数字,
+9. pitfall_quotes：从该景点档案 avoid 对应的要点中挑最重要的 1~2 条评论原文引用（逐字，不改写）；没有则空数组；
+10. 若给了“高赞攻略视频的行程草案”，以草案为主干安排：草案里的点位优先排入并尽量保留其先后顺序，
+    天数不符时按档案的时长/最佳时段增删调整；草案点不在景点档案里说明未被验证通过，不得排入；
+    没有草案时按档案与通行数据自行编排；
+11. summary_note：若有调研过但未排入行程的景点，必须把它们列为"备选"并一句话说明原因；无则空字符串；
+12. 输出严格 JSON：{"summary_note": "...", "days": [{"day": 1, "slots": [{"slot": "上午|下午|晚上|全天", "spot": "景点名",
+   "duration": "约X小时", "transport": "从上一地点至此的方式与耗时",
    "reasons": "...", "notes": [{"type": "避坑|费用|时间|提示", "text": "一句话"}], "food": "", "pitfall_quotes": ["评论原文"]}]}]}"""
 
 TRANSPORT_SYSTEM = """你是本地交通向导。给定城市、住宿位置与景点清单，为各段路线给出具体交通建议。
@@ -112,6 +118,68 @@ def candidate_spots(city: str, days: int, max_n: int) -> list[str]:
     return out[:max_n]
 
 
+# 第三方渠道加价/代抢/套餐价不是景区门票价（如评论“携程899直接买票，全程速通”）。
+# 这类数字一旦被当成门票，既会造成离谱票价，也会与详情卡口径分裂（R12 两处同源）。
+_THIRD_PARTY_PRICE_WORDS = (
+    "携程", "飞猪", "美团", "去哪儿", "同程", "代抢", "代购", "代订", "速通",
+    "黄牛", "套餐", "一日游", "跟团", "包车", "接送", "预约费", "服务费", "加急", "讲解",
+)
+
+
+def _is_third_party_price(item: str) -> bool:
+    """名称里带第三方渠道/代抢/附加服务字样 → 不是景区门票本体价。"""
+    return any(w in (item or "") for w in _THIRD_PARTY_PRICE_WORDS)
+
+
+# 园内商品/小吃/单独收费项目也不是门票本体价（实测：评论“一根烤肠卖12”被蒸馏成花费项后，
+# 一旦当成门票价，详情卡会给出离谱票价）。
+_RETAIL_PRICE_WORDS = (
+    "烤肠", "香肠", "小吃", "零食", "饮料", "矿泉水", "冰淇淋", "雪糕", "奶茶", "咖啡",
+    "纪念品", "伴手礼", "特产", "明信片", "文创", "周边", "玩具", "雨衣", "雨伞",
+    "停车", "观光车", "摆渡车", "索道", "缆车", "游船", "船票", "寄存", "童车", "轮椅",
+)
+
+
+def _is_retail_price(item: str) -> bool:
+    """名称是园内商品/小吃/单独收费项目 → 不是景区门票本体价。"""
+    return any(w in (item or "") for w in _RETAIL_PRICE_WORDS)
+
+
+def _is_non_ticket(item: str) -> bool:
+    """门票口径的统一排除判定：第三方加价 + 园内商品，两者都不进门票池与详情卡票价。"""
+    return _is_third_party_price(item) or _is_retail_price(item)
+
+
+def pick_ticket_price(cost_items) -> float | None:
+    """门票唯一口径（catalog 详情与行程槽位共用，R12 两处同源的取数源头）。
+
+    规则：剔除第三方渠道代抢/速通/套餐加价项；多条门票价取最低明确数字（与 PROFILE_SYSTEM
+    规则 5“区间取最低”一致）；显式 0 视为“免费”返回 0.0；无可靠门票价返回 None（渲染标待核实）。
+    纯函数，独立可测。"""
+    prices: list[float] = []
+    free = False
+    for c in cost_items or []:
+        if not isinstance(c, dict) or str(c.get("type") or "") not in ("门票", "票价"):
+            continue
+        if _is_non_ticket(str(c.get("item") or "")):
+            continue
+        try:
+            v = float(c.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            prices.append(round(v, 2))
+        elif v == 0:
+            free = True
+    if prices:
+        return min(prices)
+    return 0.0 if free else None
+
+
+# 门票唯一口径 pick_ticket_price（上方）供 catalog 详情卡读权威价；
+# 点位 cost 溯源与预算池的旧兜底链（P6）已随预算模块一并移除：报告不再输出任何金额估算。
+
+
 def _normalize_profile(data: dict) -> dict:
     """档案防御性规范化：字段补齐、非法值降级。纯函数，独立可测。"""
     def lst(k: str) -> list[str]:
@@ -126,13 +194,15 @@ def _normalize_profile(data: dict) -> dict:
     except (TypeError, ValueError):
         dur = None
     slot = str(data.get("best_time_slot") or "").strip()
-    # 花费项：只保留名称与金额都合法且金额>0 的条目（预算计算的原料，脏数据一律丢弃）
+    # 花费项：只保留名称与金额都合法且金额>0 的条目（详情卡与门票口径的原料，脏数据一律丢弃）
     cost_items = []
     for x in data.get("cost_items") or []:
         if not isinstance(x, dict):
             continue
         item = str(x.get("item") or "").strip()
         ctype = str(x.get("type") or "").strip()
+        if ctype in ("门票", "票价") and _is_non_ticket(item):
+            continue   # 代抢/速通/套餐加价与园内小吃商品（如“烤肠12元”）都不是景区门票，不得进门票口径与详情卡
         try:
             amount = float(x.get("amount"))
         except (TypeError, ValueError):
@@ -145,6 +215,7 @@ def _normalize_profile(data: dict) -> dict:
     return {
         "duration_hours": dur,
         "best_time_slot": slot if slot in ALLOWED_SLOTS | {"全天"} else "全天",
+        "is_all_day": (dur is not None and dur >= ALL_DAY_HOURS) or data.get("is_all_day") is True,
         "highlights": lst("highlights"),
         "avoid": lst("avoid"),
         "food": lst("food"),
@@ -156,7 +227,7 @@ def _normalize_profile(data: dict) -> dict:
 
 def empty_profile() -> dict:
     return {
-        "duration_hours": None, "best_time_slot": "全天",
+        "duration_hours": None, "best_time_slot": "全天", "is_all_day": False,
         "highlights": [], "avoid": [], "food": [], "photo_spots": [], "tips": [],
         "cost_items": [],
     }
@@ -215,7 +286,6 @@ def build_review_digest(spot: str, points: list[dict]) -> dict:
 
 # —— 注意事项分点化：类型图标 + 关键词兜底分类（纯函数，独立可测）——
 NOTE_TYPES = {"避坑", "费用", "时间", "提示"}
-NOTE_ICONS = {"避坑": "❌", "费用": "💰", "时间": "🕐", "提示": "💡"}
 
 _PIT_RE = re.compile(r"别|不要|禁止|严禁|注意|当[心小]|避[雷坑]|勿|坑|劝退|不值|不划算|警惕")
 _COST_RE = re.compile(r"\d+\s*元|门票|收费|免费|人均|费用|押金|价格|价钱")
@@ -253,19 +323,14 @@ def normalize_notes(raw) -> list[dict]:
     return out
 
 
-def _plan_with_note_lists(plan: dict) -> dict:
-    """渲染前统一把每个 slot 的 notes 转成分点列表（旧数据/测试夹具的字符串也能渲染）。"""
-    out = dict(plan)
-    out["days"] = [
-        {**d, "slots": [{**s, "notes": normalize_notes(s.get("notes"))} for s in d.get("slots", [])]}
-        for d in plan.get("days", [])
-    ]
-    return out
-
-
 def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
-    """行程防御性规范化：丢弃不在名单中的景点、修正非法时段、限制天数。纯函数可测。"""
+    """行程防御性规范化：丢弃不在名单中的景点、修正非法时段、限制天数、跨天去重。纯函数可测。
+
+    每个景点全程只排一次（PLAN_SYSTEM 规则 7）：LLM 偶尔把同一点排进多天（如九龙壁第 1、2 天各一次），
+    这里按首次出现保留、后续重复丢弃并记入 duplicate_drops，供 QC 与报告明示（不静默）。"""
     out_days = []
+    seen_spots: set[str] = set()
+    duplicate_drops: list[str] = []
     for d in (data.get("days") or [])[:days]:
         slots = []
         for s in d.get("slots") or []:
@@ -273,14 +338,10 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
             slot = str(s.get("slot") or "").strip()
             if not spot or spot not in allowed_spots:
                 continue
-            # cost：数字或"约120元"这类文本都尽量解析成数字，失败记 0（预算不中断）
-            raw_cost = s.get("cost")
-            try:
-                cost = float(str(raw_cost).replace("，", "").replace("元", "").strip() or 0)
-            except ValueError:
-                import re as _re
-                m = _re.search(r"[\d.]+", str(raw_cost) or "")
-                cost = float(m.group()) if m else 0.0
+            if spot in seen_spots:
+                duplicate_drops.append(f"{spot}（第{len(out_days) + 1}天{slot or '未标时段'}）")
+                continue
+            seen_spots.add(spot)
             quotes = s.get("pitfall_quotes")
             quotes = [str(q).strip()[:80] for q in quotes if str(q).strip()] if isinstance(quotes, list) else []
             slots.append(
@@ -289,7 +350,6 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
                     "spot": spot,
                     "duration": str(s.get("duration") or "").strip(),
                     "transport": str(s.get("transport") or "").strip(),
-                    "cost": round(cost, 2),
                     "reasons": str(s.get("reasons") or "").strip(),
                     "notes": normalize_notes(s.get("notes")),
                     "food": str(s.get("food") or "").strip(),
@@ -298,7 +358,8 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
             )
         if slots:
             out_days.append({"day": len(out_days) + 1, "slots": slots})
-    return {"days": out_days, "summary_note": str(data.get("summary_note") or "").strip()}
+    return {"days": out_days, "summary_note": str(data.get("summary_note") or "").strip(),
+            "duplicate_drops": duplicate_drops}
 
 
 def transport_hints(city: str, hotel: str, spots: list[str], max_routes: int = 15) -> list[str]:
@@ -329,17 +390,121 @@ def transport_hints(city: str, hotel: str, spots: list[str], max_routes: int = 1
     return out
 
 
+# ============================ M2b：时间模型 + 结构化交通 Leg ============================
+def day_weekdays_from(start_date: str | None, days: int) -> list[str]:
+    """由出发日推算每日星期（中文）。无日期/非法格式返回 []（R3 闭馆校验据此降级为不判定）。纯函数可测。"""
+    if not start_date:
+        return []
+    s = str(start_date).strip()[:10]
+    d0 = None
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"):
+        try:
+            d0 = datetime.strptime(s, fmt).date()
+            break
+        except ValueError:
+            continue
+    if d0 is None:
+        return []
+    return [CN_WEEKDAYS[(d0 + timedelta(days=i)).weekday()] for i in range(max(1, int(days)))]
+
+
+def is_all_day(profile: dict | None) -> bool:
+    """是否“全天型”点位：优先看已存标位，否则由建议时长判定（≥ALL_DAY_HOURS）。纯函数可测。"""
+    p = profile or {}
+    if p.get("is_all_day") is True:
+        return True
+    try:
+        return p.get("duration_hours") is not None and float(p["duration_hours"]) >= ALL_DAY_HOURS
+    except (TypeError, ValueError):
+        return False
+
+
+def _speed_kmh(mode: str) -> float:
+    m = str(mode or "")
+    if "步行" in m:
+        return 4.5
+    if "地铁" in m:
+        return 32.0
+    if "公交" in m:
+        return 18.0
+    return 25.0  # 打车/自驾默认
+
+
+def _match_hint(a: str, b: str, travel_lines: list[str] | None) -> str:
+    for line in travel_lines or []:
+        if "->" in line and line.split(":", 1)[0].strip() == f"{a}->{b}":
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def _make_leg(a: str, b: str, locs: dict[str, str], travel_lines: list[str] | None) -> dict:
+    """单段交通 Leg：有坐标优先高德 travel_time（实测），无则按距离与方式估算。
+
+    只给方式与耗时（行程信息），不含任何费用估算——报告不输出金额数字。"""
+    from core import geo
+    la, lb = locs.get(a, ""), locs.get(b, "")
+    km = None
+    if la and lb:
+        try:
+            km = geo.distance_km(la, lb)
+        except Exception:
+            km = None
+    minutes, mode, nature = None, "", "估算"
+    if la and lb and geo.available():
+        try:
+            tt = geo.travel_time(la, lb)
+        except Exception:
+            tt = None
+        if tt:
+            minutes, mode = tt[0], tt[1]
+            nature = "实测"
+    if not mode:
+        mode = "步行" if (km is not None and km < 1.5) else "公交"
+    if minutes is None and km is not None:
+        minutes = int(round(km / _speed_kmh(mode) * 60))
+    return {"from": a, "to": b, "mode": mode, "minutes": minutes,
+            "km": round(km, 2) if km is not None else None,
+            "note": _match_hint(a, b, travel_lines), "nature": nature}
+
+
+def build_legs(city: str, hotel: str, plan: dict, locs: dict[str, str],
+               travel_lines: list[str] | None = None) -> list[dict]:
+    """为已排入行程的相邻停留点（含酒店往返）生成结构化交通 Leg（F-D5）。纯构造、可测。"""
+    hl = locs.get("酒店") or (locs.get(hotel) if hotel else "")
+    use_hotel = bool(hl or (hotel and hotel.strip()))   # 给了酒店名即使无坐标也补酒店往返段（估算）
+    legs: list[dict] = []
+    for day in plan.get("days", []):
+        stops = [s.get("spot") for s in day.get("slots", []) if s.get("spot")]
+        if not stops:
+            continue
+        seq = (["酒店"] if use_hotel else []) + stops + (["酒店"] if use_hotel else [])
+        dn = day.get("day")
+        for a, b in zip(seq, seq[1:]):
+            leg = _make_leg(a, b, locs, travel_lines)
+            leg["day"] = dn
+            legs.append(leg)
+    return legs
+
+
 def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
                    travel_lines: list[str], preferences: str,
-                   budget: float | None = None, preference_mode: str = "均衡",
-                   foods: dict[str, dict] | None = None,
-                   extra_issues: list[str] | None = None) -> dict:
-    """一次 LLM 调用生成行程 JSON，随后做防御性规范化。传入预算时启用预算约束规则；
-    传入 foods（餐厅档案）时启用每日午/晚餐推荐规则。
+                   preference_mode: str = "均衡",
+                   extra_issues: list[str] | None = None,
+                   heat_summary: str = "",
+                   guide_hints: list[str] | None = None,
+                   draft_plan: dict | None = None) -> dict:
+    """一次 LLM 调用生成行程 JSON，随后做防御性规范化（排布兜底见 rebalance_days）。
 
     extra_issues：来自 pipeline.qc 权威门禁的修正指令（F5.2 有限回炉）。传入时连同覆盖率
     问题一起写进回炉提示；采纳条件放宽为"覆盖率不变差即返回重试版"，最终是否采纳由调用方
-    用 qc.problem_count 权威判定（无 extra_issues 时保持原有"严格变少才采纳"行为）。"""
+    用 qc.problem_count 权威判定（无 extra_issues 时保持原有"严格变少才采纳"行为）。
+
+    guide_hints（M6-B）：城市高赞攻略视频提炼出的真实编排建议（串线顺序/住宿片区/
+    可跳过项）。传入时拼进提示词，使排线有实证依据而非只靠模型基线常识；
+    不传则行为与从前完全一致（零回归）。
+
+    draft_plan（M6-C）：高赞攻略视频的行程草案（已由 LLM 审核增删改）——传入时作为主干
+    注入提示词，优先保留视频实证的点位与顺序；不传则按景点档案自行编排。"""
     profile_lines = []
     for name, p in profiles.items():
         dur = f"约{p['duration_hours']}小时" if p["duration_hours"] else "时长未知"
@@ -352,27 +517,32 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
             f"  美食: {'; '.join(p['food']) or '无'}\n"
             f"  注意: {'; '.join(p['tips']) or '无'}"
         )
-    budget_line = (
-        f"总预算：{budget:.0f} 元（不含大交通）｜消费偏好：{preference_mode}\n" if budget else "总预算：未指定\n"
-    )
     user = (
         f"城市：{city}\n天数：{days}\n住宿酒店：{hotel or '未指定'}\n"
-        + budget_line
-        + f"用户偏好：{preferences or '无'}\n\n"
+        f"消费偏好：{preference_mode}\n"
+        f"用户偏好：{preferences or '无'}\n\n"
         f"景点档案：\n" + "\n".join(profile_lines) + "\n\n"
-        + f"交通方案数据（实测或估算，transport 优先引用）：\n"
+        f"交通方案数据（实测或估算，transport 优先引用）：\n"
         + ("\n".join(travel_lines) if travel_lines else "（无，按距离给出大致方案并标注'以地图App为准'）")
     )
-    if foods:
-        food_lines = []
-        for name, p in foods.items():
-            costs = "；".join(f"{c['item']}{c['amount']:.0f}元" for c in p.get("cost_items", [])) or "人均未知"
-            food_lines.append(
-                f"【{name}】{costs}\n"
-                f"  招牌/推荐: {'; '.join(p['highlights']) or '无'}\n"
-                f"  避雷: {'; '.join(p['avoid']) or '无'}"
-            )
-        user += "\n\n餐厅候选（每日午餐/晚餐从中推荐，每家最多推荐一次）：\n" + "\n".join(food_lines)
+    # F-A4：热度与证据在规划前已算好并喂入，引导优先安排证据强、口碑好的点
+    if heat_summary:
+        user += "\n\n已知热度与证据（优先排入证据强、热度高且趋势向好的点）：\n" + heat_summary
+    # M6-B：城市攻略层的真实编排知识（来自高赞攻略视频，不是模型常识）——
+    # 串线顺序/住宿片区/可跳过项据此判断；与景点档案冲突时以档案的实测数据为准
+    if guide_hints:
+        hints = [str(h).strip() for h in guide_hints if str(h).strip()][:10]
+        if hints:
+            user += ("\n\n真实攻略的编排建议（来自该城市高赞攻略视频，优先参考；"
+                     "与上述景点档案冲突时以档案为准）：\n"
+                     + "\n".join(f"- {h}" for h in hints))
+    # M6-C：高赞攻略视频的行程草案（已审核增删改）作为主干注入——用户要的就是
+    # “先看热门视频怎么排，再逐点验证”，草案优先于模型自行编排
+    if draft_plan:
+        draft_txt = format_draft_plan(draft_plan)
+        if draft_txt:
+            user += ("\n\n高赞攻略视频的行程草案（真实攻略里被反复验证的编排，作为主干优先采用；"
+                     "点位顺序尽量保留，天数不符时按档案的建议时长/最佳时段增删）：\n" + draft_txt)
     data = chat_json(PLAN_SYSTEM, user)
     plan = _normalize_plan(data, set(profiles.keys()), days)
     # 覆盖率兜底 + 质量门禁回炉：排点过少/晚上型错位/未排景点无备选说明（_coverage_issues），
@@ -389,9 +559,11 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         # 有门禁指令：覆盖率不变差即返回重试版，权威采纳交调用方（qc.problem_count 比较）
         if base2 < len(base_issues) or (extra and base2 <= len(base_issues)):
             plan = plan2
-    # 餐厅防编造：food 推荐必须命中候选店名，否则清空（没调研过的店不能写进路书）
-    plan = _filter_fabricated_food(plan, set(foods or {}))
-    return plan
+    # 餐饮解耦（PRD §9.3）：行程时间线不排具体餐厅，一律清空 slot.food（传空候选集→全部置空）；
+    # 餐厅调研结果仅供美食推荐榜（M4）与详情卡使用
+    plan = _filter_fabricated_food(plan, set())
+    # 排布兜底：LLM 排出“某天只有 1 个时段”时，把过满天的点位移过来（确定性修复）
+    return rebalance_days(plan, profiles, days)
 
 
 def _filter_fabricated_food(plan: dict, food_names: set[str]) -> dict:
@@ -407,14 +579,38 @@ def _filter_fabricated_food(plan: dict, food_names: set[str]) -> dict:
 
 
 def _coverage_issues(plan: dict, profiles: dict[str, dict], days: int) -> list[str]:
-    """规划覆盖率检查（纯函数可测）：行程点过少、晚上型景点错位、未排景点无备选说明。
+    """规划覆盖率检查（纯函数可测）：天数不完整、行程点过少、晚上型景点错位、未排景点无备选说明。
 
     不要求全排入：景点多天数少时有备选是正常的，关键是地标不能被静默丢掉。"""
     slots = [s for d in plan.get("days", []) for s in d.get("slots", [])]
     issues: list[str] = []
+    # 天数完整性（比点位数更硬）：LLM 偶尔少输出整天，PLAN_SYSTEM 规则 1 已明写要求
+    # 但仍会被违反（实测：要 3 天只给 2 天），提示词约束必须配代码兜底才能触发回炉
+    plan_days = plan.get("days") or []
+    empty_days = [i + 1 for i, dd in enumerate(plan_days) if not (dd.get("slots") or [])]
+    if len(plan_days) < days or empty_days:
+        tail = f"，其中第 {'、'.join(str(x) for x in empty_days)} 天无任何安排" if empty_days else ""
+        issues.append(
+            f"行程天数不完整：要求 {days} 天，实际只有 {len(plan_days)} 天{tail}。"
+            f"必须输出全部 {days} 天、每天至少一个时段有安排；"
+            f"点位不足时把已调研点分散到每一天，不得空整天")
     min_slots = min(2 * days, len(profiles))
     if len(slots) < min_slots:
         issues.append(f"行程点只有 {len(slots)} 个，低于下限 {min_slots} 个，请把更多已调研景点排入行程")
+    # 每日密度（实测出现过“第 2 天只有上午”）：除“全天型独日”外，每天至少两个时段有安排；
+    # 只在素材够分时提要求（点数本来就不够摊时不逼回炉，交由 rebalance_days 与已知妥协）
+    all_day_names = {n for n, p in profiles.items() if is_all_day(p)}
+    all_day_days, thin_days = 0, []
+    for i, dd in enumerate(plan_days, start=1):
+        sl = dd.get("slots") or []
+        if len(sl) == 1 and str(sl[0].get("spot") or "") in all_day_names:
+            all_day_days += 1   # 全天型点独占一天：单条 slot="全天" 为合法排法（F-D1）
+        elif len(sl) <= 1:
+            thin_days.append(i)
+    if thin_days and len(slots) >= 2 * len(plan_days) - all_day_days:
+        issues.append(f"排布过空：第 {'、'.join(str(x) for x in thin_days)} 天只有 1 个时段有安排。"
+                      f"除全天型景点独占一整天外，每天上午/下午/晚上至少要有两个时段有安排，"
+                      f"请重新均衡分配，不要出现“某天只有上午”这类残缺日子")
     planned = {s["spot"] for s in slots}
     for name in planned:
         p = profiles.get(name) or {}
@@ -428,418 +624,99 @@ def _coverage_issues(plan: dict, profiles: dict[str, dict], days: int) -> list[s
     return issues
 
 
-# F4.2/F4.6 餐饮人均口径：单菜/小吃单价（如"香辣蟹7元"）常被误标成"餐饮人均"，
-# 低于正餐人均下限的剔除；无可靠调研人均时用城市正餐基线兜底并标注"基线估算"
-MIN_MEAL_PER_PERSON = 12
-MEAL_BASELINE = 50
+def format_draft_plan(draft: dict | None) -> str:
+    """把“视频行程草案”格式化成规划提示词文本（纯函数可测）；无有效内容返回空串。"""
+    if not isinstance(draft, dict):
+        return ""
+    lines: list[str] = []
+    for d in draft.get("days") or []:
+        if not isinstance(d, dict):
+            continue
+        bits: list[str] = []
+        for it in d.get("slots") or d.get("items") or []:
+            if not isinstance(it, dict):
+                continue
+            spot = str(it.get("spot") or "").strip()
+            if not spot:
+                continue
+            slot = str(it.get("slot") or it.get("period") or "").strip()
+            bits.append(f"{slot} {spot}" if slot else spot)
+        if bits:
+            lines.append(f"第 {d.get('day') or len(lines) + 1} 天：" + "；".join(bits))
+    note = str(draft.get("notes") or "").strip()
+    if note:
+        lines.append(f"（审核说明：{note}）")
+    return "\n".join(lines)
 
 
-def build_budget_summary(profiles: dict[str, dict], plan: dict, days: int,
-                         budget: float | None) -> dict:
-    """预算明细汇总：门票（只计已排入行程的景点，多源去重后求和）/餐饮（人均×天数×2 正餐）
-    /市内交通估算/弹性 10%。纯函数，独立可测；无预算时 total_budget 为 None。
-    tickets_missing 记录已排入但无票价数据的景点（渲染层明示提醒，不静默漏算）。"""
-    planned = {s["spot"] for d in plan.get("days", []) for s in d.get("slots", [])}
-    # 点位花费兜底：档案无门票项时用 LLM 排入的 cost（环球这类票价在贴士不在 cost_items 的场景）
-    slot_cost: dict[str, float] = {}
-    for d in plan.get("days", []):
-        for s in d.get("slots", []):
-            slot_cost[s["spot"]] = max(slot_cost.get(s["spot"], 0), float(s.get("cost") or 0))
-    tickets = []
-    ticket_detail_items: list[str] = []   # 与总额同口径的门票明细，渲染层直接复用
-    food_prices = []
-    food_price_srcs: list[str] = []   # 可靠正餐人均来源（店名+金额），供明细列依据
-    tickets_missing = []
-    for name, p in profiles.items():
-        has_ticket = False
-        for c in p.get("cost_items", []):
-            if c["type"] == "门票":
-                has_ticket = True
-                if name in planned:  # 调研了但没排进行程的，门票不计入预算
-                    tickets.append(round(c["amount"]))
-                    ticket_detail_items.append(f"{name} {c['item']} {c['amount']:.0f} 元")
-            elif c["type"] == "餐饮人均" and c["amount"] >= MIN_MEAL_PER_PERSON:
-                # F4.2：低于正餐人均下限的多是单菜/小吃单价（如"香辣蟹7元"），剔除不当人均
-                food_prices.append(c["amount"])
-                food_price_srcs.append(f"{name} 人均 {c['amount']:.0f} 元")
-        if name in planned and not has_ticket:
-            if slot_cost.get(name, 0) > 0:
-                tickets.append(round(slot_cost[name]))
-                ticket_detail_items.append(f"{name} 点位预估 {slot_cost[name]:.0f} 元")
-            else:
-                tickets_missing.append(name)
-    ticket_total = float(sum(dict.fromkeys(tickets)))  # 同价位门票去重（多个来源说同一票价）
-    if food_prices:
-        avg_meal = round(sum(food_prices) / len(food_prices))
-        food_baseline = False
-    else:
-        avg_meal = MEAL_BASELINE   # F4.6：无可靠调研人均时用城市正餐基线兜底
-        food_baseline = True
-    food_total = float(avg_meal * days * 2)
-    slot_count = sum(len(d["slots"]) for d in plan.get("days", []))
-    transport = float(max(slot_count, 1) * 15)  # 估算值：每点位市内交通约 15 元（无实测数据时的保守占位）
-    subtotal = ticket_total + food_total + transport
-    flex = round(subtotal * 0.1, 2)
-    total = round(subtotal + flex, 2)
-    out = {
-        "tickets": ticket_total,
-        "tickets_detail": ticket_detail_items,
-        "tickets_missing": tickets_missing,
-        "food": food_total,
-        "food_avg": float(avg_meal),
-        "food_baseline": food_baseline,
-        "food_price_srcs": food_price_srcs,
-        "transport": transport,
-        "flex": flex,
-        "total": total,
-        "total_budget": float(budget) if budget else None,
-        "status": "",
-        "note": "",
-    }
-    if budget:
-        if total <= budget:
-            out["status"] = "结余"
-            out["note"] = f"预估总花费 {total:.0f} 元，预算内结余约 {budget - total:.0f} 元"
-        else:
-            out["status"] = "超支"
-            out["note"] = (f"预估总花费 {total:.0f} 元，超出预算约 {total - budget:.0f} 元；"
-                           "建议：减少付费景点、选免费替代或降低餐饮标准")
+# 时段顺序（搬移后重排当天槽位用）
+_SLOT_ORDER = {"上午": 0, "下午": 1, "晚上": 2, "全天": 0}
+
+
+def _slot_ok(block: dict, profiles: dict[str, dict], slot: str) -> bool:
+    """搬移兼容性：晚上型景点只能落在晚上时段、全天型点不参与搬移。纯函数可测。"""
+    p = profiles.get(str(block.get("spot") or "")) or {}
+    if is_all_day(p):
+        return False
+    return not (str(p.get("best_time_slot") or "") == "晚上" and slot != "晚上")
+
+
+def rebalance_days(plan: dict, profiles: dict[str, dict], days: int) -> dict:
+    """排布均衡兜底（纯函数可测）：把排得过满的天里的点位挪到只有 1 个时段的天，
+    使除“全天型独占日”外每天至少两个时段有安排（实测出现过“第 2 天只有上午”）。
+
+    只在素材够分（已排点数 ≥ 2×天数 − 全天独占日数）时移动；不新增/删除点位，
+    仅调整点位的归属日与时段标签，并保持晚上型点落在晚上。返回新 plan（不改入参），
+    moved 记录每次移动供报告明示。"""
+    out = {**plan,
+           "days": [dict(d, slots=list(d.get("slots") or [])) for d in plan.get("days") or []],
+           "moved": []}
+    days_list = out["days"]
+
+    def _all_day_only(dd: dict) -> bool:
+        sl = dd.get("slots") or []
+        return len(sl) == 1 and is_all_day(profiles.get(str(sl[0].get("spot") or "")))
+
+    all_day_days = sum(1 for dd in days_list if _all_day_only(dd))
+    n_slots = sum(len(dd.get("slots") or []) for dd in days_list)
+    if n_slots < 2 * len(days_list) - all_day_days:
+        return out   # 素材本来就不够摊（如 3 天 4 个点）：不硬凑，交由回炉与已知妥协说明
+    while True:
+        thin = [dd for dd in days_list if len(dd.get("slots") or []) <= 1 and not _all_day_only(dd)]
+        donors = [dd for dd in days_list if len(dd.get("slots") or []) >= 3]
+        if not thin or not donors:
+            break
+        dest = thin[0]
+        donor = max(donors, key=lambda dd: len(dd["slots"]))
+        taken = {str(s.get("slot") or "") for s in dest["slots"]}
+        moved_one = False
+        for free in (t for t in ("上午", "下午", "晚上") if t not in taken):
+            pool = [s for s in donor["slots"] if _slot_ok(s, profiles, free)]
+            if not pool:
+                continue
+            move = pool[-1]
+            donor["slots"].remove(move)
+            move["slot"] = free
+            dest["slots"].append(move)
+            dest["slots"].sort(key=lambda s: _SLOT_ORDER.get(str(s.get("slot") or ""), 3))
+            out["moved"].append(f"第{donor.get('day')}天 {move.get('spot')} → 第{dest.get('day')}天{free}")
+            moved_one = True
+            break
+        if not moved_one:
+            break   # 目标天可选时段里没有兼容的点位（如全是晚上型）：不硬搬，保持原样
     return out
 
 
 def build_overview(days: int, plan: dict, profiles: dict[str, dict],
-                   budget_summary: dict | None, pitfall: list[dict] | None,
+                   pitfall: list[dict] | None,
                    foods: dict[str, dict] | None = None) -> dict:
-    """行程概览卡数据：天数/景点与餐厅数/总预算与日均/亮点与避坑数量。纯函数可测。"""
+    """行程概览卡数据：天数/景点与餐厅数/行程点数/亮点与避坑数量。纯函数可测。"""
     total_slots = sum(len(d.get("slots", [])) for d in plan.get("days", []))
-    total = budget_summary["total"] if budget_summary else None
     return {
         "days": days,
         "spots": len(profiles),
         "foods": len(foods or {}),
         "slots": total_slots,
-        "total_cost": total,
-        "daily_cost": round(total / days, 2) if (total and days) else None,
         "highlights": sum(len(p.get("highlights", [])) for p in profiles.values()),
         "pitfalls": len(pitfall or []),
     }
-
-
-def day_subtotals(plan: dict, budget_summary: dict | None) -> list[dict]:
-    """每日花费小计：点位花费 + 餐饮/交通按天摊（弹性不分摊，留在总计里）。纯函数可测。"""
-    n_days = len(plan.get("days", [])) or 1
-    food_d = round(budget_summary["food"] / n_days) if budget_summary else 0
-    trans_d = round(budget_summary["transport"] / n_days) if budget_summary else 0
-    out = []
-    for d in plan.get("days", []):
-        spot_sum = round(sum(s.get("cost") or 0 for s in d.get("slots", [])))
-        out.append({"day": d.get("day"), "spots": spot_sum, "food": food_d,
-                    "transport": trans_d, "total": spot_sum + food_d + trans_d})
-    return out
-
-
-def budget_breakdown(profiles: dict[str, dict], budget_summary: dict | None,
-                     days: int) -> list[dict]:
-    """预算明细行：门票逐点列明 / 餐饮 / 交通 / 弹性。纯函数可测。"""
-    if not budget_summary:
-        return []
-    # 门票明细直接用汇总层同口径的结果，避免"列了未排入景点门票但总额为 0"的矛盾
-    ticket_detail = "；".join(budget_summary.get("tickets_detail") or []) or "已排入景点均无票价数据"
-    missing = (budget_summary or {}).get("tickets_missing") or []
-    if missing:
-        ticket_detail += f"（{'、'.join(missing)} 无票价数据，可能免费或未被提及，出发前请核实）"
-    # 餐饮人均依据用汇总层过滤后的可靠来源（单菜价已剔除），口径与总额一致；
-    # 兼容未含 food_price_srcs 的旧汇总：按同一下限从 profiles 现算
-    food_srcs = budget_summary.get("food_price_srcs")
-    if food_srcs is None:
-        food_srcs = [f"{name} 人均 {c['amount']:.0f} 元"
-                     for name, p in profiles.items() for c in p.get("cost_items", [])
-                     if c.get("type") == "餐饮人均" and c.get("amount", 0) >= MIN_MEAL_PER_PERSON]
-    food_detail = f"人均 {budget_summary['food_avg']:.0f} 元 × 2 正餐 × {days} 天"
-    if budget_summary.get("food_baseline"):
-        food_detail += "（无可靠调研人均，按城市正餐基线估算，出发前请核实）"
-    elif food_srcs:
-        food_detail += "（调研到的餐厅人均：" + "；".join(food_srcs) + "）"
-    return [
-        {"item": "门票", "detail": ticket_detail, "amount": budget_summary["tickets"]},
-        {"item": "餐饮", "detail": food_detail, "amount": budget_summary["food"]},
-        {"item": "市内交通", "detail": "估算（每行程点约 15 元）", "amount": budget_summary["transport"]},
-        {"item": "弹性预留", "detail": "前几项小计的 10%", "amount": budget_summary["flex"]},
-    ]
-
-
-def _decision_rows(decisions) -> list[dict]:
-    """选点决策表数据行（F7.1）。接受 SpotDecision 列表，格式化成可直接渲染的字段。纯函数可测。"""
-    rows = []
-    for d in decisions or []:
-        r = d.to_row()
-        state = r.get("state") or ""
-        rows.append({
-            "name": r["name"], "category": r["category"], "sources": r["sources"],
-            "evidence": r["evidence"], "state": state or "未定",
-            "state_icon": _STATE_ICONS.get(state, "❔"),
-            "heat": f"{r['heat_score']:.2f}" if r.get("heat_score") else "—",
-            "trend": r.get("heat_trend") or "—",
-            "mkt": f"{r['mkt_ratio']:.0%}" if r.get("mkt_ratio") else "—",
-            "reason": r.get("reason") or "—",
-        })
-    return rows
-
-
-def _quality_dict(quality) -> dict | None:
-    """质量报告规范化成 dict（接受 QualityReport 对象或已是 dict）。纯函数可测。"""
-    if quality is None:
-        return None
-    if isinstance(quality, dict):
-        return quality
-    to_dict = getattr(quality, "to_dict", None)
-    return to_dict() if callable(to_dict) else None
-
-
-def render_trip(city: str, days: int, hotel: str, plan: dict, profiles: dict[str, dict],
-                spot_sources: dict[str, list[str]], geo_on: bool,
-                budget_summary: dict | None = None, pitfall: list[dict] | None = None,
-                heat: list[dict] | None = None, digests: dict[str, dict] | None = None,
-                foods: dict[str, dict] | None = None,
-                food_sources: dict[str, list[str]] | None = None,
-                preferences: str = "", preference_mode: str = "",
-                user_spots: list[str] | None = None,
-                decisions: list | None = None, quality=None) -> str:
-    """把行程 JSON 渲染成 Markdown 路书（逐日卡片 + 预算 + 避坑专题 + 热度榜 + 景点详情 + 来源链接）。"""
-    plan = _plan_with_note_lists(plan)
-    total_slots = sum(len(d["slots"]) for d in plan["days"])
-    # 输入参数回显：让用户确认报告是按他的需求生成的，也方便对照调整参数重新生成
-    echo = [f"目的地 **{city}**", f"天数 **{days} 天**"]
-    if hotel:
-        echo.append(f"住宿 **{hotel}**")
-    if budget_summary and budget_summary.get("total_budget"):
-        echo.append(f"预算 **{budget_summary['total_budget']:.0f} 元**")
-    if preference_mode:
-        echo.append(f"消费偏好 **{preference_mode}**")
-    if preferences:
-        echo.append(f"特别偏好 **{preferences}**")
-    if user_spots:
-        echo.append(f"指定景点 **{'、'.join(s.strip() for s in user_spots if s and s.strip())}**")
-    lines = [
-        f"# 《{city}》{days} 天行程规划",
-        "",
-        f"> 你的需求：{' ｜ '.join(echo)}",
-        "> 如与预期不符，可在网页调整参数后重新生成",
-        f"> 生成时间：{datetime.now():%Y-%m-%d %H:%M}",
-        f"> 住宿：{hotel or '未指定'}",
-        f"> 数据来源：{len(profiles)} 个景点" + (f" + {len(foods)} 家餐厅" if foods else "")
-        + f"的抖音实地调研 · 共 {total_slots} 个行程点",
-        f"> 路线依据：{'高德地图实测（公交线路/票价/打车费用）' if geo_on else 'LLM 交通估算（未配置高德 Key，线路与费用为估算，出发前以地图 App 为准）'}",
-        "",
-    ]
-    # 行程概览卡：总天数/总预算与日均/亮点与避坑数量，一眼看全貌
-    ov = build_overview(days, plan, profiles, budget_summary, pitfall, foods)
-    spot_line = f"- 总天数 **{ov['days']} 天** ｜ 景点 **{ov['spots']} 个** ｜ 行程点 **{ov['slots']} 个**"
-    if ov["foods"]:
-        spot_line += f" ｜ 推荐餐厅 **{ov['foods']} 家**"
-    lines += ["## 行程概览", "", spot_line]
-    if ov["total_cost"] is not None:
-        cost_line = (f"- 总预算估算 **约 {ov['total_cost']:.0f} 元** ｜ 每日预算 **约 {ov['daily_cost']:.0f} 元/天**"
-                     + (f"（用户预算 {budget_summary['total_budget']:.0f} 元 · {budget_summary['status']}）"
-                        if budget_summary["total_budget"] else ""))
-        lines.append(cost_line)
-    lines += [f"- 亮点 **{ov['highlights']} 条** ｜ 避坑提示 **{ov['pitfalls']} 条**", ""]
-    day_costs = day_subtotals(plan, budget_summary)
-    if plan.get("summary_note"):
-        lines += [f"- 规划说明：{plan['summary_note']}", ""]
-    # 质量分卡（§5.3 / F5.1）：总分 + 各规则状态 + 回炉轮次 + 已知妥协
-    q = _quality_dict(quality)
-    if q:
-        lines += ["## 质量分卡", "",
-                  f"- 质量总分 **{q.get('score', 0)}** / 100 ｜ 回炉 **{q.get('repair_rounds', 0)}** 轮"
-                  f" ｜ 已知妥协 **{len(q.get('unresolved') or [])}** 项", ""]
-        for c in q.get("checks", []):
-            icon = _QC_ICONS.get(c.get("status"), "")
-            note = f" — {c['note']}" if c.get("note") else ""
-            lines.append(f"- {icon} **{c['rule_id']} {c['name']}**：{c.get('status')}"
-                         f"（{c.get('actual', '')}）{note}")
-        lines.append("")
-        if q.get("unresolved"):
-            lines += ["### 已知妥协 / 待你定夺", "",
-                      "> 以下是回炉后仍未能完全满足的项，如实列出而非静默掩盖：", ""]
-            lines += [f"- {u}" for u in q["unresolved"]]
-            lines.append("")
-    # 选点决策表（F7.1，最重要的展示位）：淘汰点也展示，回答"为什么没带你去 X"
-    rows = _decision_rows(decisions)
-    if rows:
-        lines += ["## 选点决策表", "",
-                  "> 每个被圈定的候选都有明确结论——包括没带你去的点及原因。", "",
-                  "| 状态 | 名称 | 类别 | 来源 | 证据 | 热度（趋势） | 营销号 | 理由 |",
-                  "|---|---|---|---|---|---|---|---|"]
-        for r in rows:
-            lines.append(f"| {r['state_icon']} {r['state']} | {r['name']} | {r['category']} "
-                         f"| {r['sources']} | {r['evidence']} | {r['heat']}（{r['trend']}） "
-                         f"| {r['mkt']} | {r['reason']} |")
-        lines.append("")
-    if pitfall:
-        lines += ["## 避坑专题（附评论原文 · 高置信度排前）", ""]
-        for i, row in enumerate(pitfall, 1):
-            lines.append(f"{i}. **{row['claim']}**（{_conf_badge(row)}）")
-            if row["quote"]:
-                lines.append(f"   > 评论原文：\"{row['quote']}\"")
-            if row["source"]:
-                lines.append(f"   > 来源：{row['source']}")
-        lines.append("")
-    for idx, d in enumerate(plan["days"]):
-        lines.append(f"## 第 {d['day']} 天")
-        lines.append("")
-        for s in d["slots"]:
-            lines.append(f"### {s['slot']} · {s['spot']}")
-            if s["duration"]:
-                lines.append(f"- 游玩时长：{s['duration']}")
-            if s.get("cost"):
-                lines.append(f"- 预估花费：{s['cost']:.0f} 元")
-            if s["transport"]:
-                lines.append(f"- 交通：{s['transport']}")
-            if s["reasons"]:
-                lines.append(f"- 值得去：{s['reasons']}")
-            if s["notes"]:
-                lines.append("- 注意事项：")
-                for nt in s["notes"]:
-                    # 避坑/费用/时间属重要信息，整条加粗；普通提示保持常规字重
-                    mark = "**" if nt["type"] in ("避坑", "费用", "时间") else ""
-                    lines.append(f"  - {NOTE_ICONS.get(nt['type'], '💡')} {mark}{nt['type']}：{nt['text']}{mark}")
-            for q in s.get("pitfall_quotes", []):
-                lines.append(f"  > 避坑引用：\"{q}\"")
-            if s["food"]:
-                lines.append(f"- 美食：{s['food']}")
-            lines.append("")
-        if budget_summary and idx < len(day_costs):
-            sc = day_costs[idx]
-            lines.append(f"> 当日花费小计：**约 {sc['total']:.0f} 元**"
-                         f"（点位花费 {sc['spots']:.0f} + 餐饮 {sc['food']:.0f} + 市内交通 {sc['transport']:.0f}，弹性预留不分摊）")
-            lines.append("")
-    if heat:
-        lines += ["## 热度榜（近 90 天抖音数据）", "",
-                  "> 热度指数 = 点赞热度 40%（对数归一）+ 评论密度 30% + 新鲜度 30%（近 90 天发布占比）；",
-                  "> 营销号占比 = 文案命中营销话术的视频占比，≥50% 需谨慎看待该热度；",
-                  "> 情感趋势 = 近 30 天评论好评率与更早对比（关键词判定，判断是不是越做越差）。",
-                  ""]
-        for i, h in enumerate(heat, 1):
-            mkt_ratio = h.get("mkt_ratio", 0) or 0
-            warn = " ｜ ⚠️ **营销号占比高，谨慎参考**" if mkt_ratio >= 0.5 else ""
-            senti = f" · 情感 {h['sentiment']}" if h.get("sentiment") else ""
-            lines.append(f"{i}. **{h['spot']}** ｜ 热度指数 {h['score']:.2f} ｜ {h['trend']}"
-                         f"（视频 {h['videos']} 条 · 点赞 {h['likes']} · 评论 {h['comments']}"
-                         f" · 营销号 {h.get('marketing', 0)}/{h['videos']} · {mkt_ratio:.0%}{senti}）{warn}")
-        lines.append("")
-    lines.append("## 景点详情卡")
-    lines.append("")
-    for name, p in profiles.items():
-        lines.append(f"### {name}")
-        dur = f"约 {p['duration_hours']} 小时" if p["duration_hours"] else "见要点"
-        lines.append(f"- 建议时长：{dur}｜最佳时段：{p['best_time_slot']}")
-        costs = "；".join(f"{c['item']} {c['amount']:.0f} 元" for c in p.get("cost_items", []))
-        if costs:
-            lines.append(f"- 参考花费：{costs}")
-        if p["highlights"]:
-            lines.append(f"- 亮点：{'；'.join(p['highlights'])}")
-        if p["avoid"]:
-            lines.append(f"- 别踩坑：{'；'.join(p['avoid'])}")
-        if p["food"]:
-            lines.append(f"- 美食：{'；'.join(p['food'])}")
-        if p["photo_spots"]:
-            lines.append(f"- 打卡点：{'；'.join(p['photo_spots'])}")
-        if p["tips"]:
-            lines.append(f"- 贴士：{'；'.join(p['tips'])}")
-        dg = (digests or {}).get(name) or {}
-        if dg.get("verdict"):
-            lines.append(f"- 真实评价摘要：{dg['verdict']}")
-            if dg.get("positive"):
-                lines.append(f"  - 好评：{dg['positive']}")
-            if dg.get("negative"):
-                lines.append(f"  - 差评：{dg['negative']}")
-            for q in dg.get("quotes", []):
-                lines.append(f"  > 评论摘录：\"{q}\"")
-        urls = spot_sources.get(name) or []
-        if urls:
-            links = " ".join(f"[来源{idx + 1}]({u})" for idx, u in enumerate(urls[:6]))
-            lines.append(f"- 信息溯源：{links}")
-        lines.append("")
-    if foods:
-        lines.append("## 餐厅详情卡（含避坑分析）")
-        lines.append("")
-        for name, p in foods.items():
-            lines.append(f"### 🍜 {name}")
-            costs = "；".join(f"{c['item']} {c['amount']:.0f} 元" for c in p.get("cost_items", []))
-            if costs:
-                lines.append(f"- 参考花费：{costs}")
-            if p["highlights"]:
-                lines.append(f"- 招牌/推荐：{'；'.join(p['highlights'])}")
-            if p["avoid"]:
-                lines.append(f"- 别踩坑：{'；'.join(p['avoid'])}")
-            if p["tips"]:
-                lines.append(f"- 贴士：{'；'.join(p['tips'])}")
-            dg = (digests or {}).get(name) or {}
-            if dg.get("verdict"):
-                lines.append(f"- 真实评价摘要：{dg['verdict']}")
-                if dg.get("positive"):
-                    lines.append(f"  - 好评：{dg['positive']}")
-                if dg.get("negative"):
-                    lines.append(f"  - 差评：{dg['negative']}")
-                for q in dg.get("quotes", []):
-                    lines.append(f"  > 评论摘录：\"{q}\"")
-            urls = (food_sources or {}).get(name) or []
-            if urls:
-                links = " ".join(f"[来源{idx + 1}]({u})" for idx, u in enumerate(urls[:6]))
-                lines.append(f"- 信息溯源：{links}")
-            lines.append("")
-    if budget_summary:
-        lines += ["## 预算明细", "", "| 项目 | 说明 | 金额 |", "|---|---|---|"]
-        for row in budget_breakdown({**profiles, **(foods or {})}, budget_summary, days):
-            lines.append(f"| {row['item']} | {row['detail']} | {row['amount']:.0f} 元 |")
-        lines.append(f"| **预估总计** | 门票+餐饮+交通+弹性 | **{budget_summary['total']:.0f} 元** |")
-        if budget_summary["total_budget"]:
-            lines.append(f"| 用户预算 | {budget_summary['note']} | {budget_summary['total_budget']:.0f} 元 |")
-        lines.append("")
-    lines.append("> 本行程由 AI 基于抖音公开内容与地图数据生成，仅供参考；")
-    lines.append("> 开放时间、票价、班次等时效信息出发前请务必通过官方渠道核实。")
-    return "\n".join(lines)
-
-
-def render_trip_html(city: str, days: int, hotel: str, plan: dict, profiles: dict[str, dict],
-                     spot_sources: dict[str, list[str]], geo_on: bool,
-                     locs: dict[str, str] | None = None, budget_summary: dict | None = None,
-                     pitfall: list[dict] | None = None, heat: list[dict] | None = None,
-                     digests: dict[str, dict] | None = None,
-                     foods: dict[str, dict] | None = None,
-                     food_sources: dict[str, list[str]] | None = None,
-                     preferences: str = "", preference_mode: str = "",
-                     user_spots: list[str] | None = None,
-                     decisions: list | None = None, quality=None) -> str:
-    """渲染 HTML 可视化路书（Jinja2 模板 + ECharts/Leaflet CDN，离线时模板内置文本版降级）。"""
-    plan = _plan_with_note_lists(plan)
-    env = Environment(
-        loader=FileSystemLoader(_TEMPLATE_DIR),
-        autoescape=select_autoescape(["html"]),
-    )
-    tpl = env.get_template("trip_report.html")
-    markers: list[dict] = []
-    for name, loc in (locs or {}).items():
-        try:
-            lng, lat = loc.split(",")
-            markers.append({"name": name, "lng": float(lng), "lat": float(lat)})
-        except ValueError:
-            continue
-    return tpl.render(
-        city=city, days=days, hotel=hotel, plan=plan, profiles=profiles,
-        spot_sources=spot_sources, geo_on=geo_on, markers=markers,
-        preferences=preferences, preference_mode=preference_mode,
-        user_spots=user_spots or [],
-        budget_summary=budget_summary, pitfall=pitfall or [], heat=heat or [],
-        digests=digests or {},
-        foods=foods or {},
-        food_sources=food_sources or {},
-        overview=build_overview(days, plan, profiles, budget_summary, pitfall, foods),
-        day_costs=day_subtotals(plan, budget_summary),
-        breakdown=budget_breakdown({**profiles, **(foods or {})}, budget_summary, days),
-        decision_rows=_decision_rows(decisions),
-        quality=_quality_dict(quality),
-        generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
-        total_slots=sum(len(d["slots"]) for d in plan["days"]),
-    )

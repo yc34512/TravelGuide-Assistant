@@ -1,5 +1,7 @@
 .env
-data/
+data/*
+# 官方事实种子层是人工策展数据，需入库（PRD §6.4 / F-C1，Demo 与黄金用例走此层）
+!data/official_facts/
 browser_profile/
 __pycache__/
 *.pyc

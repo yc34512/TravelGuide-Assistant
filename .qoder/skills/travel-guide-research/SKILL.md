@@ -48,13 +48,15 @@ Content-Type: application/json
 POST /api/trip
 Content-Type: application/json
 
-{"city": "大同", "days": 3, "hotel": "大同古城内", "spots": null, "preferences": "", "budget": 1500, "preference_mode": "均衡"}
+{"city": "大同", "days": 3, "hotel": "大同古城内", "spots": null, "preferences": "", "preference_mode": "均衡"}
 ```
 
-- `spots` 传数组可指定景点；缺省时系统自动圈定 15~20 个候选并经抖音验证筛选（保留 8~12 个）；
-- `budget`（可选）总预算（元，不含大交通），传入后输出预算明细与超支预警；`preference_mode`：省钱优先 / 体验优先 / 均衡；
+- `spots` 传数组可指定景点；缺省时先看该城市高赞攻略视频里的逐日行程（视频行程草案，经 LLM 审核增删改），
+  再把草案点位逐个丢去抖音验证采集，最后以草案为主干排线（保留 8~12 个验证通过的点）；
+- `preference_mode`：省钱优先 / 体验优先 / 均衡（影响选点倾向，不参与预算计算）；
+- **报告不输出任何预算估算**（金额口径不可靠）：只给行程规划，预算请用户自行考虑；行程里只保留调研到的确定门票价（标注来源）；
 - 行程任务耗时更长：未调研过的景点约 5 分钟/个，7 天内调研过的自动命中缓存；
-- 结果额外含 `budget_summary`（预算明细）、`pitfall_digest`（避坑专题，附评论原文）、`heat_rank`（热度榜）与 `html_name`（可视化页面，可用下载接口取）；
+- 结果额外含 `draft_plan`（视频行程草案）、`pitfall_digest`（避坑专题，附评论原文）、`heat_rank`（热度榜）与 `html_name`（可视化页面，可用下载接口取）；
 - 后续轮询、取消、结果处理与攻略任务完全一致（同一个 /api/jobs/{id}）。
 
 若用户问**某城市哪些景点最近火/在降温**（如"大同现在哪里最火"），用热度榜接口：

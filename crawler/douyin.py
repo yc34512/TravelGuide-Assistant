@@ -13,8 +13,10 @@ from urllib.parse import quote
 
 from DrissionPage import ChromiumPage
 
-from config import MAX_COMMENTS_PER_VIDEO, MAX_SEARCH_SCROLLS
+from config import (MAX_COMMENTS_PER_VIDEO, MAX_SEARCH_SCROLLS, SEARCH_POOL_SIZE,
+                    SEARCH_SORT_BY_LIKES)
 from core.models import Comment, VideoItem
+from core.quality import screen_pool, video_quality_score
 from core.rate_limiter import RateLimiter
 from core.sanitize import clean_comment, parse_comment_block, parse_count, timestamp_to_date
 from crawler import base
@@ -26,8 +28,10 @@ _CREATE_TIME_RE = re.compile(r'"create_time"\s*:\s*(\d{10})')
 
 # —— 选择器集中管理（候选列表按顺序尝试，失效时改这里）——
 SEL_SEARCH_LINKS = 'css:a[href*="/video/"]'
-# 搜索结果卡片上的点赞数（尽力而为：解析失败退化为按原顺序采集，不阻断）
-SEL_SEARCH_LIKE = ['css:[class*="like-count"]', 'css:[class*="digg"]', 'css:[class*="like"]']
+# 搜索结果卡片上的点赞数（尽力而为：全部失效时 core.quality.screen_pool 会把筛选
+# 延后到详情页逐条判定，不阻断采集、也不瞎猜点赞数）
+SEL_SEARCH_LIKE = ['css:[class*="like-count"]', 'css:[class*="digg"]', 'css:[class*="like"]',
+                   'css:[data-e2e*="like"]', 'css:[class*="count"]']
 SEL_VIDEO_DESC = [
     'css:[data-e2e="video-desc"]',
     'css:[data-e2e="detail-video-info"]',
@@ -106,22 +110,63 @@ def _find_items(container, selectors: list[str]):
     return []
 
 
-def rank_candidates(candidates: list[dict], limit: int) -> list[str]:
-    """择优排序：有点赞数的按点赞降序在前，无法解析的按发现顺序垫后；
-    按 video_id 去重，取前 limit 条 URL。纯函数，独立可测。"""
+# 搜索地址的排序参数。sort_type: 0 综合排序 / 1 最多点赞 / 2 最新发布。
+# 尽力而为：平台不认这个参数时会退回综合排序，两种情况都由本地质量闸兜底。
+_SORT_PARAM = "&sort_type=1" if SEARCH_SORT_BY_LIKES else ""
+
+
+def search_url(keyword: str) -> str:
+    """搜索结果页地址（纯函数，独立可测）。默认带"最多点赞"排序。"""
+    return f"https://www.douyin.com/search/{quote(keyword)}?type=video{_SORT_PARAM}"
+
+
+def _stat_int(v) -> int | None:
+    """详情接口计数字段归一：int 直接用，字符串走 parse_count，其余 None（不猜数）。"""
+    if isinstance(v, int):
+        return v if v >= 0 else None
+    if isinstance(v, str):
+        return parse_count(v)
+    return None
+
+
+def _stat_duration(v) -> float | None:
+    """视频时长归一到秒。抖音详情接口的 duration 多为毫秒，个别字段给秒，
+    按数量级判别；拿不准返回 None（质量闸对 None 不生效，宁缺勿错）。"""
+    try:
+        d = float(v)
+    except (TypeError, ValueError):
+        return None
+    if d <= 0:
+        return None
+    return round(d / 1000.0, 1) if d >= 1000 else round(d, 1)
+
+
+def dedupe_pool(candidates: list[dict]) -> list[dict]:
+    """候选池按 video_id 去重，保留首次发现顺序（多查询词合并用）。纯函数可测。"""
     seen: set[str] = set()
-    uniq: list[dict] = []
-    for c in candidates:
-        if c["video_id"] not in seen:
-            seen.add(c["video_id"])
-            uniq.append(c)
-    scored = sorted(
-        (c for c in uniq if c.get("like_count")),
-        key=lambda c: c["like_count"],
-        reverse=True,
-    )
-    unscored = [c for c in uniq if not c.get("like_count")]
-    return [c["url"] for c in scored + unscored][:limit]
+    out: list[dict] = []
+    for c in candidates or []:
+        vid = c.get("video_id")
+        if vid and vid not in seen:
+            seen.add(vid)
+            out.append(c)
+    return out
+
+
+def rank_pool_dicts(pool: list[dict]) -> list[dict]:
+    """按质量分降序稳定排序（不淘汰、不降档——门槛判定归 core.quality.screen_pool）。
+
+    搜索页候选只有点赞数时，质量分是点赞的单调函数（收藏/评论维度为 0、
+    新鲜度取中性值），因此排序结果与旧的"点赞降序 + 无点赞垫后"完全一致，
+    旧调用方与旧测试行为不变。纯函数，独立可测。"""
+    return sorted(dedupe_pool(pool), key=video_quality_score, reverse=True)
+
+
+def rank_candidates(candidates: list[dict], limit: int) -> list[str]:
+    """择优排序后取前 limit 条 URL（向后兼容出口，不做门槛过滤）。
+
+    需要"门槛筛选 + 自动降档 + 淘汰明细"请用 DouyinCrawler.rank_pool。"""
+    return [c["url"] for c in rank_pool_dicts(candidates)][:limit]
 
 
 def parse_comment_payload(comments, author_uid: str | None = None) -> list[dict]:
@@ -196,6 +241,9 @@ def rank_and_filter(comments: list[Comment], max_n: int) -> list[Comment]:
 
 
 class DouyinCrawler:
+    # 详情接口质量字段探测：每进程只打印一次（实跑确认口径用，避免刷屏）
+    _stats_probed = False
+
     def __init__(self, page: ChromiumPage, limiter: RateLimiter | None = None):
         self.page = page
         self.limiter = limiter or RateLimiter()
@@ -218,7 +266,7 @@ class DouyinCrawler:
         """搜索结果页采集。scrolls 可指定滚动轮数（补充查询用更少轮数省时间）。"""
         if base.session_stopped():
             return []   # 本会话已触发验证码风控：不再发新搜索请求（避免加重风控）
-        url = f"https://www.douyin.com/search/{quote(keyword)}?type=video"
+        url = search_url(keyword)
         self._apply_block(keep_video=False)
         self.limiter.wait()   # 搜索导航也是一次域名请求，同样过频控
         self.page.get(url)
@@ -271,30 +319,73 @@ class DouyinCrawler:
                     n = parse_count(ele.text)
                     if n is not None:
                         return n
-            # 兜底：卡片文本末尾的独立计数（如 "1.2万"）
-            m = re.search(r"([\d.]+\s*万?)\s*$", (link.text or "").strip())
+            text = (link.text or "").strip()
+            # 兜底 1：卡片文本末尾的独立计数（如 "1.2万"）
+            m = re.search(r"([\d.]+\s*万?)\s*$", text)
             if m:
-                return parse_count(m.group(1))
+                n = parse_count(m.group(1))
+                if n:
+                    return n
+            # 兜底 2：全文中最后一个带"万"的计数（点赞数在卡片右下角，通常是末位计数）。
+            # 选择器失效时靠这个把"按点赞择优"救回来，避免排序整体退化成综合排序原样
+            hits = re.findall(r"[\d.]+\s*万", text)
+            if hits:
+                return parse_count(hits[-1])
         except Exception:
             pass
         return None
 
-    # ---- 搜索 + 择优：多角度查询合并候选池，按点赞排序后取前 limit 条 ----
-    def search_and_rank(self, keyword: str, limit: int) -> list[str]:
-        """先搜原词（候选池 2 倍）；候选池没饱和时再补一轮"避雷"角度查询。
+    # ---- 搜索：多角度扩池 + 质量闸择优 ----
+    def search_pool(self, queries: list[str], pool_size: int = SEARCH_POOL_SIZE,
+                    scrolls: int | None = None) -> list[dict]:
+        """多查询词合并候选池（按 video_id 去重，保留首次发现顺序）。
 
-        减量策略：第一轮已凑足候选池就跳过第二轮（省一次完整搜索+滚动，约 20~30 秒）；
-        不足时第二轮滚动轮数减半——避雷素材仍要有，但不必全量翻页。
-        扩展查询失败静默跳过。"""
+        为什么多角度扩池是划算的：每个查询词是一次页面导航，而滚动加载更多卡片
+        不产生新的域名请求——"1 次导航收 30 个候选"的风控成本远低于"多采 25 个详情页"
+        （后者会撞会话级验证码）。池子收满即停，不再发多余导航。
+        单个查询词失败静默跳过（其余仍可用）；本会话已触发风控则不再发新搜索。"""
         base.require_ugc_source()   # 开源合规闸门：UGC 源默认关闭
-        pool = self._search_one(keyword, limit * 2)
-        if len(pool) < limit * 2:
+        pool: list[dict] = []
+        seen: set[str] = set()
+        for i, q in enumerate(dict.fromkeys(x for x in (queries or []) if str(x).strip())):
+            if base.session_stopped():
+                break
+            want = pool_size - len(pool)
+            if want <= 0:
+                break
+            # 首个查询词全量滚动，后续补充角度滚动减半（素材要有，不必全量翻页）
+            sc = scrolls if scrolls is not None else (
+                MAX_SEARCH_SCROLLS if i == 0 else max(2, MAX_SEARCH_SCROLLS // 2))
             try:
-                pool.extend(self._search_one(f"{keyword} 避雷", limit,
-                                             scrolls=max(2, MAX_SEARCH_SCROLLS // 2)))
+                got = self._search_one(q, want, scrolls=sc)
             except Exception:
-                pass
-        return rank_candidates(pool, limit)
+                continue
+            for c in got:
+                if c["video_id"] not in seen:
+                    seen.add(c["video_id"])
+                    pool.append(c)
+        return pool
+
+    def rank_pool(self, pool: list[dict], limit: int, level: str | None = None) -> dict:
+        """候选池 → 质量闸筛选结果（core.quality.screen_pool 的采集层入口）。
+
+        返回 {kept, picked, urls, level, relaxed, reasons, pool_size}。
+        urls / picked 是首批深采名单（limit 条），kept 是全部达标候选（含候补队列），
+        交给 crawler.tabs.fetch_videos_gated 分批消费——首批就达标时只导航 limit 次。
+        level="deferred" 表示搜索页拿不到点赞，筛选已延后到详情页逐条判定
+        （不猜数、不静默降标准）。"""
+        res = screen_pool(pool, limit, level=level)
+        res["urls"] = [c["url"] for c in res.get("picked") or []]
+        return res
+
+    def search_and_rank(self, keyword: str, limit: int, level: str | None = None) -> list[str]:
+        """搜索 + 质量闸择优，返回要深采的视频地址（向后兼容旧签名）。
+
+        查询角度：原词 → "{原词} 攻略" → "{原词} 避雷"（池子够大就不发多余导航）。
+        需要筛选明细（淘汰了多少、降档到哪档）时改用 rank_pool。"""
+        pool = self.search_pool([keyword, f"{keyword} 攻略", f"{keyword} 避雷"],
+                                pool_size=max(SEARCH_POOL_SIZE, limit * 3))
+        return self.rank_pool(pool, limit, level=level)["urls"]
 
     # ---- 单个视频页：文案 + 标签 + 点赞 + 发布时间 + (可选)口播转写 + 评论 ----
     def fetch_video(self, url: str, max_comments: int = MAX_COMMENTS_PER_VIDEO,
@@ -336,16 +427,27 @@ class DouyinCrawler:
         if item.description:
             item.tags = list(dict.fromkeys(TAG_RE.findall(item.description)))[:15]
 
-        digg = (node.get("statistics") or {}).get("digg_count")
+        stats = node.get("statistics") or {}
+        digg = stats.get("digg_count")
         if isinstance(digg, int) and digg > 0:
             item.like_count = digg
         else:
             like = _wait_any(self.page, SEL_VIDEO_LIKE, timeout=2)
             if like:
                 item.like_count = parse_count(like.text)
+        # 质量指标读全（M6）：以前只读 digg_count，播放量/收藏/分享/评论数/时长白白丢弃
+        # （comment_count 字段甚至定义了却从未赋值），质量闸与热度计算都缺原料
+        item.play_count = _stat_int(stats.get("play_count"))
+        item.comment_count = _stat_int(stats.get("comment_count"))
+        item.collect_count = _stat_int(stats.get("collect_count"))
+        item.share_count = _stat_int(stats.get("share_count"))
+        item.duration = _stat_duration(node.get("duration"))
+        self._probe_stats_once(stats, node)
 
         item.publish_time = timestamp_to_date(node.get("create_time")) or self._extract_publish_time()
         item.comments = self._fetch_comments(max_comments) if collect_comments else []
+        # 采回即打分：候补队列与排序直接用，调用方不必再算一遍
+        item.quality_score = video_quality_score(item)
 
         if with_asr:
             # 只捕获媒体地址（音视频分离：需挑含音轨的），转写在采集结束后并行做；
@@ -356,6 +458,23 @@ class DouyinCrawler:
         except Exception:
             pass
         return item
+
+    def _probe_stats_once(self, stats: dict, node: dict) -> None:
+        """首次采集时如实打印详情接口的可用质量字段（每进程一次）。
+
+        实跑已确认 statistics 下发 play_count/collect_count/share_count/comment_count 与
+        节点级 duration；保留这个探测是因为平台改版时字段可能消失，届时日志会直接
+        告知哪个维度没了（字段缺失时质量闸自动对该维度不生效，不阻断采集）。"""
+        if DouyinCrawler._stats_probed:
+            return
+        DouyinCrawler._stats_probed = True
+        try:
+            keys = sorted(k for k, v in (stats or {}).items() if isinstance(v, (int, str)))
+            extra = [k for k in ("duration", "create_time", "aweme_type") if k in (node or {})]
+            print(f"[质量闸探测] statistics 可用字段：{keys or '（空）'}；节点级：{extra or '（空）'}"
+                  f"｜播放量 play_count：{'有' if 'play_count' in (stats or {}) else '无（该维度自动不加分，不猜数）'}")
+        except Exception:
+            pass
 
     def _drain_detail(self, timeout: float = DETAIL_WAIT) -> dict:
         """在监听包里找视频详情包，返回其 JSON 体（找不到给空 dict）。

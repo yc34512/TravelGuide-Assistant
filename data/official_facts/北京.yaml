@@ -1,0 +1,46 @@
+# 官方事实种子层（PRD §6.4 / F-C1）——人工 / 社区策展的"一处能查到"的硬事实。
+# 原则：只填有官方出处、可复核的字段；无把握一律留空 → 下游标"待核实"，严禁编造数字。
+# 每条尽量带 source_url 与 valid_until（过期自动降权、不作亮点，见 R9 / official_expired）。
+# 贡献方式见 CONTRIBUTING「如何补城市官方事实」。价格档以旺季成人参考价为示意，出发前以官方为准。
+city: 北京
+spots:
+  故宫博物院:
+    aliases: ["故宫", "紫禁城"]
+    price: 60
+    price_note: "旺季（4.1-10.31）成人票，珍宝馆 / 钟表馆各另收 10 元"
+    open_hours: "08:30-17:00（4.1-10.31），16:10 停止入场"
+    close_day: "周一"
+    booking_rule: "需提前在网上实名预约，现场不售票"
+    valid_until: "2026-12-31"
+    source_url: "https://www.dpm.org.cn/"
+  中国国家博物馆:
+    aliases: ["国博", "国家博物馆"]
+    price: 0
+    price_note: "免费，需实名预约，凭身份证入馆"
+    open_hours: "09:00-17:00"
+    close_day: "周一"
+    booking_rule: "提前在网上预约分时段入馆"
+    valid_until: "2026-12-31"
+    source_url: "http://www.chnmuseum.cn/"
+  北京环球度假区:
+    aliases: ["环球影城", "环球"]
+    price: 638
+    price_note: "淡季单日门票参考价，旺季浮动、以官方日历票为准"
+    open_hours: "09:30-20:00（以当日官方公告为准）"
+    booking_rule: "官方 App / 官网按日期购票"
+    valid_until: "2026-12-31"
+    source_url: "https://www.universalbeijingresort.com/"
+  798艺术区:
+    aliases: ["798"]
+    price: 0
+    price_note: "园区免费开放，个别展馆 / 展览另收费"
+    open_hours: "全天（各展馆营业时间不一，多为 10:00-18:00）"
+    valid_until: "2026-12-31"
+    source_url: ""
+  颐和园:
+    price: 30
+    price_note: "旺季大门门票，佛香阁 / 苏州街等景点联票另计"
+    open_hours: "06:30-18:00（旺季）"
+    booking_rule: "现场或线上购票"
+    valid_until: "2026-12-31"
+    source_url: "https://www.summerpalace.net.cn/"

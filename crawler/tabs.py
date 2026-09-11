@@ -13,8 +13,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from config import CRAWL_TABS, MAX_COMMENTS_PER_VIDEO
+from config import (CRAWL_TABS, MAX_COMMENTS_PER_VIDEO, MAX_DETAIL_FETCH,
+                    MIN_KEEP_BEFORE_RELAX, QUALITY_LEVEL)
 from core.rate_limiter import global_limiter
+from core.quality import gate_and_backfill, passes_gate, relax_level
 from crawler import base
 
 FETCH_RETRIES = 2      # 单条视频采集失败自动重试次数（页面渲染/网络偶发抖动很常见）
@@ -123,3 +125,108 @@ def fetch_videos(page, urls, *, comments: int = MAX_COMMENTS_PER_VIDEO, asr: boo
     finally:
         close_tabs(tabs, page)
     return [(i, out_items[i], out_errs[i]) for i in range(total)]
+
+
+def fetch_videos_gated(page, candidates, target_n: int, *,
+                       comments: int = MAX_COMMENTS_PER_VIDEO, asr: bool = False,
+                       level: str | None = None, workers: int | None = None,
+                       log=None, cancelled=None, on_error=None,
+                       max_fetch: int | None = None) -> dict:
+    """质量闸驱动的分批候补补采（M6-A 核心）：深采一批 → 校验 → 不达标的从候补顶上。
+
+    为何分批而不是一次全采：搜索页能解析到点赞时，质量筛选已在那里完成，
+    这里第一批就达标，详情页导航次数与从前完全相同（最好情况零额外成本）；
+    只有搜索页信息不足（level=deferred）时才靠候补逐条筛。
+
+    风控红线：max_fetch（默认 config.MAX_DETAIL_FETCH）是详情页导航硬上限。抖音是
+    会话级风控，连续 5~6 次视频页导航后弹 3D 验证码、之后整个会话返回 0 结果，
+    所以宁可少采也不越界。达标不足时只对**已采回**的数据降档重判（零额外导航），
+    不会为了凑数去撞风控。
+
+    candidates：已按质量分排序的候选字典列表（DouyinCrawler.rank_pool 的 kept）。
+    返回 {items, rejected, reasons, fetched, capped, exhausted, relaxed, level, note}。
+    """
+    base.require_ugc_source()   # 开源合规闸门：UGC 源默认关闭
+    max_fetch = max_fetch or MAX_DETAIL_FETCH
+    cands = [c for c in (candidates or []) if c.get("url")]
+    target_n = max(1, int(target_n or 1))
+    # 无候选可采：搜索阶段就没结果（验证码风控/关键词过冷/选择器失效）。
+    # 如实说明原因，不报成"门槛过严"也不报成"候选池用尽"（两者都会带偏排查方向）
+    if not cands:
+        return {"items": [], "rejected": [], "reasons": {}, "fetched": 0,
+                "capped": False, "exhausted": False, "relaxed": [],
+                "level": level if level else QUALITY_LEVEL,
+                "note": "无候选可采：搜索阶段未返回结果（验证码风控/关键词过冷/选择器失效），"
+                        "不是门槛过严，本次未消耗任何详情页导航额度"}
+    kept: list = []
+    rejected: list = []
+    reasons: dict = {}
+    cursor = fetched = 0
+    capped = exhausted = False
+    lv = level if level else QUALITY_LEVEL
+
+    while len(kept) < target_n:
+        if cancelled and cancelled():
+            break
+        room = max_fetch - fetched
+        if room <= 0:
+            capped = True
+            break
+        if cursor >= len(cands):
+            exhausted = True
+            break
+        batch = cands[cursor:cursor + min(target_n - len(kept), room)]
+        cursor += len(batch)
+        urls = [c["url"] for c in batch]
+        fetched += len(urls)
+        got = []
+        for _i, item, _err in fetch_videos(page, urls, comments=comments, asr=asr,
+                                          workers=workers, log=log, cancelled=cancelled,
+                                          on_error=on_error):
+            if item is not None:
+                got.append(item)
+        res = gate_and_backfill(batch, got, target_n, level=lv)
+        kept.extend(res["kept"])
+        rejected.extend(res["rejected"])
+        for k, v in (res["reasons"] or {}).items():
+            reasons[k] = reasons.get(k, 0) + v
+        lv = res["level"]
+        if not got:
+            # 整批一条都没采到：多半是风控或选择器失效，再采只是白白消耗导航额度
+            break
+
+    # 达标不足且无法再采：对已采回但被淘汰的视频按下一档重判（数据已在手里，
+    # 降档零成本零风险）；降档事实进 note，由调用方写日志与报告，不静默放宽标准
+    relaxed: list[str] = []
+    while len(kept) < min(MIN_KEEP_BEFORE_RELAX, target_n) and rejected:
+        nxt = relax_level(lv)
+        if not nxt:
+            break
+        relaxed.append(f"{lv}→{nxt}")
+        lv = nxt
+        still = []
+        for it in rejected:
+            if passes_gate(it, lv):
+                it.quality_reject = ""
+                kept.append(it)
+            else:
+                still.append(it)
+        rejected = still
+        reasons = {}
+        for it in rejected:
+            k = getattr(it, "quality_reject", "") or "未达标"
+            reasons[k] = reasons.get(k, 0) + 1
+
+    kept.sort(key=lambda x: (getattr(x, "quality_score", None) or 0.0), reverse=True)
+    kept = kept[:target_n]
+    likes = [it.like_count for it in kept if isinstance(it.like_count, int) and it.like_count > 0]
+    note = (f"详情页导航 {fetched} 次 → 达标 {len(kept)}/{target_n} 条"
+            + (f"；淘汰 " + "、".join(f"{k} {v}" for k, v in sorted(reasons.items())) if reasons else "")
+            + (f"；素材不足已降档（{'，'.join(relaxed)}），未静默放宽标准" if relaxed else "")
+            + (f"；门槛档 {lv}" if lv else "")
+            + (f"；保留视频点赞 {min(likes)}~{max(likes)}" if likes else "")
+            + ("；已触详情页导航硬上限（防会话级风控，不再多采）" if capped else "")
+            + ("；候选池已用尽" if exhausted else ""))
+    return {"items": kept, "rejected": rejected, "reasons": reasons, "fetched": fetched,
+            "capped": capped, "exhausted": exhausted, "relaxed": relaxed,
+            "level": lv, "note": note}

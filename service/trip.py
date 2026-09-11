@@ -1,45 +1,59 @@
 """行程规划任务编排：圈定景点 -> 逐点调研 -> 景点档案 -> 通行矩阵 -> 规划生成 -> 渲染。
 
 P0 升级：混合候选验证（大模型圈定 -> 抖音验证采集 -> 交叉验证筛选）、
-营销号过滤、热度榜、避坑专题（附评论原文引用）、预算控制、HTML 可视化输出。
+营销号过滤、热度榜、避坑专题（附评论原文引用）、HTML 可视化输出。
+M6-C 升级：先读高赞攻略视频的逐日行程编排（视频行程草案）-> LLM 审核增删改 ->
+草案点位逐个验证采集 -> 规划以草案为主干。预算估算整体退役（估算金额不可靠，
+预算交由用户自行考虑），报告只保留调研到的确定事实价。
 复用 research 的任务框架（JOBS/取消/终态落库/历史查询）与采集管道；
 行程任务与攻略任务共享 _CRAWL_LOCK（全局只允许一个浏览器采集）。
 为控制总时长，行程内的逐点调研用 fast 档且关闭缺口补全与 ASR。
 """
+import os
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from pathlib import Path
 
-from config import KB_TTL_DAYS, REPORT_DIR
+from config import (CITY_GUIDE_ENABLED, CITY_GUIDE_TTL_DAYS, CITY_GUIDE_VIDEOS,
+                    KB_TTL_DAYS, REPORT_DIR)
 from core import geo, knowledge
+from core.llm import usage_note
+from core.official_facts import load_city_facts
 from pipeline.candidates import (
     VERIFY_MAX,
     candidate_foods,
+    draft_spot_names,
+    empty_guide_knowledge,
+    extract_guide_knowledge,
     generate_candidates,
     is_marketing,
+    review_guide_itinerary,
     select_verify_candidates,
     verify_candidates,
 )
 from pipeline.extract import extract_points
 from pipeline.heat import heat_index, pitfall_digest, sentiment_trend
 from pipeline.verify import annotate_confidence
-from pipeline.decision import build_decisions
-from pipeline.qc import finalize, run_quality_gate
+from pipeline.decision import (apply_attribution_check, build_decisions, build_trip_plan,
+                               spot_evidence)
+from pipeline.qc import apply_trip_plan_checks, finalize, run_quality_gate
 from pipeline.planner import (
-    build_budget_summary,
+    build_legs,
+    build_overview,
     build_review_digest,
     build_spot_profile,
     candidate_spots,
+    day_weekdays_from,
     empty_digest,
     empty_profile,
     plan_itinerary,
-    render_trip,
-    render_trip_html,
     transport_hints,
 )
-from crawler.base import SourceDisabled
+from pipeline.trip_render import render_html as render_tp_html, render_markdown as render_tp_md
+from crawler.base import SourceDisabled, douyin_enabled
 from service.research import (
     JOBS,
     _CRAWL_LOCK,
@@ -54,18 +68,24 @@ TRIP_SPOT_LIMIT = 5      # 逐点调研按 fast 档（候选验证采集同样�
 TRIP_SPOT_COMMENTS = 100
 MAX_SPOTS_PER_DAY = 3    # 候选景点上限 = 天数 × 3（简单路径）
 MIN_USABLE_SPOTS = 2     # 低于此数的可用调研结果无法排行程
-TRIP_FOOD_LIMIT = 3      # 餐厅调研数上限（午/晚餐推荐用，成本闸）
+TRIP_FOOD_LIMIT = 3      # 餐厅调研数上限（美食推荐榜用，不排入时间线，成本闸）
+# F-F2 美食榜样本下限（可 env 调高；配额取与本限的较大者，默认不增采集成本）
+FOOD_RANK_MIN_SAMPLES = max(1, int(os.getenv("FOOD_SAMPLE_MIN", "3")))
 QC_REPAIR_ROUNDS = 1     # 质量门禁不达标时的回炉轮次上限（F5.2；每轮多一次规划 LLM 调用，成本敏感故设 1）
 
 
 _UGC_WARNED = False
 
 
-def _try_crawl(name: str, job_id: str | None, log) -> list:
-    """现场采集的安全阀：UGC 源未启用（kernel-only）时不抛错，返回空并提示走缓存/LLM 基线。"""
+def _try_crawl(name: str, job_id: str | None, log, limit: int = TRIP_SPOT_LIMIT,
+               queries: list[str] | None = None) -> list:
+    """现场采集的安全阀：UGC 源未启用（kernel-only）时不抛错，返回空并提示走缓存/LLM 基线。
+
+    limit/queries（M6）：采集条数与自定义搜索查询矩阵——城市攻略层用攻略词矩阵，
+    逐点验证用默认（景点名 + 攻略 + 避雷 三角度）。"""
     global _UGC_WARNED
     try:
-        return _crawl(name, TRIP_SPOT_LIMIT, TRIP_SPOT_COMMENTS, False, job_id, log)
+        return _crawl(name, limit, TRIP_SPOT_COMMENTS, False, job_id, log, queries=queries)
     except SourceDisabled:
         if not _UGC_WARNED:
             _UGC_WARNED = True
@@ -74,9 +94,107 @@ def _try_crawl(name: str, job_id: str | None, log) -> list:
         return []
 
 
+# 天数中文表达（拼"三天两夜"这类抖音上真实存在的高信息密度搜索词）
+_CN_NUM = {1: "一", 2: "两", 3: "三", 4: "四", 5: "五", 6: "六", 7: "七"}
+
+
+def _city_guide_queries(city: str, days: int) -> list[str]:
+    """城市攻略层的搜索查询矩阵（纯函数，独立可测）。
+
+    用户要去某地旅游，抖音上真正有信息密度的是"{城市}旅游攻略""{城市}三天两夜"
+    这类综合攻略视频（含串线/住宿/取舍/避雷），而不是逐个景点名搜出来的打卡短视频。"""
+    c = str(city or "").strip()
+    d = max(1, int(days or 1))
+    nights = max(1, d - 1)
+    cn_d = _CN_NUM.get(d, str(d))
+    cn_n = _CN_NUM.get(nights, str(nights))
+    return [f"{c}旅游攻略", f"{c}{cn_d}天{cn_n}夜", f"{c}旅游避雷", f"{c}自由行攻略"]
+
+
+def _city_guide_layer(city: str, days: int, job_id: str | None, log) -> dict:
+    """第 0 阶段：城市攻略层（M6-B）。返回 extract_guide_knowledge 结构（失败给空骨架）。
+
+    缓存优先：同城保鲜期内采过就直接复用已提炼结果（免采集、也免重复调 LLM）。
+    本层是增强项不是必需项：UGC 源未启用、采集失败、提炼为空都返回空骨架，
+    调用方自动降级为纯 LLM 圈定——绝不因它失败而阻断行程生成。"""
+    if not CITY_GUIDE_ENABLED:
+        return empty_guide_knowledge()
+    try:
+        cached = knowledge.find_guide(city, CITY_GUIDE_TTL_DAYS)
+    except Exception as e:
+        cached = None
+        log(f"攻略层缓存查询失败（{e}），本轮现采")
+    if cached and cached.get("guide"):
+        g = cached["guide"]
+        log(f"城市攻略层：缓存命中（{cached.get('crawled_at')}，{cached.get('video_count')} 条高赞攻略）——"
+            f"实证候选 {len(g.get('guide_candidates') or [])} 个 / 编排建议 {len(g.get('plan_hints') or [])} 条")
+        return g
+    if not douyin_enabled():
+        log("城市攻略层跳过：UGC 源未启用（kernel-only），圈定与排线走 LLM 基线")
+        return empty_guide_knowledge()
+    queries = _city_guide_queries(city, days)
+    log(f"城市攻略层：采集高赞综合攻略（{'／'.join(queries)}）")
+    try:
+        items = _try_crawl(f"{city}旅游攻略", job_id, log,
+                           limit=CITY_GUIDE_VIDEOS, queries=queries)
+    except Cancelled:
+        raise
+    except Exception as e:
+        log(f"城市攻略层采集失败（{e}），降级为纯 LLM 圈定")
+        return empty_guide_knowledge()
+    if not items:
+        log("城市攻略层未采到内容（可能触发风控、未登录或该城攻略视频稀少），降级为纯 LLM 圈定")
+        return empty_guide_knowledge()
+    guide = extract_guide_knowledge(items, city=city, days=days)
+    gc = guide.get("guide_candidates") or []
+    hints = guide.get("plan_hints") or []
+    if not gc and not hints:
+        log("城市攻略层提炼为空（素材与攻略无关或 LLM 失败），降级为纯 LLM 圈定")
+        return guide
+    log(f"城市攻略层：{len(items)} 条高赞攻略 → 实证候选 {len(gc)} 个"
+        f"（{'、'.join(m['name'] for m in gc[:8])}{'…' if len(gc) > 8 else ''}）"
+        f"｜编排建议 {len(hints)} 条"
+        + (f"｜建议天数 {guide['days_advice']}" if guide.get("days_advice") else "")
+        + (f"｜住宿片区 {guide['stay_advice']}" if guide.get("stay_advice") else ""))
+    # 落盘 + 登记：同城下次规划直接吃缓存（编排知识变化慢，TTL 比景点长）
+    try:
+        raw_path = save_raw(f"{city}城市攻略", items)
+        knowledge.record_guide(city, raw_path, len(items), guide)
+        log(f"城市攻略层已入库：{Path(raw_path).name}（保鲜 {CITY_GUIDE_TTL_DAYS} 天）")
+    except Exception as e:
+        log(f"城市攻略层入库失败（不影响本次结果）：{e}")
+    return guide
+
+
+def _guide_note(guide: dict, draft: dict | None = None) -> str:
+    """攻略层的来源说明（进报告概览，让用户知道圈定与排线的实证依据从哪来）。
+
+    无攻略层产出时返回空串（渲染层不输出该行，零回归）。纯函数，独立可测。"""
+    g = guide or {}
+    gc = g.get("guide_candidates") or []
+    hints = g.get("plan_hints") or []
+    if not gc and not hints:
+        return ""
+    n = g.get("videos") or 0
+    bits = [f"城市攻略层 {n} 条高赞综合攻略视频" if n else "城市攻略层"]
+    if gc:
+        top = "、".join(m["name"] for m in gc[:6])
+        bits.append(f"实证候选 {len(gc)} 个（{top}{'…' if len(gc) > 6 else ''}）")
+    if hints:
+        bits.append(f"编排建议 {len(hints)} 条")
+    n_its = len(g.get("guide_itineraries") or [])
+    if n_its:
+        n_pts = len(draft_spot_names(draft)) if draft else 0
+        bits.append(f"视频行程草案 {n_its} 条"
+                    + (f"（审核后 {len(draft['days'])} 天 / {n_pts} 个点位，作为排线主干）" if n_pts else ""))
+    if g.get("stay_advice"):
+        bits.append(f"推荐住宿片区 {g['stay_advice']}")
+    return "；".join(bits)
+
+
 def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
-               preferences: str = "", budget: float | None = None,
-               preference_mode: str = "均衡") -> str:
+               preferences: str = "",
+               preference_mode: str = "均衡", start_date: str | None = None) -> str:
     job_id = uuid.uuid4().hex[:12]
     with _LOCK:
         JOBS[job_id] = {
@@ -94,7 +212,7 @@ def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
         }
     threading.Thread(
         target=_run_trip,
-        args=(job_id, city, days, hotel, spots, preferences, budget, preference_mode),
+        args=(job_id, city, days, hotel, spots, preferences, preference_mode, start_date),
         daemon=True,
     ).start()
     return job_id
@@ -102,7 +220,8 @@ def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
 
 def _run_trip(job_id: str, city: str, days: int, hotel: str,
               user_spots: list[str] | None, preferences: str,
-              budget: float | None = None, preference_mode: str = "均衡") -> None:
+              preference_mode: str = "均衡",
+              start_date: str | None = None) -> None:
     job = JOBS[job_id]
     started = time.time()
 
@@ -122,6 +241,40 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             log(f"任务档案落库失败（不影响结果）：{e}")
 
     try:
+        # 0) 城市攻略层（M6-B）：先搜"{城市}旅游攻略／N天N夜／避雷"这类综合攻略视频，
+        #    从中提炼"真实被反复提到的点"与编排知识（串线/住宿片区/可跳过项）。
+        #    从前圈定完全靠 LLM 凭空想象、排线只靠模型常识，这是报告"泛泛而谈"的根源。
+        #    本层是增强项：未启用 UGC 源、采集失败或提炼为空都自动降级为纯 LLM 圈定。
+        job["stage"] = "城市攻略层"
+        guide = _city_guide_layer(city, days, job_id, log)
+        guide_hints = [str(h).strip() for h in (guide.get("plan_hints") or []) if str(h).strip()]
+        if guide.get("stay_advice") and not hotel:
+            # 用户没给住宿时，把攻略推荐的片区作为排线参考（不伪造酒店名，只写进提示）
+            guide_hints.append(f"未指定住宿：攻略推荐住在{guide['stay_advice']}片区，按此就近排线")
+        if _cancelled():
+            raise Cancelled()
+
+        # 0.5) 视频行程草案（M6-C）：先看高赞攻略视频“实际是怎么排的”（逐日编排），
+        #      由 LLM 审核合并/对齐用户天数/判断增删改，拿到草案后再把点位逐个丢去验证采集，
+        #      最终规划以草案为主干——用户踩过的坑不重踩（无草案素材时自动跳过，零回归）。
+        job["stage"] = "审核行程草案"
+        draft_plan: dict = {}
+        if guide.get("guide_itineraries"):
+            draft_plan = review_guide_itinerary(city, days, preferences, guide)
+            dn = draft_spot_names(draft_plan)
+            if dn:
+                log(f"视频行程草案：{len(guide['guide_itineraries'])} 条视频编排 → 审核后 "
+                    f"{len(draft_plan['days'])} 天 / {len(dn)} 个点位"
+                    f"（{'、'.join(dn[:8])}{'…' if len(dn) > 8 else ''}）")
+                if draft_plan.get("notes"):
+                    log(f"  审核说明：{draft_plan['notes']}")
+            else:
+                draft_plan = {}
+                log("视频行程草案审核未产出有效编排，本次不注草案（零回归）")
+        draft_names = draft_spot_names(draft_plan)
+        if _cancelled():
+            raise Cancelled()
+
         # 1) 圈定候选：用户指定 > 混合候选验证（未指定清单时）> 简单圈定兜底
         job["stage"] = "圈定景点"
         categories: dict[str, str] = {}
@@ -133,18 +286,23 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             log(f"使用用户指定景点清单：{'、'.join(spots)}")
             food_names: list[str] = []
             try:
-                food_names = candidate_foods(city, TRIP_FOOD_LIMIT)
+                food_names = candidate_foods(city, max(TRIP_FOOD_LIMIT, FOOD_RANK_MIN_SAMPLES))
                 if food_names:
-                    log(f"美食候选：{'、'.join(food_names)}（将单独调研供午/晚餐推荐）")
+                    log(f"美食候选：{'、'.join(food_names)}（将单独调研供美食推荐榜）")
             except Exception as e:
-                log(f"美食候选圈定失败（{e}），行程不含餐厅推荐")
+                log(f"美食候选圈定失败（{e}），美食榜将缺样本")
             food_pre: dict[str, tuple[list, list[dict]]] = {}
         else:
             spots = []
             try:
-                cands = generate_candidates(city, days, preferences)
-                log(f"大模型圈定 {len(cands)} 个候选，按类别配额公平挑选验证（上限 {VERIFY_MAX} 个）")
-                verify_cands = select_verify_candidates(cands, VERIFY_MAX)
+                cands = generate_candidates(city, days, preferences, guide_evidence=guide,
+                                            draft_plan=draft_plan or None)
+                log(f"圈定 {len(cands)} 个候选"
+                    + (f"（以 {len(guide.get('guide_candidates') or [])} 个攻略实证点为底稿）"
+                       if guide.get("guide_candidates") else "（无攻略层实证，纯 LLM 基线）")
+                    + (f"，草案 {len(draft_names)} 个点位优先验证" if draft_names else "")
+                    + f"；按类别配额公平挑选验证（上限 {VERIFY_MAX} 个）")
+                verify_cands = select_verify_candidates(cands, VERIFY_MAX, priority=draft_names)
                 vstats: dict[str, dict] = {}
                 researched: dict[str, tuple[list, list[dict]]] = {}
                 for ci, cand in enumerate(verify_cands, 1):
@@ -206,7 +364,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 # 景点优先（行程骨架）；美食候选分流去餐厅调研线（不进景点排序）
                 kept.sort(key=lambda n: 0 if categories.get(n) == "景点" else 1)
                 pre = {n: researched[n] for n in kept if categories.get(n) != "美食"}
-                food_names = [n for n in kept if categories.get(n) == "美食"][:TRIP_FOOD_LIMIT]
+                food_names = [n for n in kept if categories.get(n) == "美食"][:max(TRIP_FOOD_LIMIT, FOOD_RANK_MIN_SAMPLES)]
                 food_pre = {n: researched[n] for n in food_names}
                 log(f"保留 {len(kept)} 个优质候选（景点/体验 {len(pre)} + 餐厅 {len(food_pre)}）：{'、'.join(kept)}")
             except Cancelled:
@@ -295,9 +453,9 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             )
         food_points, food_sources, food_items = _research(food_names, food_pre, "餐厅 ")
         if food_points:
-            log(f"餐厅调研完成：{len(food_points)}/{len(food_names)} 家可用于午/晚餐推荐")
+            log(f"餐厅调研完成：{len(food_points)}/{len(food_names)} 家，供美食推荐榜（不排入时间线）")
         else:
-            log("无可用餐厅调研结果，行程不含餐厅推荐")
+            log("无可用餐厅调研结果，美食榜将缺样本（不编造餐厅）")
         all_items_for_heat = {**spot_items, **food_items}
 
         # 3) 档案 + 真实评价摘要：景点与餐厅同等待遇（同池 3 路并发）
@@ -381,14 +539,13 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if _cancelled():
             raise Cancelled()
 
-        # 5) 规划生成（预算约束 + 每日午/晚餐餐厅推荐）
-        job["stage"] = "生成规划"
-        plan = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
-                              budget, preference_mode, foods=food_profiles or None)
-        if not plan["days"]:
-            raise RuntimeError("规划生成失败：未产出有效行程，请重试或减少天数/景点")
+        # 4.5) F-A3 主体归属校验：剔除挂错地点、实为描述别处的要点（串档），宁可漏剔不误删
+        misattr = apply_attribution_check(profiles)
+        if misattr:
+            n_rm = sum(len(v) for v in misattr.values())
+            log(f"F-A3 归属校验：剔除 {n_rm} 条疑似描述别处的条目（涉及 {'、'.join(list(misattr)[:4])}）")
 
-        # 数据分析中与 plan 无关的先算：避坑专题 + 热度榜（回炉改 plan 也不影响这两项）
+        # 与 plan 无关的先算（F-A4：热度/证据在规划前就绪并喂给规划器）：避坑专题 + 热度榜
         all_points = [p for pts in spot_points.values() for p in pts] \
             + [p for pts in food_points.values() for p in pts]
         pitfall = pitfall_digest(all_points)
@@ -401,11 +558,40 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 h["sentiment"] = sentiment_trend([c for it in items for c in it.comments])["trend"]
                 heat_rows.append(h)
         heat_rows.sort(key=lambda r: r["score"], reverse=True)
+        # 热度+证据摘要喂规划：优先证据强、热度高的点（F-A4）
+        heat_by_name = {h["spot"]: h for h in heat_rows}
+        hs_lines: list[str] = []
+        for name in list(profiles.keys())[:12]:
+            ev = spot_evidence(None, spot_points.get(name, []))
+            h = heat_by_name.get(name)
+            hs_lines.append(
+                f"{name}：证据{ev}｜热度{h['score']:.2f} {h['trend']}" if h
+                else f"{name}：证据{ev}")
+        heat_summary = "\n".join(hs_lines)
+
+        # 5) 规划生成（以视频行程草案为主干；餐饮解耦为美食榜，不排餐厅进时间线）
+        job["stage"] = "生成规划"
+        plan = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
+                              preference_mode, heat_summary=heat_summary,
+                              guide_hints=guide_hints, draft_plan=draft_plan or None)
+        if not plan["days"]:
+            raise RuntimeError("规划生成失败：未产出有效行程，请重试或减少天数/景点")
 
         # 5.5) 统一决策对象 + 质量门禁 + 有限回炉（PRD Epic 5，M1 技术核心）：
         #      生成与裁判分离——门禁是独立确定性规则，不达标带 issues 回炉，仍不达标进已知妥协
         job["stage"] = "质量门禁"
         today = datetime.now().strftime("%Y-%m-%d")
+        # 出发日→每日星期（F-D2）：有则 R3 运行期真校闭馆日，无则 [] 使 R3 退回不判闭馆
+        day_weekdays = day_weekdays_from(start_date, days)
+        if day_weekdays:
+            log(f"出发日 {start_date}：行程各日星期 {'、'.join(day_weekdays)}（R3 将据官方闭馆日校验）")
+
+        # 官方事实层（F-C1 三层降级）：命中种子/高德的点喂决策与门票同源展示；无则留空标"待核实"
+        _of_names = list(profiles) + [str(c.get("name") or "").strip()
+                                      for c in (cands or []) if isinstance(c, dict)]
+        official_map = load_city_facts(city, _of_names, with_amap=geo.available())
+        if official_map:
+            log(f"官方事实层：命中 {len(official_map)} 点（种子/高德），行程门票以官方/同源价展示")
 
         def _build_decs(p: dict) -> list:
             return build_decisions(
@@ -413,14 +599,16 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 profiles=profiles, food_profiles=food_profiles,
                 points_by_spot={**spot_points, **food_points},
                 sources_by_spot={**spot_sources, **food_sources},
-                heat_rows=heat_rows, locs=locs, travel_lines=travel_lines, plan=p)
+                heat_rows=heat_rows, locs=locs, travel_lines=travel_lines,
+                official_facts=official_map, plan=p)
 
         def _gate(p: dict, decs: list):
-            # 预算随 plan 变：门禁用当版 plan 现算预算（纯函数零成本），定稿后再算权威预算
-            bs = build_budget_summary({**profiles, **food_profiles}, p, days, budget)
+            # 时间可行性（R4）与路线闸（R5）随 plan 变：用当版 plan 现算 Leg（纯函数零成本）
+            lg = build_legs(city, hotel, p, locs, travel_lines)
             return run_quality_gate(decisions=decs, plan=p, profiles=profiles, days=days,
-                                    budget_summary=bs, pitfall=pitfall,
-                                    food_profiles=food_profiles, locs=locs, today=today)
+                                    pitfall=pitfall,
+                                    food_profiles=food_profiles, locs=locs, today=today,
+                                    day_weekdays=day_weekdays, legs=lg)
 
         decisions = _build_decs(plan)
         report = _gate(plan, decisions)
@@ -432,8 +620,9 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             fails = "、".join(c.rule_id for c in report.fails)
             log(f"质量门禁 {report.score} 分，{len(report.fails)} 项不达标（{fails}），回炉重排第 {rounds} 轮")
             plan2 = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
-                                   budget, preference_mode, foods=food_profiles or None,
-                                   extra_issues=report.issues)
+                                   preference_mode, extra_issues=report.issues,
+                                   heat_summary=heat_summary,
+                                   guide_hints=guide_hints, draft_plan=draft_plan or None)
             if not plan2["days"]:
                 break
             decs2 = _build_decs(plan2)
@@ -446,24 +635,55 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 break
         finalize(report, repair_rounds=rounds)
 
-        # 预算：以最终 plan 为准重算（餐厅档案的"餐饮人均"一并计入人均基准）
-        budget_summary = build_budget_summary({**profiles, **food_profiles}, plan, days, budget)
-        log(f"预算明细：预估 {budget_summary['total']:.0f} 元"
-            + (f"（用户预算 {budget_summary['total_budget']:.0f}，{budget_summary['status']}）" if budget else "（未设预算）")
-            + f"；避坑 {len(pitfall)} 条；热度榜 {len(heat_rows)} 个；质量分 {report.score}"
-            + (f"；已知妥协 {len(report.unresolved)} 项" if report.unresolved else ""))
+        # 定稿 Leg 汇总（F-D5）：交通方案随最终 plan 重算，供报告"分段交通"与 R4/R5 复用
+        legs = build_legs(city, hotel, plan, locs, travel_lines)
+        log(f"行程定稿：{len(plan.get('days') or [])} 天；避坑 {len(pitfall)} 条；"
+            f"热度榜 {len(heat_rows)} 个；质量分 {report.score}"
+            + (f"；已知妥协 {len(report.unresolved)} 项" if report.unresolved else "")
+            + (f"；排布兜底搬移 {len(plan.get('moved') or [])} 处" if plan.get("moved") else ""))
         if _cancelled():
             raise Cancelled()
 
         # 6) 渲染落盘：Markdown + HTML 可视化双输出（共享同一时间戳文件名）
         job["stage"] = "渲染路书"
         ts = datetime.now()
-        md = render_trip(city, days, hotel, plan, profiles, spot_sources, geo.available(),
-                         budget_summary=budget_summary, pitfall=pitfall, heat=heat_rows,
-                         digests=digests, foods=food_profiles or None,
-                         food_sources=food_sources or None,
-                         preferences=preferences, preference_mode=preference_mode,
-                         user_spots=user_spots, decisions=decisions, quality=report)
+        # M4b-1：决策层产出唯一 TripPlan（§6.11），并据它补判 R11/R12（输出完整性，不入回炉）
+        # M4b-2：呈现快照由编排层用决策层纯函数预先整理（表达层只读，零计算）
+        snap = {
+            "user_spots": user_spots,
+            "overview": build_overview(days, plan, profiles, pitfall, food_profiles or None),
+            "pitfall": pitfall, "digests": digests, "legs": legs,
+            "geo_on": geo.available(),
+            "summary_note": plan.get("summary_note", ""),
+            # 攻略层的实证来源必须对用户可见（圈定与排线的依据到底从哪来）
+            "guide_note": _guide_note(guide, draft_plan),
+            # 重复点位剔除必须对用户可见（不静默改行程）
+            "dedupe_note": (("已剔除重复排入的点位：" + "、".join(plan.get("duplicate_drops") or [])
+                             + "（每个景点全程只排一次）")
+                            if plan.get("duplicate_drops") else ""),
+            # 排布兜底搬移也必须对用户可见（不静默改行程）
+            "rebalance_note": (("已均衡排布：" + "；".join(plan.get("moved") or [])
+                                + "（避免某些天排得太空/太满）")
+                               if plan.get("moved") else ""),
+            "profiles": profiles, "foods": food_profiles or {}, "heat": heat_rows,
+        }
+        trip_plan = build_trip_plan(
+            meta={"city": city, "days": days, "stay": hotel,
+                  "prefs": preferences, "preference_mode": preference_mode,
+                  "start_date": start_date,
+                  "collect_mode": "douyin+cache" if douyin_enabled() else "kernel-only",
+                  "guide_videos": guide.get("videos") or 0,   # 攻略层实证视频数（0=未启用/已降级）
+                  "draft_days": len(draft_plan.get("days") or []),  # 视频行程草案天数（0=无草案）
+                  "generated_at": ts.isoformat(timespec="seconds"),
+                  "facts_cutoff": today, "synthetic": False},
+            decisions=decisions, plan=plan,
+            quality=report, legs=legs, snap=snap,
+            food_min_samples=FOOD_RANK_MIN_SAMPLES,
+            guide=guide)      # 攻略层实证补进 catalog（美食榜排序与详情展示用）
+        apply_trip_plan_checks(report, trip_plan.to_dict())
+        trip_plan.quality = report.to_dict()          # 刷新内嵌质量（含 R11/R12 真判）
+        tp = trip_plan.to_dict()
+        md = render_tp_md(tp)   # 只读渲染：唯一 TripPlan → 0~11 报告 IA（旧 render_trip 已删，双写收敛）
         report_path = REPORT_DIR / f"行程_{city}_{ts:%Y%m%d_%H%M%S}.md"
         report_path.write_text(md, encoding="utf-8")
         # 行程报告无采集档案，单独登记进报告表，网页历史列表才不会遗漏
@@ -474,19 +694,13 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         )
         html_path = report_path.with_suffix(".html")
         try:
-            html_path.write_text(
-                render_trip_html(city, days, hotel, plan, profiles, spot_sources,
-                                 geo.available(), locs=locs, budget_summary=budget_summary,
-                                 pitfall=pitfall, heat=heat_rows, digests=digests,
-                                 foods=food_profiles or None, food_sources=food_sources or None,
-                                 preferences=preferences, preference_mode=preference_mode,
-                                 user_spots=user_spots, decisions=decisions, quality=report),
-                encoding="utf-8",
-            )
+            html_path.write_text(render_tp_html(tp), encoding="utf-8")
             log(f"行程已保存：{report_path.name}（含 HTML 可视化版 {html_path.name}）")
         except Exception as e:
             html_path = None
             log(f"HTML 渲染失败（不影响 Markdown 结果）：{e}")
+        # 成本可见：如实报本次 LLM 消耗，用户可对照百炼控制台「免费额度」页核余量
+        log(usage_note() + "（余量请到百炼控制台「免费额度」页核对，本项目不发联网搜索请求）")
 
         job["result"] = {
             "report_path": str(report_path),
@@ -494,11 +708,12 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             "html_name": html_path.name if html_path else None,
             "markdown": md,
             "cache_hit": False,
-            "budget_summary": budget_summary,
+            "draft_plan": draft_plan,   # 视频行程草案（规划主干，API/前端可直接展示）
             "pitfall_digest": pitfall,
             "heat_rank": heat_rows,
             "quality": report.to_dict(),
             "decision_table": [d.to_row() for d in decisions],
+            "trip_plan": trip_plan.to_dict(),   # §6.11 唯一顶层对象，API/MCP 直接可取
             "stats": {
                 "spots": len(spot_points),
                 "foods": len(food_points),

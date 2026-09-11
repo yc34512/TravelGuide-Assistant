@@ -78,20 +78,20 @@ async def start_research(keyword: str, mode: str = "standard", force: bool = Fal
 @mcp.tool()
 async def plan_trip(city: str, days: int = 2, hotel: str = "",
                     spots: str = "", preferences: str = "",
-                    budget: float = 0, preference_mode: str = "均衡") -> dict:
-    """发起多天行程规划任务：自动圈定候选并经抖音验证筛选、逐个调研、预算控制、按顺路原则排线。
+                    start_date: str = "", preference_mode: str = "均衡") -> dict:
+    """发起多天行程规划任务：先提炼高赞攻略视频的行程草案（主干），再圈定候选并经抖音验证筛选、逐个调研、按顺路原则排线。
 
     city: 目的地城市，如"大同"。days: 出行天数 1~7。hotel: 酒店/住宿位置（用于排线）。
     spots: 可选，指定景点用逗号分隔；留空则自动圈定并验证。preferences: 可选偏好（如"带老人"）。
-    budget: 可选，总预算（元，不含大交通），传入后输出预算明细与超支预警。
+    start_date: 可选，出发日期（YYYY-MM-DD）；传入后校验闭馆日。
     preference_mode: 省钱优先 / 体验优先 / 均衡（默认）。
-    输出含逐日路书、预算明细、避坑专题（附评论原文）、热度榜与 HTML 可视化。
+    输出含逐日路书、避坑专题（附评论原文）、热度榜、美食榜与 HTML 可视化路书；不做预算估算（预算由用户自行考虑）。
     耗时较长：未调研过的景点约 5 分钟/个，调研过的秒级命中缓存。用 get_job_status 轮询。
     """
     body = {"city": city, "days": days, "hotel": hotel, "preferences": preferences,
             "preference_mode": preference_mode}
-    if budget > 0:
-        body["budget"] = budget
+    if start_date.strip():
+        body["start_date"] = start_date.strip()
     if spots.strip():
         body["spots"] = [s.strip() for s in spots.replace("、", ",").split(",") if s.strip()]
     try:

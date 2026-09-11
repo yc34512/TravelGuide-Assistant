@@ -16,6 +16,10 @@ from config import AMAP_API_KEY, AMAP_DAILY_CAP, PROJECT_ROOT
 
 _BASE = "https://restapi.amap.com/v3"
 
+# 交通方案劣化阈值：公交里步行超此米数、或耗时超打车此倍数，就不值得照着走
+TRANSIT_WALK_TOO_FAR = 1000
+TRANSIT_SLOWER_RATIO = 1.6
+
 # 进程内缓存（任务级生命周期足够，无需持久化）
 _geo_cache: dict[tuple[str, str], dict | None] = {}
 _time_cache: dict[tuple[str, str], tuple[int, str] | None] = {}
@@ -117,9 +121,11 @@ def geocode_poi(name: str, city: str) -> dict | None:
 
 
 def poi_detail(name: str, city: str) -> dict | None:
-    """POI 结构化详情（预算/营业信息交叉校验用）：返回 {"rating", "cost", "opentime", "tel"}。
+    """POI 结构化详情：返回 {"rating", "cost", "opentime", "tel"}。
 
-    字段均可为空字符串；无 Key / 未命中 / 异常返回 None，调用方改用评论提取值（标注"评论估算"）。
+    仅供官方事实层补充营业时间（opentime）使用；cost/rating 不作任何价格口径
+    （门票一律走 pick_ticket_price / 官方种子，避免高德人均混入票价）。字段均可为
+    空字符串；无 Key / 未命中 / 异常返回 None。
     """
     if not available():
         return None
@@ -200,17 +206,25 @@ def travel_time(origin_loc: str, dest_loc: str, city: str = "") -> tuple[int, st
 
 
 def _transit_legs(transit: dict) -> str:
-    """把一条公交换乘方案的 segments 拼成'线路名(上车站→下车站, N站)'描述。"""
+    """把一条公交换乘方案的 segments 拼成'线路名(上车站→下车站, N站)'描述。
+
+    站名/站数任一缺失时只少显示缺的那一段，绝不留半截括号：
+    实测高德地铁线路的 via_num_stops 可能为空，旧写法会输出"地铁2号线(春熙路→通惠门, 站)"。"""
     legs = []
     for seg in transit.get("segments") or []:
         bus = seg.get("bus") or {}
         for line in (bus.get("buslines") or [])[:1]:
             name = (line.get("name") or "").split("(")[0].strip()
+            if not name:
+                continue
             dep = (line.get("departure_stop") or {}).get("name") or ""
             arr = (line.get("arrival_stop") or {}).get("name") or ""
-            stops = line.get("via_num_stops") or ""
-            if name:
-                legs.append(f"{name}({dep}→{arr}, {stops}站)" if dep and arr else name)
+            stops = str(line.get("via_num_stops") or "").strip()
+            if not (dep and arr):
+                legs.append(name)                      # 缺站名：只给线路名
+            else:
+                mid = f", {stops}站" if stops else ""    # 缺站数：省略这一段
+                legs.append(f"{name}({dep}→{arr}{mid})")
     return " 换乘 ".join(legs)
 
 
@@ -218,7 +232,9 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
     """两点具体交通方案：公交/地铁线路+站数+票价+时长，并列打车费用与时长。
 
     返回如 "公交约42分钟·2元：603路(鼓楼站→云冈石窟站, 12站)，含步行约800米；打车约30分钟·约35元"；
-    1.5 公里内给步行方案（不附打车）；无 Key / 全部查询失败返回 None（调用方降级）。
+    1.5 公里内只给步行（不附打车）；1.5~3 公里并列给步行（这个距离公交换乘往往比走路还慢）；
+    公交方案劣化（步行段过长或耗时远超打车）时如实提醒，不让用户照着绕路；
+    无 Key / 全部查询失败返回 None（调用方降级）。
     """
     if not available():
         return None
@@ -228,6 +244,9 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
     parts: list[str] = []
     d = distance_km(origin_loc, dest_loc)
     walk_range = d is not None and d < 1.5
+    transit_walk = 0        # 公交方案里的步行米数（劣化判定用）
+    transit_mins = 0
+    taxi_mins = 0
     try:
         if walk_range:
             data = _amap_get("/direction/walking",
@@ -256,7 +275,22 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
                 walk = str(t.get("walking_distance") or "").strip()
                 if walk:
                     head += f"，含步行约{walk}米"
+                    try:
+                        transit_walk = int(float(walk))
+                    except (TypeError, ValueError):
+                        transit_walk = 0
+                transit_mins = mins
                 parts.append(head)
+            # 1.5~3 公里：实测高德会给"3 次地铁换乘 + 步行 1289 米 + 46 分钟"这种方案，
+            # 并列给出步行供用户自选（多一次调用，在日配额护栏内）
+            if d is not None and d < 3.0:
+                wdata = _amap_get("/direction/walking",
+                                  {"origin": origin_loc, "destination": dest_loc})
+                wpaths = ((wdata or {}).get("route") or {}).get("paths") or []
+                if wdata and wdata.get("status") == "1" and wpaths:
+                    wmins = max(1, round(int(wpaths[0]["duration"]) / 60))
+                    wdist = round(int(wpaths[0].get("distance") or 0))
+                    parts.append(f"步行约{wmins}分钟（约{wdist}米）")
         # 打车估算（driving 路线含 taxi_cost）：步行圈外与公交并列给出，用户二选一
         if not walk_range:
             data = _amap_get("/direction/driving", {
@@ -266,6 +300,7 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
             if data and data.get("status") == "1" and paths:
                 mins = max(1, round(int(paths[0].get("duration") or 0) / 60))
                 txt = f"打车约{mins}分钟"
+                taxi_mins = mins
                 try:
                     taxi = float((data.get("route") or {}).get("taxi_cost") or 0)
                     if taxi > 0:
@@ -275,6 +310,10 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
                 parts.append(txt)
     except Exception:
         parts = []
+    # 方案劣化如实提醒：公交步行段过长、或耗时远超打车时，别让用户照着绕路
+    if parts and (transit_walk > TRANSIT_WALK_TOO_FAR
+                  or (taxi_mins and transit_mins > taxi_mins * TRANSIT_SLOWER_RATIO)):
+        parts.append("⚠️ 公交换乘与步行偏多，此距离建议直接打车或步行")
     out = "；".join(parts) or None
     _route_cache[key] = out
     return out
