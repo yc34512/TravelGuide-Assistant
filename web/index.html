@@ -1373,15 +1373,42 @@ function renderHistory() {
     currentTab === 'trip' ? (r.keyword || '').startsWith('行程')
     : currentTab === 'research' ? !(r.keyword || '').startsWith('行程')
     : false);
-  $('hist').innerHTML = rows.map(r =>
-    `<li><span class="kw" onclick="viewReport('${encodeURIComponent(r.report_path)}')">${r.keyword}</span>` +
-    `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
-    (r.report_path.endsWith('.md') && r.keyword.startsWith('行程')
-      ? `<a class="mini-btn" style="text-decoration:none; margin-right:6px;" target="_blank" href="/api/reports/download?name=${encodeURIComponent(r.report_path.replace(/\.md$/, '.html'))}">📊 可视化</a>`
-      : '') +
-    `<a class="mini-btn" download href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">下载</a></li>`
-  ).join('');
+  $('hist').innerHTML = rows.map(r => {
+    // 行程报告的默认"读"入口给新版路书（HTML）：Markdown 是工程留档，按设计
+    // 保留质量分卡/选点决策表/榜单，拿它当默认阅读视图与"去工程化"定位冲突。
+    // 攻略报告没有 HTML 版本，仍走站内 Markdown 渲染。
+    const isTrip = r.report_path.endsWith('.md') && (r.keyword || '').startsWith('行程');
+    const open = isTrip
+      ? `openRoadbook('${encodeURIComponent(r.report_path)}')`
+      : `viewReport('${encodeURIComponent(r.report_path)}')`;
+    return `<li><span class="kw" onclick="${open}">${r.keyword}</span>` +
+      `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
+      (isTrip
+        ? `<a class="mini-btn" style="text-decoration:none; margin-right:6px;" target="_blank" href="/api/reports/download?name=${encodeURIComponent(r.report_path.replace(/\.md$/, '.html'))}">📊 路书</a>` +
+          `<a class="mini-btn" download title="工程留档：含质量分卡 / 选点决策表 / 榜单" style="margin-right:6px;" href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">📄 文本</a>`
+        : `<a class="mini-btn" download href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">下载</a>`) +
+      `</li>`;
+  }).join('');
   $('history').classList.toggle('hidden', !rows.length);
+}
+
+// 行程路书：真正的阅读体验在 HTML（杂志排版 + 行程全景图 + 详情弹层），
+// 直接开新标签页看全文；同时把追问上下文指向这份报告，回到站内还能接着问。
+// 早期报告只有 Markdown 留档（HTML 路书是后加的），先探测一次再决定，避免开空页。
+async function openRoadbook(name) {
+  const md = decodeURIComponent(name);
+  outputTab = currentTab;
+  setAskCtx({ report_name: md });   // 让追问仍能反查到这份报告的档案
+  const url = '/api/reports/download?name='
+    + encodeURIComponent(md.replace(/\.md$/, '.html'));
+  try {
+    const probe = await fetch(url, { method: 'HEAD' });
+    if (probe.ok) {
+      const win = window.open(url, '_blank');
+      if (win) return;              // 被弹窗拦截时继续往后退化
+    }
+  } catch (e) { /* 探测失败按缺失处理 */ }
+  viewReport(name);                 // 退化：站内 Markdown 视图，至少内容不丢
 }
 
 async function viewReport(name) {
