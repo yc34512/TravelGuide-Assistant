@@ -4211,5 +4211,466 @@ class TestTripMapLayout(unittest.TestCase):
         self.assertEqual([n["spot"] for n in m["nodes"]], ["", ""])
 
 
+class TestMdMini(unittest.TestCase):
+    """攻略报告正文的 Markdown 子集转换（pipeline.mdmini）——纯函数，可离线断言。
+
+    只支持报告实际用到的语法，所以测试的重点不只是"能不能转"，还有三条
+    更重要的不变量：
+
+    ① **不丢内容**：不认识的语法（表格、未闭合围栏）必须按纯文本输出，
+       绝不能因为不支持就吞掉；
+    ② **不可注入**：报告正文里的 claim 直接来自抖音评论与视频文案，
+       属不可信输入，必须转义，且挡掉 javascript: 这类伪协议；
+    ③ **不误伤**：引用编号只在正文里生效，代码片段里的 [8] 不该被当成引用。
+    """
+
+    def test_headings_demoted_below_page_skeleton(self):
+        """标题整体降级到 h3/h4/h5，避免与页面自身的 h1/h2 打架。"""
+        from pipeline.mdmini import md_to_html
+
+        self.assertEqual(md_to_html("# 一级"), "<h3>一级</h3>")
+        self.assertEqual(md_to_html("## 二级"), "<h4>二级</h4>")
+        self.assertEqual(md_to_html("### 三级"), "<h5>三级</h5>")
+        # 更深的级别并到 h5，不产生 h6（模板没有 h6 样式）
+        self.assertEqual(md_to_html("###### 六级"), "<h5>六级</h5>")
+
+    def test_inline_bold_and_citation_anchor(self):
+        """行内加粗与引用编号：编号锚到来源条目，结论可溯源。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("**寻觅火锅** 位置隐蔽 [4]。")
+        self.assertIn("<strong>寻觅火锅</strong>", h)
+        self.assertIn('href="#src-4"', h)
+        self.assertIn(">4</a>", h)
+
+    def test_lists_are_grouped_and_switch_tags(self):
+        """连续同类项合成一个列表；ul 切到 ol 时正确闭合，不混标签。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("- 甲\n- 乙\n\n1. 丙\n2. 丁\n")
+        self.assertEqual(h.count("<ul>"), 1)
+        self.assertEqual(h.count("<ol>"), 1)
+        self.assertEqual(h.count("<li>"), 4)
+        # ul 必须先闭合再开 ol
+        self.assertLess(h.index("</ul>"), h.index("<ol>"))
+
+    def test_citation_not_applied_inside_code_span(self):
+        """代码片段里的 [8] 不得被当成引用编号（否则会生成假锚点）。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("看这段 `arr[8]` 就好 [8]。")
+        self.assertIn("<code>arr[8]</code>", h)
+        self.assertEqual(h.count('class="cite"'), 1)   # 只有正文里那个
+
+    def test_html_is_escaped(self):
+        """不可信输入必须转义：标签注入与伪协议都要挡住。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("<script>alert(1)</script>")
+        self.assertNotIn("<script>", h)
+        self.assertIn("&lt;script&gt;", h)
+        # 属性注入：双引号必须被转义
+        self.assertNotIn('href="x" onload', md_to_html('[点](x" onload="y)'))
+
+    def test_only_http_links_are_linkified(self):
+        """只有 http/https 变链接；javascript: 等按原文输出，不当链接用。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("[正常](https://www.douyin.com/video/1) [危险](javascript:alert(1))")
+        self.assertIn('href="https://www.douyin.com/video/1"', h)
+        self.assertIn('rel="noopener noreferrer"', h)
+        self.assertNotIn('href="javascript:', h)
+        self.assertIn("[危险](javascript:alert(1))", h)
+
+    def test_unsupported_syntax_is_kept_as_text(self):
+        """不支持的语法（表格）不解析但不丢弃——宁可少解析，不可丢内容。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("| 项目 | 金额 |\n| --- | --- |\n| 门票 | 60 |")
+        self.assertIn("项目", h)
+        self.assertIn("门票", h)
+        self.assertIn("60", h)
+
+    def test_unclosed_fence_still_emits_content(self):
+        """未闭合的围栏代码块：内容照样输出，绝不吞掉。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("```\n保留我\n")
+        self.assertIn("<pre><code>", h)
+        self.assertIn("保留我", h)
+
+    def test_empty_and_none_input(self):
+        """空输入安全降级为空串（报告正文理论上有为空的情况）。"""
+        from pipeline.mdmini import md_to_html
+
+        self.assertEqual(md_to_html(""), "")
+        self.assertEqual(md_to_html(None), "")
+        self.assertEqual(md_to_html("\n\n  \n"), "")
+
+    def test_paragraph_merge_and_blank_line_split(self):
+        """同段连续行用 <br> 合并；空行切段。"""
+        from pipeline.mdmini import md_to_html
+
+        h = md_to_html("第一行\n第二行\n\n新段")
+        self.assertEqual(h.count("<p>"), 2)
+        self.assertIn("第一行<br>第二行", h)
+
+    def test_real_report_body_has_no_residual_markup(self):
+        """拿库内真实攻略报告正文跑一遍：不得残留 Markdown 标记。
+
+        这是本模块存在的理由——若残留 ** 或行首 #，说明子集没覆盖真实产出。
+        """
+        import json
+        import re
+        import sqlite3
+        from pathlib import Path
+
+        from pipeline.mdmini import md_to_html
+
+        db = Path(__file__).parent / "data" / "knowledge.db"
+        if not db.exists():
+            self.skipTest("无 knowledge.db，跳过真实数据回归")
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        checked = 0
+        for row in conn.execute("SELECT result_json FROM jobs WHERE result_json IS NOT NULL"):
+            res = json.loads(row["result_json"])
+            if res.get("trip_plan"):
+                continue
+            st = res.get("stats") or {}
+            if "spots" in st or "videos" not in st:
+                continue                      # 只认攻略报告
+            md = res.get("markdown") or ""
+            a, b = md.find("## 来源要点清单"), md.find("## 速览")
+            if a < 0 or b < 0:
+                continue
+            h = md_to_html(md[b:a])
+            checked += 1
+            self.assertNotIn("**", h, "残留粗体标记")
+            self.assertNotRegex(h, r"(?m)^#", "残留标题标记")
+            self.assertNotRegex(h, r"(?m)^- ", "残留列表标记")
+            # 引用编号必须全部转成锚点
+            plain = re.sub(r"<[^>]+>", "", h)
+            self.assertNotIn("[0]", plain)
+        if not checked:
+            self.skipTest("库内没有可用的攻略报告正文")
+
+
+class TestSpotReportHtml(unittest.TestCase):
+    """攻略报告图文版（pipeline.render.render_report_html）——图文与留档同源同口径。
+
+    这里最该守住的是"两份产物不许各说各话"：速览三栏、置信度徽章、引用编号、
+    立场分布都复用同一批函数，所以图文里的分栏必须与 Markdown 里的完全一致。
+    另外报告 claim 直接来自抖音评论，属不可信输入，必须转义。
+    """
+
+    @staticmethod
+    def _items(n=3):
+        from core.models import Comment, VideoItem
+
+        return [
+            VideoItem(video_id=f"76603835226117384{i:02d}",
+                      url=f"https://www.douyin.com/video/76603835226117384{i:02d}",
+                      description="攻略", comments=[Comment(text="好吃", like_count=9)])
+            for i in range(n)
+        ]
+
+    @staticmethod
+    def _points():
+        """一份覆盖各档位的要点集：多源推荐 / 单源推荐 / 避雷 / 中性 / 存分歧。"""
+        rows = [
+            ("美食", "老居民楼下的火锅是本地人常吃的老店", "推荐", "多源一致", "中置信度", 2, False),
+            ("打卡", "火锅店位置隐蔽游客找不到", "推荐", "多源一致", "中置信度", 2, False),
+            ("打卡", "晚上的春熙路夜景好看", "推荐", "单源", "低置信度", 1, False),
+            ("路线", "武侯祠早点去避开旅行团", "推荐", "单源", "低置信度", 1, True),
+            ("避雷", "正午别逛户外", "避雷", "单源", "低置信度", 1, False),
+            ("其他", "成都很适合懒人出行", "中性", "单源", "低置信度", 1, False),
+            ("美食", "附近有家越南菜馆味道一直在线", "推荐", "存分歧", "低置信度", 1, False),
+            ("避雷", "那家越南菜馆周末排队久", "避雷", "存分歧", "低置信度", 1, False),
+        ]
+        return [
+            {"topic": t, "claim": c, "stance": s, "confidence": conf, "conf_level": lvl,
+             "n_sources": n, "time_sensitive": ts, "quote": "",
+             "source": f"https://www.douyin.com/video/76603835226117384{i:02d}"}
+            for i, (t, c, s, conf, lvl, n, ts) in enumerate(rows)
+        ]
+
+    def test_sections_present_and_numbered_sequentially(self):
+        """四个板块齐全，编号连续（隐藏板块不得留空号）。"""
+        import re
+
+        from pipeline.render import render_report_html
+
+        html = render_report_html("宽窄巷子", "## 概览\n\n正文。", self._items(), self._points())
+        for sec in ('id="sec-glance"', 'id="sec-guide"', 'id="sec-source"', 'id="sec-video"'):
+            self.assertIn(sec, html)
+        for title in ("速览：可取 / 不可取", "攻略详解", "来源要点清单", "采集视频清单"):
+            self.assertIn(title, html)
+        nums = re.findall(r'<span class="sec-no">(\d+)</span>', html)
+        self.assertEqual(nums, [f"{i:02d}" for i in range(1, len(nums) + 1)])
+
+    def test_glance_buckets_match_markdown(self):
+        """图文的三栏必须与 Markdown 留档完全一致（防两份口径漂移）。"""
+        from pipeline.render import _quick_glance, render_report_html
+
+        pts = self._points()
+        html = render_report_html("宽窄巷子", "正文", self._items(), pts)
+        md = _quick_glance(pts)
+        # Markdown 里的每条要点（含其全局编号）都应出现在图文速览里
+        for line in md.splitlines():
+            if not line.startswith("- "):
+                continue
+            claim = line[2:line.rindex("（")]
+            self.assertIn(claim, html)
+        # 中性且无分歧的要点不进任何一栏（与 MD 同规则）
+        self.assertNotIn("成都很适合懒人出行", html.split('id="sec-guide"')[0])
+
+    def test_every_citation_has_a_matching_source_anchor(self):
+        """正文/速览里的 [n] 引用必须都能落到来源条目上，不许指向空锚点。"""
+        import re
+
+        from pipeline.render import render_report_html
+
+        pts = self._points()
+        html = render_report_html("宽窄巷子", "火锅是老店 [1]。正午别出门 [5]。", self._items(), pts)
+        cited = {m for m in re.findall(r'href="#src-(\d+)"', html)}
+        anchored = {m for m in re.findall(r'id="src-(\d+)"', html)}
+        self.assertTrue(cited)
+        self.assertTrue(cited <= anchored, f"悬空引用：{cited - anchored}")
+        # 来源条目数 = 要点总数，编号从 1 连续到 N
+        self.assertEqual(anchored, {str(i) for i in range(1, len(pts) + 1)})
+
+    def test_source_rows_carry_badges_and_flags(self):
+        """来源条目带类别/置信度/立场/时效敏感标记，且时效敏感的要点被标出来。"""
+        from pipeline.render import render_report_html
+
+        html = render_report_html("宽窄巷子", "正文", self._items(), self._points())
+        self.assertIn("中置信度·2来源", html)      # 多源要点：徽章带来源数
+        self.assertIn("低置信度", html)
+        self.assertIn("st-rec", html)              # 推荐立场配色类
+        self.assertIn("st-avoid", html)
+        self.assertIn("⚠ 时效敏感", html)
+        self.assertIn("多源印证", html)
+
+    def test_claims_are_escaped(self):
+        """claim 来自抖音评论，属不可信输入：HTML 必须转义。"""
+        from pipeline.render import render_report_html
+
+        pts = [{"topic": "其他", "claim": "<script>alert(1)</script>", "stance": "推荐",
+                "confidence": "多源一致", "conf_level": "中置信度", "n_sources": 2,
+                "time_sensitive": False, "quote": "", "source": "https://x.test/a"}]
+        html = render_report_html("测试", "<script>alert(2)</script>", self._items(1), pts)
+        self.assertNotIn("<script>alert", html)
+        self.assertIn("&lt;script&gt;", html)
+
+    def test_degrades_when_no_points(self):
+        """没有要点时：速览与来源板块不渲染，但页面本身仍可用（视频清单还在）。"""
+        from pipeline.render import render_report_html
+
+        html = render_report_html("测试", "## 概览\n\n只有正文。", self._items(2), [])
+        self.assertNotIn('id="sec-glance"', html)
+        self.assertNotIn('id="sec-source"', html)
+        self.assertIn('id="sec-guide"', html)
+        self.assertIn('id="sec-video"', html)
+        # 编号仍连续（不因隐藏板块留空号）
+        import re
+        nums = re.findall(r'<span class="sec-no">(\d+)</span>', html)
+        self.assertEqual(nums, [f"{i:02d}" for i in range(1, len(nums) + 1)])
+
+    def test_empty_body_and_items_do_not_crash(self):
+        """全空输入不崩：正文为空则详解板块不渲染，页面骨架仍在。"""
+        from pipeline.render import render_report_html
+
+        html = render_report_html("空", "", [], [])
+        self.assertIn("旅游攻略报告", html)
+        self.assertIn("本报告由 AI 汇总", html)
+
+
+class TestHeatFallback(unittest.TestCase):
+    """热度榜三层兜底：快照 → 行程回读 → 空态引导（api_server.city_heat）。
+
+    背景：行程流程本来就会为**景点与美食**都算热度（all_items_for_heat），只是
+    早期只放在任务结果里没落库。所以"该城做过行程"就应当立刻能看榜，不该逼用户
+    为了看一眼榜单再刷一轮。
+
+    这里锁定三层各自的返回契约，以及两条不变量：
+    ① **宁缺勿编**：回读历史行程时时间窗口已经拿不到了，必须给 None（页面显示
+       「—」），绝不能写 0 冒充"没有新内容"；
+    ② **口径一致**：落库与回读判 kind 的规则必须相同（都按 catalog.food），
+       否则同一份数据落不落库会长得不一样。
+    """
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        from core import knowledge
+
+        self.knowledge = knowledge
+        self._orig = knowledge._DB_PATH
+        knowledge._DB_PATH = Path(tempfile.mkdtemp()) / "heat_fallback.db"
+
+    def tearDown(self):
+        self.knowledge._DB_PATH = self._orig
+
+    @staticmethod
+    def _trip_plan(city, foods=()):
+        return {
+            "meta": {"city": city},
+            "catalog": {"poi": {"某景点": {}}, "food": {n: {} for n in foods}},
+        }
+
+    def _record_trip(self, city, rows, foods=(), job_id="job-trip"):
+        self.knowledge.record_job({
+            "id": job_id, "keyword": f"{city} 2天行程", "mode": "trip",
+            "status": "done", "stage": "完成",
+            "result": {"trip_plan": self._trip_plan(city, foods), "heat_rank": rows},
+        })
+
+    # ---------- 纯函数：行程热度行 → 榜单行 ----------
+
+    def test_rows_from_trip_kind_and_honest_nulls(self):
+        """kind 按 catalog.food 判；时间窗口未知一律 None（宁缺勿编），不写 0。"""
+        from pipeline.heat import rows_from_trip
+
+        tp = self._trip_plan("大同", foods=("凤临阁",))
+        rows = rows_from_trip(tp, [
+            {"spot": "云冈石窟", "score": 0.8, "trend": "近期热度上升", "likes": 100, "videos": 3},
+            {"spot": "凤临阁", "score": 0.6, "trend": "平稳", "likes": 50, "videos": 2},
+        ], updated_at="2026-09-11T09:38:56")
+        self.assertEqual([r["spot"] for r in rows], ["云冈石窟", "凤临阁"])  # 按分降序
+        self.assertEqual(rows[0]["kind"], "景点")
+        self.assertEqual(rows[1]["kind"], "美食")
+        for r in rows:
+            self.assertIsNone(r["fresh7"])
+            self.assertIsNone(r["fresh60"])
+            self.assertIsNone(r["old60"])
+            self.assertEqual(r["source"], "trip")
+        self.assertEqual(rows[0]["updated_at"], "2026-09-11T09:38:56")
+
+    def test_rows_from_trip_skips_blank_names(self):
+        """无名行直接跳过（榜单没有可展示的主体）；空输入返回空表。"""
+        from pipeline.heat import rows_from_trip
+
+        tp = self._trip_plan("大同")
+        self.assertEqual(rows_from_trip(tp, []), [])
+        self.assertEqual(rows_from_trip(tp, [{"spot": "  ", "score": 1}]), [])
+        self.assertEqual(rows_from_trip({}, None), [])
+
+    def test_find_latest_trip_matches_city_only(self):
+        """按 trip_plan.meta.city 精确匹配；别的城市的行程不得被当成兜底数据。"""
+        self._record_trip("大同", [{"spot": "云冈石窟", "score": 0.8}], job_id="j-dt")
+        self._record_trip("成都", [{"spot": "锦里古街", "score": 0.9}], job_id="j-cd")
+
+        hit = self.knowledge.find_latest_trip("成都")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["job_id"], "j-cd")
+        self.assertEqual(hit["heat_rank"][0]["spot"], "锦里古街")
+        self.assertIsNone(self.knowledge.find_latest_trip("不存在的城"))
+        self.assertIsNone(self.knowledge.find_latest_trip("  "))
+
+    # ---------- 接口三层 ----------
+
+    def test_tier1_snapshot_wins(self):
+        """有快照且该城没有行程：直接用快照，来源标 refresh。"""
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        self.knowledge.upsert_heat_snapshot("大同", "云冈石窟", {
+            "score": 0.7, "fresh7": 0.0, "fresh60": 0.75, "old60": 0.25,
+            "likes": 100, "videos": 4, "trend": "本周最火"})
+
+        r = TestClient(app).get("/api/heat/大同").json()
+        self.assertEqual(r["source"], "refresh")
+        self.assertIn("刷榜", r["source_label"])
+        self.assertEqual([x["spot"] for x in r["ranking"]], ["云冈石窟"])
+        self.assertEqual(r["food_ranking"], [])
+        self.assertEqual(r["hint"], "")
+
+    def test_tier2_reads_back_trip_when_no_snapshot(self):
+        """没快照但有该城行程：回读热度行，不重新采集。"""
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        self._record_trip("成都", [
+            {"spot": "锦里古街", "score": 1.0, "trend": "近期热度上升", "likes": 9000, "videos": 5},
+        ], foods=("某火锅",))
+
+        r = TestClient(app).get("/api/heat/成都").json()
+        self.assertEqual(r["source"], "trip")
+        self.assertIn("成都", r["source_label"])
+        self.assertEqual([x["spot"] for x in r["ranking"]], ["锦里古街"])
+        self.assertIsNone(r["ranking"][0]["fresh7"])   # 回归：不得把未知窗口写成 0
+        self.assertEqual(r["hint"], "")
+
+    def test_tier2_splits_food_from_spots(self):
+        """行程来源同样要按 kind 分成两个榜（餐厅不混进景点榜）。"""
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        self._record_trip("大同", [
+            {"spot": "云冈石窟", "score": 0.9, "trend": "近期热度上升"},
+            {"spot": "凤临阁", "score": 0.7, "trend": "平稳"},
+        ], foods=("凤临阁",))
+
+        r = TestClient(app).get("/api/heat/大同").json()
+        self.assertEqual([x["spot"] for x in r["ranking"]], ["云冈石窟"])
+        self.assertEqual([x["spot"] for x in r["food_ranking"]], ["凤临阁"])
+        self.assertEqual(r["source"], "trip")
+
+    def test_tier1_supplements_missing_kind_from_trip(self):
+        """快照只刷了景点（早期口径）：用行程里已经算过的餐厅热度补上美食榜。
+
+        否则用户明明做过行程，却只看到一个半截的榜单；补上后来源标为 mixed，
+        如实告诉用户这是两批数据拼起来的。
+        """
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        self._record_trip("大同", [{"spot": "凤临阁", "score": 0.7, "trend": "平稳"}],
+                          foods=("凤临阁",))
+        self.knowledge.upsert_heat_snapshot("大同", "云冈石窟", {
+            "score": 0.7, "fresh7": 0.0, "fresh60": 0.75, "old60": 0.25,
+            "likes": 100, "videos": 4, "trend": "本周最火"})
+
+        r = TestClient(app).get("/api/heat/大同").json()
+        self.assertEqual(r["source"], "mixed")
+        self.assertIn("混合", r["source_label"])
+        self.assertEqual([x["spot"] for x in r["ranking"]], ["云冈石窟"])
+        self.assertEqual([x["spot"] for x in r["food_ranking"]], ["凤临阁"])
+
+    def test_tier1_does_not_duplicate_names_from_trip(self):
+        """同名不重复：快照里已有的点，不再从行程补一遍。"""
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        self._record_trip("大同", [{"spot": "云冈石窟", "score": 0.95}])
+        self.knowledge.upsert_heat_snapshot("大同", "云冈石窟", {
+            "score": 0.7, "fresh7": 0.1, "fresh60": 0.5, "old60": 0.4,
+            "likes": 100, "videos": 4, "trend": "平稳"})
+
+        r = TestClient(app).get("/api/heat/大同").json()
+        self.assertEqual(len(r["ranking"]), 1)
+        self.assertEqual(r["source"], "refresh")     # 行程没补进任何东西，来源仍算单一
+
+    def test_tier3_empty_state_offers_two_paths(self):
+        """什么都没有：空榜 + 引导文案要同时提到「刷榜」与「做行程」两条路。"""
+        from fastapi.testclient import TestClient
+
+        from api_server import app
+
+        r = TestClient(app).get("/api/heat/从没去过的城").json()
+        self.assertEqual(r["source"], "")
+        self.assertEqual(r["ranking"], [])
+        self.assertEqual(r["food_ranking"], [])
+        self.assertIn("刷新榜单", r["hint"])
+        self.assertIn("行程规划", r["hint"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

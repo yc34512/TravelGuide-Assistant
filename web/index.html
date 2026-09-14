@@ -508,6 +508,34 @@ pre.log::-webkit-scrollbar-thumb{ background:rgba(159,216,189,.24); border-radiu
 .trend-flat{ color:var(--ink-3); }
 @keyframes bob{ 0%,100%{ transform:translate3d(0,0,0); } 50%{ transform:translate3d(0,-3px,0); } }
 
+/* 榜单来源条：数据是刷出来的还是行程顺带采的，必须一眼看得见——
+   两种来源的新鲜度口径不同（行程没拆时间窗口），不标注会被误读成同一批数据 */
+.heat-src{
+  display:flex; flex-wrap:wrap; align-items:center; gap:9px;
+  margin:2px 0 12px; padding:9px 13px; border-radius:var(--r-md);
+  border:1px solid var(--line); background:var(--paper-2); box-shadow:var(--sh-1);
+}
+.hs-tag{
+  font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:var(--r-pill);
+  background:rgba(26,60,52,.07); color:var(--ink-2); border:1px solid var(--line);
+}
+.hs-tag.hs-trip{ background:rgba(169,134,47,.1); border-color:rgba(169,134,47,.24); color:var(--gold); }
+.hs-tag.hs-refresh{ background:var(--jade-s); border-color:rgba(47,111,94,.22); color:var(--jade); }
+.hs-tag.hs-mixed{ background:var(--cinnabar-s); border-color:rgba(192,57,43,.22); color:var(--cinnabar-d); }
+.hs-text{ font-size:12.5px; color:var(--ink-2); }
+.hs-when{ margin-left:auto; font-size:12px; color:var(--ink-4); font-variant-numeric:tabular-nums; }
+
+/* 热度榜空态：给两条真能走通的路，而不是干巴巴一句"暂无数据" */
+.he-title{ font-family:var(--serif); font-weight:700; font-size:19px; margin-bottom:8px; }
+.he-sub{ margin:0 0 16px; font-size:13.5px; color:var(--ink-3); line-height:1.75; }
+.he-paths{ display:grid; grid-template-columns:repeat(auto-fit,minmax(252px,1fr)); gap:13px; }
+.he-path{
+  padding:15px 17px 16px; border-radius:var(--r-md); border:1px solid var(--line);
+  background:var(--paper-2); box-shadow:var(--sh-1);
+}
+.he-ph{ font-family:var(--serif); font-weight:700; font-size:14.5px; margin-bottom:6px; }
+.he-path p{ margin:0 0 12px; font-size:13px; color:var(--ink-3); line-height:1.7; }
+
 /* ============================================================
    07 旧稿书阁：历史报告 3D 翻转卡
    ============================================================ */
@@ -1256,15 +1284,23 @@ function trendTag(t) {
   if (t === '本周最火') return '<span class="trend-hot">🔥 ' + t + '</span>';
   if (t === '长盛不衰') return '<span class="trend-ever">✨ ' + t + '</span>';
   if (t === '正在降温') return '<span class="trend-cool">🔻 ' + t + '</span>';
+  // 行程来源的榜单用的是行程自己的判定（没拆时间窗口，算不出四态），如实展示
+  if (t === '近期热度上升') return '<span class="trend-hot">📈 ' + t + '</span>';
   return '<span class="trend-flat">➖ ' + (t || '平稳') + '</span>';
+}
+
+// 时间窗口占比：缺失（历史行程没拆过窗口）显示「—」，不写 0 冒充"没有新内容"
+function pct(v) {
+  return (v === null || v === undefined) ? '—' : Math.round(v * 100) + '%';
 }
 
 function heatTable(rows, opts) {
   const food = !!(opts && opts.food);
   // 美食与景点共用同一份热度快照，但"什么算好"不一样：
   // 景点看趋势与新鲜度（是不是正在火），吃饭更看口碑与是否越来越差。
-  // 故美食榜换掉"近7天新视频"这类内容运营指标，改用新鲜度 + 情感趋势两列，
-  // 并保留营销号占比——餐馆被探店号刷量的情况比景点更常见，这个警示更要紧。
+  // 美食列用「近90天新内容」= fresh7 + fresh60 —— time_windows 的 fresh60 只是
+  // 7~60 天那一段，单独拿它当"近90天"是错的；放宽到 90 天是因为苍蝇馆子更新慢，
+  // 卡太紧会把老店全滤掉。营销号占比两榜都留：探店号刷量在餐馆更常见。
   const head = food
     ? '<tr><th>#</th><th>店名</th><th>趋势</th><th>推荐分</th><th>近90天新内容</th><th>点赞总量</th><th>视频数</th><th>营销号占比</th><th>口碑趋势</th><th>更新时间</th></tr>'
     : '<tr><th>#</th><th>名称</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>营销号占比</th><th>情感趋势</th><th>更新时间</th></tr>';
@@ -1273,9 +1309,11 @@ function heatTable(rows, opts) {
       const mkt = h.mkt_ratio || 0;
       const senti = h.sentiment || '';
       const sentiColor = senti === '好评下降' ? 'color:#c0392b;font-weight:600;' : (senti === '好评上升' ? 'color:#1e8449;' : '');
-      const fresh = food ? (h.fresh60 || 0) : (h.fresh7 || 0);
+      const fresh = food
+        ? ((h.fresh7 == null && h.fresh60 == null) ? null : (h.fresh7 || 0) + (h.fresh60 || 0))
+        : h.fresh7;
       return `<tr><td>${i + 1}</td><td>${h.spot}</td><td>${trendTag(h.trend)}</td>` +
-        `<td>${h.score.toFixed(2)}</td><td>${Math.round(fresh * 100)}%</td>` +
+        `<td>${h.score.toFixed(2)}</td><td>${pct(fresh)}</td>` +
         `<td>${h.likes}</td><td>${h.videos}</td>` +
         `<td style="${mkt >= 0.5 ? 'color:#c0392b;font-weight:700;' : ''}">${Math.round(mkt * 100)}%${mkt >= 0.5 ? ' ⚠️' : ''}</td>` +
         `<td style="${sentiColor}">${senti || '—'}</td>` +
@@ -1295,13 +1333,58 @@ function renderHeat(r) {
     (r.ranking.length ? `<span>景点 <b>${r.ranking.length}</b> 个</span>` : '') +
     ((r.food_ranking || []).length ? `<span>美食 <b>${r.food_ranking.length}</b> 个</span>` : '');
   const hasFood = (r.food_ranking || []).length > 0;
-  if (!r.ranking.length && !hasFood) { $('report').innerHTML = `<p>${r.hint || '暂无数据'}</p>`; clearToc(); syncOutput(); return; }
-  let html = HEAT_EXPLAIN;
+  if (!r.ranking.length && !hasFood) {
+    $('report').innerHTML = heatEmpty(r);
+    clearToc(); syncOutput(); return;
+  }
+  let html = heatSourceBar(r) + HEAT_EXPLAIN;
   if (r.ranking.length) html += '<h3>🏞️ 景点热度榜</h3>' + heatTable(r.ranking);
   if (hasFood) html += `<h3 style="margin-top:22px;">🍜 美食热度榜</h3>` + FOOD_EXPLAIN + heatTable(r.food_ranking, { food: true });
   $('report').innerHTML = html;
   clearToc();
   syncOutput();
+}
+
+// 榜单来源条：数据是刷出来的还是行程顺带采的，必须让用户看得见——
+// 两种来源的新鲜度口径不同（行程没拆时间窗口），不标注会被误读成同一批数据。
+function heatSourceBar(r) {
+  if (!r.source) return '';
+  const tag = r.source === 'trip' ? '行程采集'
+    : r.source === 'mixed' ? '混合来源' : '刷榜采集';
+  const when = (r.source_at || '').replace('T', ' ');
+  return `<div class="heat-src"><span class="hs-tag hs-${r.source}">${tag}</span>` +
+    `<span class="hs-text">${r.source_label || ''}</span>` +
+    (when ? `<span class="hs-when">${when}</span>` : '') + '</div>';
+}
+
+// 空态：给两条真能走通的路，而不是干巴巴一句"去刷新榜单"。
+// 对没做过行程的用户，刷榜是他唯一的路；对想顺便拿攻略的用户，做行程更划算
+// ——该城热度会一并采好并留在这里，不必采两遍。
+function heatEmpty(r) {
+  return `<div class="heat-empty">
+    <div class="he-title">《${r.city}》还没有榜单数据</div>
+    <p class="he-sub">${r.hint || ''}</p>
+    <div class="he-paths">
+      <div class="he-path">
+        <div class="he-ph">① 只想看榜</div>
+        <p>跑一轮刷榜：只采视频元数据（点赞与发布时间），不采评论，约 3~5 分钟。</p>
+        <button type="button" class="mini-btn" onclick="goHeatRefresh()">刷新榜单</button>
+      </div>
+      <div class="he-path">
+        <div class="he-ph">② 顺便要份攻略</div>
+        <p>做一份行程规划：该城热度会一并采好并留在本页，还能拿到一份可玩的路书。</p>
+        <button type="button" class="mini-btn" onclick="goTripWithCity('${r.city}')">去做行程规划</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// 从热度榜空态跳到行程规划：把城市带过去，省得再输一遍
+function goTripWithCity(city) {
+  switchTab('trip');
+  const el = $('city');
+  if (el) el.value = city || '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function viewHeat() {
@@ -1374,28 +1457,30 @@ function renderHistory() {
     : currentTab === 'research' ? !(r.keyword || '').startsWith('行程')
     : false);
   $('hist').innerHTML = rows.map(r => {
-    // 行程报告的默认"读"入口给新版路书（HTML）：Markdown 是工程留档，按设计
-    // 保留质量分卡/选点决策表/榜单，拿它当默认阅读视图与"去工程化"定位冲突。
-    // 攻略报告没有 HTML 版本，仍走站内 Markdown 渲染。
-    const isTrip = r.report_path.endsWith('.md') && (r.keyword || '').startsWith('行程');
-    const open = isTrip
-      ? `openRoadbook('${encodeURIComponent(r.report_path)}')`
-      : `viewReport('${encodeURIComponent(r.report_path)}')`;
+    // 两类报告的默认"读"入口都给 HTML 图文版（行程=路书，攻略=图文报告）：
+    // Markdown 是工程留档，按设计保留质量分卡/选点决策表等板块，拿它当默认
+    // 阅读视图会与"去工程化"定位冲突。没有 HTML 版的老报告会由 openHtmlReport
+    // 探测失败后退回站内 Markdown 渲染，内容不丢。
+    const isMd = (r.report_path || '').endsWith('.md');
+    const isTrip = isMd && (r.keyword || '').startsWith('行程');
+    const enc = encodeURIComponent(r.report_path);
+    const open = isMd ? `openHtmlReport('${enc}')` : `viewReport('${enc}')`;
     return `<li><span class="kw" onclick="${open}">${r.keyword}</span>` +
       `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
-      (isTrip
-        ? `<a class="mini-btn" style="text-decoration:none; margin-right:6px;" target="_blank" href="/api/reports/download?name=${encodeURIComponent(r.report_path.replace(/\.md$/, '.html'))}">📊 路书</a>` +
-          `<a class="mini-btn" download title="工程留档：含质量分卡 / 选点决策表 / 榜单" style="margin-right:6px;" href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">📄 文本</a>`
-        : `<a class="mini-btn" download href="/api/reports/download?name=${encodeURIComponent(r.report_path)}">下载</a>`) +
+      (isMd
+        ? `<a class="mini-btn" style="text-decoration:none; margin-right:6px;" target="_blank" href="/api/reports/download?name=${encodeURIComponent(r.report_path.replace(/\.md$/, '.html'))}">${isTrip ? '📊 路书' : '📊 图文'}</a>` +
+          `<a class="mini-btn" download title="工程留档：含质量分卡 / 选点决策表 / 榜单" style="margin-right:6px;" href="/api/reports/download?name=${enc}">📄 文本</a>`
+        : `<a class="mini-btn" download href="/api/reports/download?name=${enc}">下载</a>`) +
       `</li>`;
   }).join('');
   $('history').classList.toggle('hidden', !rows.length);
 }
 
-// 行程路书：真正的阅读体验在 HTML（杂志排版 + 行程全景图 + 详情弹层），
-// 直接开新标签页看全文；同时把追问上下文指向这份报告，回到站内还能接着问。
-// 早期报告只有 Markdown 留档（HTML 路书是后加的），先探测一次再决定，避免开空页。
-async function openRoadbook(name) {
+// HTML 图文版入口（行程=路书，攻略=图文报告）：真正的阅读体验在 HTML——
+// 杂志排版、行程全景图、详情弹层都在那边，Markdown 只是工程留档。
+// 同时把追问上下文指向这份报告，回到站内还能接着问。
+// 早期报告只有 Markdown 留档（HTML 是后加的），先探测一次再决定，避免开空页。
+async function openHtmlReport(name) {
   const md = decodeURIComponent(name);
   outputTab = currentTab;
   setAskCtx({ report_name: md });   // 让追问仍能反查到这份报告的档案

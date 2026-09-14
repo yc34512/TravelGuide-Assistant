@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>《{{ keyword }}》旅游攻略报告</title>
+<style>
+/* ============================================================
+   攻略报告图文版 · 与路书 templates/trip_report.html 同一套设计 token
+   （宣纸/黛青/朱砂/金 + Noto Serif SC）。两套产物视觉同源、结构独立：
+   路书讲「怎么玩」，本页讲「这地方口碑怎么样、值不值得去」。
+   离线单文件：不引任何 JS 框架与外部字体链接，正文 Markdown 由后端
+   pipeline/mdmini.py 预先转成 HTML。
+   ============================================================ */
+:root{
+  --paper:#f7f3ec; --paper-2:#fdfbf6; --paper-3:#f0e9dd; --paper-4:#e6ddcc;
+  --ink:#1a3c34; --ink-2:#3a564d; --ink-3:#6d8279; --ink-4:#9caaa3;
+  --line:rgba(26,60,52,.13); --line-2:rgba(26,60,52,.07);
+  --cinnabar:#c0392b; --cinnabar-d:#9c2a1e; --cinnabar-s:rgba(192,57,43,.09);
+  --jade:#2f6f5e; --jade-s:rgba(47,111,94,.08);
+  --gold:#a9862f; --gold-s:rgba(169,134,47,.1);
+  --bronze:#9c6a44;
+  --up:#c0392b; --down:#1e8449;
+  --sh-1:0 1px 1px rgba(26,60,52,.03), 0 2px 6px rgba(26,60,52,.04);
+  --sh-2:0 1px 2px rgba(26,60,52,.04), 0 12px 28px -16px rgba(26,60,52,.24);
+  --sh-3:0 2px 4px rgba(26,60,52,.05), 0 30px 70px -32px rgba(26,60,52,.4);
+  --r-lg:16px; --r-md:10px; --r-sm:6px; --r-pill:999px;
+  --ease:cubic-bezier(.2,.9,.3,1.1);
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --serif:"Noto Serif SC","Source Han Serif SC","Songti SC",SimSun,"Times New Roman",serif;
+  --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  --w:920px;
+}
+*,*::before,*::after{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; -webkit-text-size-adjust:100%; }
+body{
+  margin:0; color:var(--ink); font-family:var(--sans); font-size:14.5px; line-height:1.78;
+  background:
+    radial-gradient(1100px 560px at 88% -12%, rgba(47,111,94,.07), transparent 60%),
+    radial-gradient(900px 480px at -8% 10%, rgba(192,57,43,.045), transparent 62%),
+    var(--paper);
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+::selection{ background:rgba(192,57,43,.16); }
+a{ color:var(--cinnabar-d); }
+:focus-visible{ outline:2px solid var(--cinnabar); outline-offset:2px; border-radius:4px; }
+.wrap{ position:relative; z-index:1; max-width:var(--w); margin:0 auto; padding:24px 22px 72px; }
+
+/* ---------- 吸顶导航 ---------- */
+.top-nav{
+  position:sticky; top:0; z-index:60;
+  background:rgba(253,251,246,.88); backdrop-filter:blur(12px) saturate(1.2);
+  border-bottom:1px solid var(--line);
+}
+.nav-in{ max-width:var(--w); margin:0 auto; padding:9px 22px; display:flex; align-items:center; gap:8px; }
+.nav-brand{
+  flex:0 0 auto; font-family:var(--serif); font-weight:700; font-size:14px; letter-spacing:.1em;
+  color:var(--ink); margin-right:6px;
+}
+.nav-chip{
+  flex:0 0 auto; padding:6px 14px; border-radius:var(--r-pill); border:1px solid transparent;
+  font-family:var(--serif); font-size:13px; letter-spacing:.06em; color:var(--ink-2);
+  text-decoration:none; white-space:nowrap;
+  transition:color .28s ease, background .28s ease, border-color .28s ease;
+}
+.nav-chip:hover{ color:var(--ink); background:var(--paper-3); border-color:var(--line); }
+
+/* ---------- 抬头 ---------- */
+.hero{
+  position:relative; z-index:1; overflow:hidden; padding:40px 26px 44px;
+  background:linear-gradient(180deg,#fcfaf5 0%,#f8f4ea 46%,#f2ebdc 100%);
+  border-bottom:1px solid var(--line);
+}
+.hero-inner{ position:relative; max-width:var(--w); margin:0 auto; }
+.hero-seal{
+  display:inline-grid; place-items:center; width:54px; height:54px; margin-bottom:16px;
+  border-radius:12px; background:linear-gradient(145deg,#cf4433,#9c2a1e);
+  font-family:var(--serif); font-size:30px; font-weight:700; color:#fdfaf3;
+  box-shadow:0 10px 26px -12px rgba(156,42,30,.7);
+}
+.hero-eyebrow{
+  display:block; font-family:var(--sans); font-size:11px; font-weight:600; letter-spacing:.22em;
+  text-transform:uppercase; color:var(--ink-3); margin-bottom:10px;
+}
+.hero h1{
+  margin:0 0 12px; font-family:var(--serif); font-weight:900; font-size:38px; line-height:1.24;
+  letter-spacing:.01em;
+}
+.hero h1 .accent{ color:var(--cinnabar); }
+.hero .subtitle{ margin:0 0 22px; font-size:14.5px; color:var(--ink-2); }
+.stats{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+.stat{
+  min-width:104px; padding:11px 17px 10px; border-radius:var(--r-md);
+  background:linear-gradient(170deg,var(--paper-2),#f8f4ea);
+  border:1px solid var(--line); box-shadow:var(--sh-1), inset 0 1px 0 rgba(255,255,255,.7);
+}
+.stat .num{ font-family:var(--serif); font-weight:700; font-size:21px; line-height:1.2; }
+.stat .lab{ font-size:11.5px; color:var(--ink-3); letter-spacing:.05em; }
+.stance-row{ display:flex; flex-wrap:wrap; gap:7px; margin-bottom:14px; }
+.stance-chip{
+  display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:var(--r-pill);
+  font-size:12.5px; border:1px solid var(--line); background:var(--paper-2); color:var(--ink-2);
+}
+.stance-chip b{ font-family:var(--serif); font-size:13.5px; }
+.stance-chip.rec{ background:var(--jade-s); border-color:rgba(47,111,94,.22); color:var(--jade); }
+.stance-chip.avoid{ background:var(--cinnabar-s); border-color:rgba(192,57,43,.22); color:var(--cinnabar-d); }
+.stance-chip.mid{ background:var(--gold-s); border-color:rgba(169,134,47,.24); color:var(--gold); }
+.meta-line{ font-size:12.5px; color:var(--ink-3); }
+.meta-line b{ color:var(--ink-2); font-weight:600; }
+
+/* ---------- 章节骨架 ---------- */
+section{ margin-top:44px; scroll-margin-top:64px; }
+.sec-head{ display:flex; align-items:flex-end; gap:13px; margin-bottom:18px; }
+.sec-no{
+  flex:0 0 auto; font-family:var(--serif); font-weight:900; font-size:34px; line-height:.82;
+  color:rgba(26,60,52,.13); -webkit-text-stroke:1px rgba(26,60,52,.22); transform:translateY(2px);
+}
+.sec-head h2{
+  margin:0; font-family:var(--serif); font-weight:700; font-size:23px; letter-spacing:.02em;
+}
+.sec-note{ margin-left:auto; font-size:12.5px; color:var(--ink-3); text-align:right; }
+.lede{ margin:-6px 0 16px; font-size:13.5px; color:var(--ink-3); }
+
+/* ---------- 01 速览三色卡 ---------- */
+.glance{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px; }
+.gcard{
+  border-radius:var(--r-md); border:1px solid var(--line); background:var(--paper-2);
+  box-shadow:var(--sh-1); overflow:hidden; display:flex; flex-direction:column;
+}
+.gcard header{
+  display:flex; align-items:center; gap:8px; padding:12px 16px 11px;
+  font-family:var(--serif); font-size:14.5px; font-weight:700; letter-spacing:.02em;
+  border-bottom:1px solid var(--line-2);
+}
+.gcard header .cnt{
+  margin-left:auto; font-family:var(--sans); font-size:12px; font-weight:600;
+  padding:2px 9px; border-radius:var(--r-pill); background:rgba(26,60,52,.07); color:var(--ink-2);
+}
+.gcard.rec{ border-color:rgba(47,111,94,.24); }
+.gcard.rec header{ background:var(--jade-s); color:var(--jade); }
+.gcard.avoid{ border-color:rgba(192,57,43,.24); }
+.gcard.avoid header{ background:var(--cinnabar-s); color:var(--cinnabar-d); }
+.gcard.mid{ border-color:rgba(169,134,47,.26); }
+.gcard.mid header{ background:var(--gold-s); color:var(--gold); }
+.gcard ul{ margin:0; padding:9px 16px 14px; list-style:none; }
+.gcard li{ position:relative; padding:6px 0 6px 15px; font-size:13.5px; line-height:1.72; border-top:1px dotted var(--line-2); }
+.gcard li:first-child{ border-top:0; }
+.gcard li::before{ content:""; position:absolute; left:2px; top:15px; width:5px; height:5px; border-radius:50%; background:var(--ink-4); }
+.gcard.rec li::before{ background:var(--jade); }
+.gcard.avoid li::before{ background:var(--cinnabar); }
+.gcard.mid li::before{ background:var(--gold); }
+.gcard .empty{ padding:14px 16px; font-size:13px; color:var(--ink-4); }
+
+/* 引用编号：正文与速览里出现的 [n] 都指向来源条目 */
+a.cite{
+  display:inline-block; min-width:16px; padding:0 4px; margin:0 1px; border-radius:4px;
+  font-family:var(--mono); font-size:11.5px; line-height:16px; text-align:center; text-decoration:none;
+  color:var(--cinnabar-d); background:var(--cinnabar-s); border:1px solid rgba(192,57,43,.18);
+  vertical-align:1px; transition:background .2s ease, color .2s ease;
+}
+a.cite:hover{ background:var(--cinnabar); color:#fdfaf3; }
+
+/* ---------- 02 攻略详解（后端 mdmini 产出的 HTML） ---------- */
+.guide{
+  padding:26px 28px 28px; border-radius:var(--r-md); border:1px solid var(--line);
+  background:linear-gradient(180deg,var(--paper-2),#fdfbf7); box-shadow:var(--sh-1);
+  font-size:14.5px; line-height:1.86;
+}
+.guide h3{
+  margin:30px 0 12px; font-family:var(--serif); font-weight:700; font-size:21px; letter-spacing:.02em;
+  padding-bottom:9px; border-bottom:1px solid var(--line);
+}
+.guide h3:first-child{ margin-top:0; }
+.guide h4{
+  margin:22px 0 9px; font-family:var(--serif); font-weight:700; font-size:16.5px; color:var(--ink);
+}
+.guide h4::before{ content:"◆"; margin-right:8px; font-size:10px; color:var(--cinnabar); vertical-align:2px; }
+.guide h5{ margin:16px 0 7px; font-size:15px; font-weight:700; color:var(--ink-2); }
+.guide p{ margin:0 0 13px; }
+.guide strong{ color:var(--ink); font-weight:700; }
+.guide ul,.guide ol{ margin:0 0 14px; padding-left:22px; }
+.guide li{ margin:5px 0; }
+.guide ul li::marker{ color:var(--cinnabar); }
+.guide code{
+  font-family:var(--mono); font-size:12.5px; padding:1.5px 5px; border-radius:4px;
+  background:rgba(26,60,52,.06); color:var(--cinnabar-d);
+}
+.guide pre{
+  margin:0 0 14px; padding:13px 15px; border-radius:var(--r-sm); overflow:auto;
+  background:#1a3c34; color:#e8f0ec; font-size:12.5px; line-height:1.7;
+}
+.guide pre code{ background:none; color:inherit; padding:0; }
+.guide .md-quote{
+  display:block; padding:9px 14px; border-left:3px solid var(--gold);
+  background:var(--gold-s); border-radius:0 var(--r-sm) var(--r-sm) 0; color:var(--ink-2); font-size:13.5px;
+}
+
+/* ---------- 03 来源要点清单 ---------- */
+.src-list{ display:flex; flex-direction:column; gap:9px; }
+.src-item{
+  display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start;
+  padding:12px 15px; border-radius:var(--r-md); border:1px solid var(--line);
+  background:var(--paper-2); box-shadow:var(--sh-1); scroll-margin-top:70px;
+}
+.src-item:target{ border-color:var(--cinnabar); box-shadow:0 0 0 3px var(--cinnabar-s); }
+.src-idx{
+  display:grid; place-items:center; width:26px; height:26px; border-radius:7px;
+  font-family:var(--serif); font-weight:700; font-size:12.5px;
+  background:rgba(26,60,52,.07); color:var(--ink-2); border:1px solid var(--line);
+}
+.src-body{ min-width:0; }
+.src-tags{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+.tag{
+  display:inline-block; padding:1.5px 8px; border-radius:var(--r-pill); font-size:11.5px;
+  border:1px solid var(--line); background:var(--paper-3); color:var(--ink-3); white-space:nowrap;
+}
+.tag.topic{ font-family:var(--serif); color:var(--ink-2); }
+.tag.conf-高{ background:var(--jade-s); border-color:rgba(47,111,94,.24); color:var(--jade); }
+.tag.conf-中{ background:var(--gold-s); border-color:rgba(169,134,47,.24); color:var(--gold); }
+.tag.conf-低{ color:var(--ink-4); }
+.tag.st-rec{ background:var(--jade-s); border-color:rgba(47,111,94,.2); color:var(--jade); }
+.tag.st-avoid{ background:var(--cinnabar-s); border-color:rgba(192,57,43,.2); color:var(--cinnabar-d); }
+.tag.st-mid{ color:var(--ink-3); }
+.tag.warn{ background:var(--cinnabar-s); border-color:rgba(192,57,43,.24); color:var(--cinnabar-d); font-weight:600; }
+.src-claim{ font-size:13.5px; line-height:1.72; margin-bottom:5px; }
+.src-link{
+  font-size:11.5px; color:var(--ink-4); text-decoration:none; font-family:var(--mono);
+  word-break:break-all; border-bottom:1px dotted var(--line);
+}
+.src-link:hover{ color:var(--cinnabar-d); }
+
+/* ---------- 04 采集视频清单 ---------- */
+.vid-row{ display:flex; flex-wrap:wrap; gap:8px; }
+.vid-chip{
+  padding:6px 13px; border-radius:var(--r-pill); border:1px solid var(--line);
+  background:var(--paper-2); box-shadow:var(--sh-1); font-family:var(--mono); font-size:12px;
+  color:var(--ink-2); text-decoration:none; transition:border-color .24s ease, color .24s ease;
+}
+.vid-chip:hover{ border-color:rgba(192,57,43,.3); color:var(--cinnabar-d); }
+
+/* ---------- 页脚 ---------- */
+.foot{
+  margin-top:50px; padding-top:22px; border-top:1px solid var(--line);
+  font-size:12.5px; line-height:1.9; color:var(--ink-3);
+}
+.foot .md-quote{ display:block; }
+
+/* ---------- 动效：初始隐藏只在 JS 确认运行后挂载 ---------- */
+.js .fx{ opacity:0; transform:translate3d(0,14px,0); }
+.js .fx.in{ opacity:1; transform:none; transition:opacity .62s var(--ease-out), transform .62s var(--ease-out); }
+
+@media (max-width:720px){
+  .hero{ padding:30px 18px 34px; }
+  .hero h1{ font-size:28px; }
+  .wrap{ padding:20px 15px 60px; }
+  .sec-note{ display:none; }
+  .guide{ padding:20px 17px 22px; }
+  .glance{ grid-template-columns:1fr; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation:none !important; transition:none !important; }
+  .js .fx{ opacity:1 !important; transform:none !important; }
+}
+@media print{
+  .top-nav{ display:none; }
+  body{ background:#fff; font-size:12px; }
+  .js .fx{ opacity:1 !important; transform:none !important; }
+  section{ break-inside:avoid-page; }
+  .src-item{ break-inside:avoid; }
+}
+</style>
+<script>
+/* 动效层启动标记：只有 JS 真的跑起来，才挂 .js 给元素加初始隐藏，
+   否则（无 JS / 脚本被拦）内容直接可见。另设 1.8s 兜底强制显示，
+   避免任何异常导致内容永久隐藏。 */
+(function () {
+  var d = document.documentElement;
+  d.classList.add('js');
+  setTimeout(function () {
+    var fx = document.querySelectorAll('.fx');
+    for (var i = 0; i < fx.length; i++) fx[i].classList.add('in');
+  }, 1800);
+  function reveal() {
+    var fx = document.querySelectorAll('.fx');
+    for (var i = 0; i < fx.length; i++) {
+      (function (el, k) { setTimeout(function () { el.classList.add('in'); }, 60 + k * 70); })(fx[i], i);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', reveal);
+  } else { reveal(); }
+})();
+</script>
+</head>
+<body>
+{% set ns = namespace(no=0) %}
+
+<nav class="top-nav">
+  <div class="nav-in">
+    <span class="nav-brand">攻略报告</span>
+    {% if glance_groups %}<a class="nav-chip" href="#sec-glance">速览</a>{% endif %}
+    {% if guide_html %}<a class="nav-chip" href="#sec-guide">攻略详解</a>{% endif %}
+    {% if source_rows %}<a class="nav-chip" href="#sec-source">来源要点</a>{% endif %}
+    {% if video_rows %}<a class="nav-chip" href="#sec-video">采集视频</a>{% endif %}
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-inner">
+    <span class="hero-seal" aria-hidden="true">攻</span>
+    <span class="hero-eyebrow">DOUYIN UGC · SPOT REPORT</span>
+    <h1>《{{ keyword }}》<span class="accent">旅游攻略报告</span></h1>
+    <p class="subtitle">抖音真实评论聚合 · 每条结论都能溯源</p>
+
+    <div class="stats">
+      <div class="stat"><div class="num">{{ video_count }}</div><div class="lab">调研视频</div></div>
+      <div class="stat"><div class="num">{{ comment_count }}</div><div class="lab">真实评论</div></div>
+      <div class="stat"><div class="num">{{ point_count }}</div><div class="lab">要点条数</div></div>
+      {% if multi_src_count %}<div class="stat"><div class="num">{{ multi_src_count }}</div><div class="lab">多源印证</div></div>{% endif %}
+    </div>
+
+    {% if stance_rows %}
+    <div class="stance-row">
+      {% for s in stance_rows %}
+      <span class="stance-chip {{ s.chip_cls }}">{{ s.icon }} {{ s.name }} <b>{{ s.n }}</b></span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="meta-line">
+      生成于 <b>{{ generated }}</b> ｜ 数据来源：抖音公开内容 ｜ 立场分布按要点逐条判定
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  {% if glance_groups %}
+  <section id="sec-glance">
+    <div class="sec-head"><span class="sec-no">{{ '%02d'|format(ns.no + 1) }}</span>{% set ns.no = ns.no + 1 %}<h2>速览：可取 / 不可取</h2>
+      <span class="sec-note">先看这三栏，再决定要不要细读</span></div>
+    <p class="lede">由要点直接聚合，不经过二次生成——有分歧的单独归到「待你判断」，不替你做结论。</p>
+
+    <div class="glance">
+      {% for g in glance_groups %}
+      <div class="gcard {{ g.cls }} fx">
+        <header>{{ g.icon }} {{ g.title }}<span class="cnt">{{ g.rows|length }} 条</span></header>
+        {% if g.rows %}
+        <ul>
+          {% for it in g.rows %}
+          <li>{{ it.claim }}<a class="cite" href="#src-{{ it.n }}" title="查看第 {{ it.n }} 条来源">{{ it.n }}</a></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty">本次调研没有落在这一栏的要点</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if guide_html %}
+  <section id="sec-guide">
+    <div class="sec-head"><span class="sec-no">{{ '%02d'|format(ns.no + 1) }}</span>{% set ns.no = ns.no + 1 %}<h2>攻略详解</h2>
+      <span class="sec-note">正文里的编号可点，直达来源</span></div>
+    <div class="guide fx">{{ guide_html|safe }}</div>
+  </section>
+  {% endif %}
+
+  {% if source_rows %}
+  <section id="sec-source">
+    <div class="sec-head"><span class="sec-no">{{ '%02d'|format(ns.no + 1) }}</span>{% set ns.no = ns.no + 1 %}<h2>来源要点清单</h2>
+      <span class="sec-note">每条结论对应一条抖音内容</span></div>
+    <p class="lede">标签含义：<b>置信度</b>按独立来源数判定；<b>立场</b>是推荐 / 避雷 / 中性；
+      标 <b>时效敏感</b> 的涉及价格、时间、政策，出发前请务必自己核实。</p>
+
+    <div class="src-list">
+      {% for p in source_rows %}
+      <div class="src-item fx" id="src-{{ p.n }}">
+        <span class="src-idx">{{ p.n }}</span>
+        <div class="src-body">
+          <div class="src-tags">
+            <span class="tag topic">{{ p.topic }}</span>
+            <span class="tag {{ p.conf_cls }}">{{ p.badge }}</span>
+            <span class="tag {{ p.stance_cls }}">{{ p.stance }}</span>
+            {% if p.time_sensitive %}<span class="tag warn">⚠ 时效敏感</span>{% endif %}
+          </div>
+          <div class="src-claim">{{ p.claim }}</div>
+          <a class="src-link" href="{{ p.source }}" target="_blank" rel="noopener noreferrer">{{ p.source }}</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if video_rows %}
+  <section id="sec-video">
+    <div class="sec-head"><span class="sec-no">{{ '%02d'|format(ns.no + 1) }}</span>{% set ns.no = ns.no + 1 %}<h2>采集视频清单</h2>
+      <span class="sec-note">共 {{ video_count }} 条</span></div>
+    <div class="vid-row">
+      {% for v in video_rows %}
+      <a class="vid-chip fx" href="{{ v.url }}" target="_blank" rel="noopener noreferrer">{{ v.video_id }}</a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <footer class="foot">
+    {{ disclaimer_html|safe }}
+  </footer>
+</div>
+</body>
+</html>

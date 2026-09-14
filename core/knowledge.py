@@ -119,6 +119,12 @@ def _conn() -> sqlite3.Connection:
         conn.execute("ALTER TABLE heat_snapshots ADD COLUMN sentiment TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass
+    try:  # 旧库迁移：榜单来源（refresh=刷榜任务 / trip=行程规划顺带采集）。
+        # 行程流程本就会为景点与美食算热度，落库后热度榜无需再单独刷一遍；
+        # 但要能区分来源，页面才好如实标注数据是怎么来的。
+        conn.execute("ALTER TABLE heat_snapshots ADD COLUMN source TEXT DEFAULT 'refresh'")
+    except sqlite3.OperationalError:
+        pass
     # 报告登记表：行程等"无采集档案"的报告也在此登记，历史列表不遗漏。
     # 攻略报告仍随 spot_cache 登记（与采集缓存绑定），两处合并不重复。
     conn.execute(
@@ -428,33 +434,45 @@ def list_city_spots(city: str) -> list[str]:
     return [r["spot"] for r in rows]
 
 
-def upsert_heat_snapshot(city: str, spot: str, snap: dict, kind: str = "景点") -> None:
-    """写入/更新某城某景点（或餐厅）的热度快照（每城每对象一行）；
-    snap 可附 mkt_ratio（营销号占比）与 sentiment（评论情感趋势）。"""
+def upsert_heat_snapshot(city: str, spot: str, snap: dict, kind: str = "景点",
+                         source: str = "refresh") -> None:
+    """写入/更新某城某景点（或餐厅）的热度快照（每城每对象一行）。
+
+    snap 可附 mkt_ratio（营销号占比）与 sentiment（评论情感趋势）。
+    source 标明数据怎么来的：`refresh` = 刷榜任务（元数据轻量采集）；
+    `trip` = 行程规划顺带算的——行程本就会为景点与美食算热度，落库后
+    热度榜不必再单独刷一遍，用户不用为了看榜再搜一次城市。
+
+    fresh7 / fresh60 / old60 允许缺省：行程来源的行若拿不到三窗口拆分，
+    宁可存 NULL 让页面显示「—」，也不要写 0 冒充"没有新内容"。
+    """
     with _conn() as conn:
         conn.execute(
             "INSERT INTO heat_snapshots (city, spot, score, fresh7, fresh60, old60,"
-            " likes, videos, trend, kind, mkt_ratio, sentiment, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " likes, videos, trend, kind, mkt_ratio, sentiment, source, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(city, spot) DO UPDATE SET"
             " score=excluded.score, fresh7=excluded.fresh7, fresh60=excluded.fresh60,"
             " old60=excluded.old60, likes=excluded.likes, videos=excluded.videos,"
             " trend=excluded.trend, kind=excluded.kind, mkt_ratio=excluded.mkt_ratio,"
-            " sentiment=excluded.sentiment, updated_at=excluded.updated_at",
-            (city.strip(), spot.strip(), snap["score"], snap["fresh7"], snap["fresh60"],
-             snap["old60"], snap["likes"], snap["videos"], snap["trend"], kind,
-             snap.get("mkt_ratio", 0), snap.get("sentiment", ""),
+            " sentiment=excluded.sentiment, source=excluded.source,"
+            " updated_at=excluded.updated_at",
+            (city.strip(), spot.strip(), snap["score"], snap.get("fresh7"),
+             snap.get("fresh60"), snap.get("old60"),
+             snap.get("likes", 0), snap.get("videos", 0), snap.get("trend", "平稳"), kind,
+             snap.get("mkt_ratio", 0), snap.get("sentiment", ""), source,
              datetime.now().isoformat(timespec="seconds")),
         )
 
 
 def load_heat_snapshots(city: str) -> list[dict]:
     """某城的最新热度榜（按综合分降序，含 kind 供景点/美食分榜、
-    mkt_ratio 营销号占比与 sentiment 评论情感趋势）；无快照返回空列表。"""
+    mkt_ratio 营销号占比、sentiment 评论情感趋势与 source 来源标记）；
+    无快照返回空列表。fresh7/60/old60 可能为 None（行程来源缺三窗口拆分）。"""
     with _conn() as conn:
         rows = conn.execute(
             "SELECT spot, score, fresh7, fresh60, old60, likes, videos, trend, kind,"
-            " mkt_ratio, sentiment, updated_at"
+            " mkt_ratio, sentiment, source, updated_at"
             " FROM heat_snapshots WHERE city = ? ORDER BY score DESC",
             (city.strip(),),
         ).fetchall()
@@ -465,7 +483,42 @@ def load_heat_snapshots(city: str) -> list[dict]:
             "likes": r["likes"], "videos": r["videos"],
             "kind": r["kind"] or "景点",
             "mkt_ratio": r["mkt_ratio"] or 0, "sentiment": r["sentiment"] or "",
+            "source": r["source"] or "refresh",
             "updated_at": r["updated_at"],
         }
         for r in rows
     ]
+
+
+def find_latest_trip(city: str) -> dict | None:
+    """该城最近一次成功的行程任务（含 trip_plan 与顺带算出的 heat_rank）。
+
+    热度榜在"没有刷榜快照"时的兜底数据源：行程流程本就会为景点与美食都算热度，
+    没必要让用户为了看一次榜再做一轮采集。返回 None 表示确实没有可用档案。
+
+    只看最近 40 条任务：热度榜是交互式查询，不能为了一次兜底把整张 jobs 表
+    的 result_json（每条可达数百 KB）全解析一遍。
+    """
+    target = city.strip()
+    if not target:
+        return None
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, keyword, finished_at, result_json FROM jobs"
+            " WHERE status='done' AND result_json IS NOT NULL"
+            " ORDER BY finished_at DESC LIMIT 40"
+        ).fetchall()
+    for r in rows:
+        try:
+            res = json.loads(r["result_json"])
+        except (ValueError, TypeError):
+            continue
+        tp = res.get("trip_plan") or {}
+        if ((tp.get("meta") or {}).get("city") or "").strip() != target:
+            continue
+        return {
+            "job_id": r["id"], "keyword": r["keyword"],
+            "finished_at": r["finished_at"],
+            "trip_plan": tp, "heat_rank": res.get("heat_rank") or [],
+        }
+    return None

@@ -213,3 +213,37 @@ def trend_of(fresh7: float, old60: float, score: float) -> str:
     if score >= HOT_SCORE:
         return "长盛不衰"
     return "平稳"
+
+
+def rows_from_trip(trip_plan: dict, heat_rank: list[dict], updated_at: str = "") -> list[dict]:
+    """把行程顺带算出的热度行整理成与 heat_snapshots 同形的榜单行。
+
+    用途：热度榜在"没有刷榜快照"或"快照缺某一类（早期只刷了景点）"时回读历史行程。
+    口径与 service/trip._persist_heat 保持一致（同样按 catalog.food 判 kind），
+    否则同一份数据落库与不落库会长得不一样。
+
+    fresh7/60/old60 一律为 None：历史行程没拆过时间窗口，宁缺勿编——页面据此显示
+    「—」，而不是写 0 冒充"没有新内容"。trend 沿用行程自己的判定（"近期热度上升 /
+    平稳"），不做四态换算：那是刷榜口径，硬套会给出没有依据的结论。
+    updated_at 传行程的生成时间，否则榜单的"更新时间"列会空着。
+    """
+    food_names = set(((trip_plan.get("catalog") or {}).get("food") or {}).keys())
+    rows: list[dict] = []
+    for h in heat_rank or []:
+        name = (h.get("spot") or "").strip()
+        if not name:
+            continue
+        rows.append({
+            "spot": name,
+            "score": h.get("score", 0),
+            "trend": h.get("trend") or "平稳",
+            "fresh7": None, "fresh60": None, "old60": None,
+            "likes": h.get("likes", 0), "videos": h.get("videos", 0),
+            "kind": "美食" if name in food_names else "景点",
+            "mkt_ratio": h.get("mkt_ratio", 0),
+            "sentiment": h.get("sentiment", "") or "",
+            "source": "trip",
+            "updated_at": updated_at,
+        })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    return rows

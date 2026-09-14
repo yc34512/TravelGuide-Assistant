@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from config import KB_TTL_DAYS, REPORT_DIR
 from core import geo, knowledge
 from pipeline import ask as ask_engine
+from pipeline import heat
 from service import heatrefresh, research, trip
 
 app = FastAPI(
@@ -108,18 +109,67 @@ def heat_refresh(body: HeatRefreshIn):
     return {"job_id": job_id}
 
 
-@app.get("/api/heat/{city}", summary="查询城市实时热度榜（景点榜 + 美食榜）")
+@app.get("/api/heat/{city}", summary="查询城市热度榜（景点榜 + 美食榜）")
 def city_heat(city: str):
-    """返回该城最新热度快照：景点榜与美食榜并列（各自按热度降序，含趋势标签）；
-    无数据返回空列表与引导提示。"""
-    rows = knowledge.load_heat_snapshots(city.strip())
+    """返回该城榜单，按数据来源分三层兜底：
+
+    ① 有热度快照 → 直接用（source: refresh 刷榜 / trip 行程采集 / mixed 混合）；
+    ② 没有快照但该城做过行程规划 → 回读那次行程顺带算出的热度，**不重新采集**；
+    ③ 都没有 → 空榜单 + 两条可走的路径（刷榜 / 顺手做份行程）。
+
+    第 ② 层是为历史行程准备的：行程流程本来就会为景点与美食都算热度，只是早期
+    没落库。落库之后新行程走 ①，老行程仍能被这一层读到，用户不必为了看榜重跑一次。
+    """
+    name = city.strip()
+    rows = knowledge.load_heat_snapshots(name)
+    source = source_at = source_label = ""
+    trip = knowledge.find_latest_trip(name) if name else None
+
+    if rows:
+        kinds = {r.get("source") or "refresh" for r in rows}
+        source_at = max((r.get("updated_at") or "") for r in rows)
+        # 快照里缺的那一类，用该城行程顺带采到的补上：早期刷榜只刷景点（那时美食
+        # 还不进榜），但行程其实已经为餐厅算过热度。不补的话，用户明明做过行程，
+        # 却只看到一个半截的榜单。每行自带 source，页面据此如实标注混合来源。
+        if trip:
+            have = {r.get("spot") for r in rows}
+            extra = [
+                r for r in heat.rows_from_trip(trip["trip_plan"], trip["heat_rank"],
+                                               trip.get("finished_at") or "")
+                if r["spot"] not in have
+            ]
+            if extra:
+                rows = sorted(rows + extra, key=lambda r: r.get("score", 0), reverse=True)
+                kinds.add("trip")
+                source_at = max(source_at, trip.get("finished_at") or "")
+        source = ("trip" if kinds == {"trip"}
+                  else "refresh" if kinds == {"refresh"} else "mixed")
+        source_label = {
+            "trip": "本次数据来自行程规划顺带采集（未单独刷榜）",
+            "refresh": "本次数据来自刷榜采集（近 90 天抖音内容）",
+            "mixed": "刷榜与行程规划采集混合的数据",
+        }[source]
+    elif trip:
+        rows = heat.rows_from_trip(trip["trip_plan"], trip["heat_rank"],
+                                   trip.get("finished_at") or "")
+        source = "trip"
+        source_at = trip.get("finished_at") or ""
+        source_label = f"来自你 {source_at[:10]} 的一次《{name}》行程规划"
+
     ranking = [r for r in rows if r.get("kind") != "美食"]
     food_ranking = [r for r in rows if r.get("kind") == "美食"]
     return {
-        "city": city.strip(),
+        "city": name,
         "ranking": ranking,
         "food_ranking": food_ranking,
-        "hint": "" if rows else "暂无该城热度数据：先点“刷新榜单”跑一轮刷榜任务（约 3~5 分钟）",
+        "source": source,               # refresh / trip / mixed / ""（无数据）
+        "source_at": source_at,
+        "source_label": source_label,
+        "hint": "" if rows else (
+            f"暂无《{name}》的榜单数据。两条路都行："
+            "① 点「刷新榜单」跑一轮采集（只采元数据，约 3~5 分钟）；"
+            "② 直接做一份行程规划——热度会一并采好并留在本页。"
+        ),
     }
 
 

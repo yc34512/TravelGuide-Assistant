@@ -77,6 +77,41 @@ QC_REPAIR_ROUNDS = 1     # 质量门禁不达标时的回炉轮次上限（F5.2�
 _UGC_WARNED = False
 
 
+def _persist_heat(city: str, heat_rows: list[dict], items_by_name: dict,
+                  food_names: set[str]) -> None:
+    """把行程顺带算出的热度写进 heat_snapshots（source='trip'）。
+
+    为什么值得做：行程流程本来就要为**景点与美食**都算热度（all_items_for_heat），
+    但此前只放在任务结果里，热度榜页读不到——用户想看榜还得为该城再刷一遍。
+    落库后一次采集两处可用。
+
+    与刷榜任务的差别只在"原料"：刷榜用 time_windows 拆近7天 / 7~60天 / 60天以上
+    三窗口并据此判四态趋势；行程这边同样拿得到原始 VideoItem，所以这里补算一次，
+    让两种来源的行结构完全一致——否则同一张表里会出现两种口径。
+
+    趋势统一用 trend_of（与刷榜同口径），而不是 heat_index 的"近期热度上升/平稳"，
+    避免一张榜单上并存两套趋势词汇。
+    """
+    from pipeline.heat import time_windows, trend_of
+
+    for row in heat_rows:
+        items = items_by_name.get(row["spot"]) or []
+        w = time_windows(items) if items else {}
+        knowledge.upsert_heat_snapshot(
+            city, row["spot"],
+            {
+                "score": row["score"],
+                "trend": trend_of(w.get("fresh7", 0.0), w.get("old60", 0.0), row["score"]),
+                "fresh7": w.get("fresh7"), "fresh60": w.get("fresh60"),
+                "old60": w.get("old60"),
+                "likes": row.get("likes", 0), "videos": row.get("videos", 0),
+                "mkt_ratio": row.get("mkt_ratio", 0), "sentiment": row.get("sentiment", ""),
+            },
+            kind="美食" if row["spot"] in food_names else "景点",
+            source="trip",
+        )
+
+
 def _try_crawl(name: str, job_id: str | None, log, limit: int = TRIP_SPOT_LIMIT,
                queries: list[str] | None = None) -> list:
     """现场采集的安全阀：UGC 源未启用（kernel-only）时不抛错，返回空并提示走缓存/LLM 基线。
@@ -643,6 +678,15 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             + (f"；排布兜底搬移 {len(plan.get('moved') or [])} 处" if plan.get("moved") else ""))
         if _cancelled():
             raise Cancelled()
+
+        # 顺带把这次采集到的热度落库（source=trip）：本次已为景点+美食都算了热度，
+        # 落库后用户去热度榜不必再为该城单独刷一遍（一次采集，两处可用）。
+        # 写库失败不影响行程本身——榜单是顺带的产物，不该因为它毁掉整单。
+        try:
+            _persist_heat(city, heat_rows, all_items_for_heat, set(food_profiles.keys()))
+            log(f"热度快照已落库：{len(heat_rows)} 条（热度榜可直接查看，无需再刷榜）")
+        except Exception as e:
+            log(f"热度快照落库失败（不影响行程与路书）：{e}")
 
         # 6) 渲染落盘：Markdown + HTML 可视化双输出（共享同一时间戳文件名）
         job["stage"] = "渲染路书"

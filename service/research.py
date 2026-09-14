@@ -409,22 +409,36 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
         job["stage"] = "生成报告"
         if _cancelled():
             raise Cancelled()
-        from pipeline.render import render_report
+        from pipeline.render import render_report, render_report_html
         from pipeline.report import synthesize_report
 
         body = synthesize_report(keyword, all_points)
-        report_path = REPORT_DIR / f"{keyword}_{datetime.now():%Y%m%d_%H%M%S}.md"
+        stamp = f"{datetime.now():%Y%m%d_%H%M%S}"
+        report_path = REPORT_DIR / f"{keyword}_{stamp}.md"
+        html_path = REPORT_DIR / f"{keyword}_{stamp}.html"
         report_path.write_text(
             render_report(keyword, body, items, all_points), encoding="utf-8"
         )
+        # 图文版：同一份数据的第二套产物——.md 是留档（可下载、可 diff），
+        # .html 是给人读的读物。渲染失败不该拖垮整个任务，降级为"无图文版"即可。
+        try:
+            html_path.write_text(
+                render_report_html(keyword, body, items, all_points), encoding="utf-8"
+            )
+        except Exception as e:
+            log(f"图文版渲染失败（Markdown 留档不受影响）：{e}")
+            html_path = None
         knowledge.update_report(record_id, str(report_path))
-        log(f"报告已保存：{report_path.name}")
+        log(f"报告已保存：{report_path.name}"
+            + (f" ｜ 图文版 {html_path.name}" if html_path else ""))
         # 成本可见：如实报本次 LLM 消耗（用户硬要求：只花免费额度与券，不扣现金）
         log(usage_note() + "（余量请到百炼控制台「免费额度」页核对，本项目不发联网搜索请求）")
 
         job["result"] = {
             "report_path": str(report_path),
             "report_name": report_path.name,
+            # 图文版文件名：与报告同名不同后缀。None = 渲染失败，前端按无图文版处理
+            "html_name": html_path.name if html_path else None,
             "markdown": report_path.read_text(encoding="utf-8"),
             "cache_hit": job.get("cache_hit", False),
             "stats": {
