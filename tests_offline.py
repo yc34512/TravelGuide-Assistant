@@ -1228,7 +1228,7 @@ class TestCrawlSpeedUp(unittest.TestCase):
 
 class TestMcpAndOpenapi(unittest.TestCase):
     def test_mcp_tools_registered(self):
-        """MCP 服务器注册了全套 9 个工具；plan_trip 参数面与 /api/trip 对齐（防再次漂移）。"""
+        """MCP 服务器注册了全套 10 个工具；plan_trip 参数面与 /api/trip 对齐（防再次漂移）。"""
         import asyncio
 
         import mcp_server
@@ -1239,7 +1239,7 @@ class TestMcpAndOpenapi(unittest.TestCase):
             names,
             {"check_service", "start_research", "plan_trip", "get_job_status",
              "cancel_research", "list_reports", "get_report_content",
-             "get_city_heat", "refresh_city_heat"},
+             "get_city_heat", "refresh_city_heat", "open_ui"},
         )
         # 预算已退役不得回潮；start_date 与 api_server.TripIn 对齐（闭馆日校验）
         trip_tool = next(t for t in tools if t.name == "plan_trip")
@@ -1251,6 +1251,36 @@ class TestMcpAndOpenapi(unittest.TestCase):
             props,
             {"city", "days", "hotel", "spots", "preferences", "start_date", "preference_mode"},
         )
+
+    def test_web_url_is_always_handed_back(self):
+        """开网页是交付的一部分：相关工具必须把网页地址交出来。
+
+        多数 MCP 客户端自己开不了浏览器，若响应里不带地址，客户端只能猜、或让
+        用户自己去找——所以 `server_url` / `url` 是必须的，服务不可用时也要给。
+        """
+        import asyncio
+        from unittest import mock
+
+        import mcp_server
+
+        def _call(fn):
+            return asyncio.run(getattr(fn, "fn", fn)())
+
+        # check_service：health 与网页地址一并返回
+        with mock.patch.object(mcp_server, "_ensure_service",
+                               new=mock.AsyncMock(return_value=None)), \
+                mock.patch.object(mcp_server, "_get",
+                                  new=mock.AsyncMock(return_value={"status": "ok"})):
+            got = _call(mcp_server.check_service)
+        self.assertEqual(got["status"], "ok")
+        self.assertEqual(got["server_url"], mcp_server.BASE_URL)
+
+        # 服务拉不起来：open_ui 仍要把 url 交回，便于客户端呈现给用户点击
+        with mock.patch.object(mcp_server, "_ensure_service",
+                               new=mock.AsyncMock(return_value="服务未启动或不可达")):
+            got = _call(mcp_server.open_ui)
+        self.assertFalse(got["ok"])
+        self.assertEqual(got["url"], mcp_server.BASE_URL)
 
     def test_openapi_schema(self):
         """OpenAPI 规范含全部 API 端点（供 Dify/Coze/GPTs 等平台导入）。"""

@@ -239,7 +239,7 @@ API 形态：`POST /api/trip {"city": "大同", "days": 3, "hotel": "大同古�
 
 **2. MCP 接入（Claude Desktop / Cursor / Cherry Studio / Cline 等）**
 
-仓库自带 `mcp_server.py`（stdio 传输，9 个工具：服务探测 / 发起攻略 / 发起行程 / 查城市热度 / 刷榜 / 查进度 / 取消 / 历史报告列表 / 读报告）。客户端配置（Claude Desktop / Cursor / Cherry Studio / Cline / **WorkBuddy** 等）：
+仓库自带 `mcp_server.py`（stdio 传输，10 个工具：服务探测 / 发起攻略 / 发起行程 / 查城市热度 / 刷榜 / 查进度 / 取消 / 历史报告列表 / 读报告 / **打开网页**）。客户端配置（Claude Desktop / Cursor / Cherry Studio / Cline / **WorkBuddy** 等）：
 
 ```json
 {

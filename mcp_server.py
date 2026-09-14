@@ -177,17 +177,39 @@ async def _post(path: str, body: dict | None = None):
 
 def _conn_err(e: Exception) -> dict:
     if isinstance(e, ServiceUnavailable):
-        return {"ok": False, "error": str(e)}
-    return {"ok": False, "error": _START_HINT, "detail": str(e)}
+        return {"ok": False, "error": str(e), "server_url": BASE_URL}
+    return {"ok": False, "error": _START_HINT, "detail": str(e), "server_url": BASE_URL}
 
 
 @mcp.tool()
 async def check_service() -> dict:
-    """检查旅游攻略助手服务是否在线，返回知识库概览（景点数/报告数）。"""
+    """检查旅游攻略助手服务是否在线，返回知识库概览（景点数/报告数）与网页地址。
+
+    响应里的 `server_url` 是网页版地址，可直接给用户点开——多数 MCP 客户端自己
+    开不了浏览器，得靠这个地址或在服务所在机器上调 open_ui。
+    """
     try:
-        return await _get("/api/health")
+        return {**(await _get("/api/health")), "server_url": BASE_URL}
     except Exception as e:
         return _conn_err(e)
+
+
+@mcp.tool()
+async def open_ui() -> dict:
+    """在**服务所在机器**的默认浏览器里打开网页版界面（服务没起会先自动拉起）。
+
+    为什么需要它：MCP 客户端通常没有开浏览器的能力，而"跑完报告打开网站看看"
+    是很自然的诉求。返回 `url` 供客户端在无法开浏览器时直接呈现给用户点击。
+    """
+    import webbrowser
+
+    if hint := await _ensure_service():
+        return {"ok": False, "error": hint, "url": BASE_URL}
+    try:
+        launched = webbrowser.open(BASE_URL)
+    except Exception as e:                       # 无桌面环境等：给 URL 交回客户端
+        return {"ok": False, "error": f"打开浏览器失败：{e}", "url": BASE_URL}
+    return {"ok": True, "url": BASE_URL, "browser_launched": bool(launched)}
 
 
 @mcp.tool()
