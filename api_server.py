@@ -193,8 +193,14 @@ def report_history():
 
 
 @app.get("/api/reports/download", summary="下载报告（Markdown/HTML，防目录穿越）")
+@app.head("/api/reports/download", include_in_schema=False)
 def download_report(name: str):
-    """按文件名下载报告（.md 或行程可视化 .html）。路径先 resolve 再校验父目录，防止 ../ 目录穿越。"""
+    """按文件名下载报告（.md 或行程可视化 .html）。路径先 resolve 再校验父目录，防止 ../ 目录穿越。
+
+    同时挂 HEAD：网页端点历史里的行程报告时，先用 HEAD 探一下 HTML 路书是否存在——
+    存在才开新标签页，否则会开出 404 空页（早期报告只留了 Markdown）。只回响应头，
+    不传 100KB+ 正文，探针成本可忽略。
+    """
     path = (REPORT_DIR / name).resolve()
     if path.parent != REPORT_DIR.resolve() or path.suffix not in (".md", ".html") or not path.exists():
         raise HTTPException(status_code=404, detail="报告不存在")
