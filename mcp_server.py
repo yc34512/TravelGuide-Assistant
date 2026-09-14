@@ -1,6 +1,6 @@
 """MCP 服务器：把旅游攻略助手暴露为标准工具，供任意 MCP 兼容智能体调用。
 
-适用客户端：Claude Desktop / Cursor / Cherry Studio / Cline / Qoder 等。
+适用客户端：Claude Desktop / Cursor / Cherry Studio / Cline / Qoder / WorkBuddy 等。
 以 stdio 方式接入，客户端配置示例：
 
     {
@@ -12,39 +12,172 @@
       }
     }
 
-目标服务地址用环境变量 TG_SERVER_URL 覆盖（默认 http://127.0.0.1:8000）。
-本进程只做"翻译"：HTTP 调不通时返回友好的排障指引，而不是抛栈。
+目标服务地址用环境变量 TG_SERVER_URL 覆盖；缺省时取项目 config 里的
+SERVER_HOST / SERVER_PORT（与 run_server.py 起在同一处，即 http://127.0.0.1:8000）。
+
+**本进程会按需自动拉起本地服务**：任何工具调用都先探一次 /api/health，不通就在
+后台起一个 uvicorn（刻意不弹浏览器），就绪后继续执行原调用——客户端因此不需要
+先手动启动服务。拉不起来时返回友好的排障指引，而不是抛栈。
 """
+import asyncio
 import os
+import urllib.parse
+from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-BASE_URL = os.getenv("TG_SERVER_URL", "http://127.0.0.1:8000")
+PROJECT_DIR = Path(__file__).resolve().parent
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+_BOOT_WAIT = 20                 # 冷启动最多等 20 秒（实测通常 2~4 秒）
+_AUTOSTART_LOCK = asyncio.Lock()
+_autostart_tried = False        # 本进程只尝试拉起一次，避免连续失败时反复 spawn
+
+
+class ServiceUnavailable(RuntimeError):
+    """服务不可用（含自动拉起失败），携带给用户看的排障说明。"""
+
+
+def _resolve_target() -> tuple[str, str, int, bool]:
+    """定出 (base_url, host, port, 是否本机)。
+
+    端口缺省时回落到项目 config，保证与 run_server.py 起在同一地址；主机名按
+    TG_SERVER_URL 解析，用于判断"要不要在本地自动拉起"——指向远端服务时不该
+    在本机乱起进程。
+    """
+    try:
+        from config import SERVER_HOST, SERVER_PORT
+    except Exception:                     # 单独拷走此文件时也能跑
+        SERVER_HOST, SERVER_PORT = "127.0.0.1", 8000
+    env = os.getenv("TG_SERVER_URL", "").strip()
+    if not env:
+        return f"http://{SERVER_HOST}:{SERVER_PORT}", SERVER_HOST, SERVER_PORT, True
+    p = urllib.parse.urlparse(env)
+    host = p.hostname or SERVER_HOST
+    return env.rstrip("/"), host, p.port or SERVER_PORT, host in _LOCAL_HOSTS
+
+
+BASE_URL, _HOST, _PORT, _IS_LOCAL = _resolve_target()
 
 mcp = FastMCP("travel-guide-assistant")
 
 _START_HINT = (
-    "服务未启动或不可达。请先启动旅游攻略助手服务：在项目目录执行 "
+    "服务未启动或不可达。可手动启动旅游攻略助手服务：在项目目录执行 "
     "python run_server.py（Windows 可双击 运行服务.bat），等待 3 秒后重试。"
 )
 
 
+def _client(**kw) -> httpx.AsyncClient:
+    """统一的 httpx 客户端。
+
+    trust_env=False 对本机地址是关键：本机请求绝不能走 HTTP_PROXY。企业代理、
+    容器/沙箱或任何设了环境代理的机器上，代理对 127.0.0.1 的处理各不相同
+    （实测常见的是直接回 502），会表现为"服务明明起着却调不通"这种极难排查的
+    假故障。只有指向远端服务（TG_SERVER_URL 非本机）时才允许读环境代理。
+    """
+    return httpx.AsyncClient(base_url=BASE_URL, trust_env=not _IS_LOCAL, **kw)
+
+
+async def _healthy(timeout: float = 2.0) -> bool:
+    """探一次 /api/health（轻量、短超时，仅用于判断要不要拉起服务）。"""
+    try:
+        async with _client(timeout=timeout) as c:
+            return (await c.get("/api/health")).status_code == 200
+    except Exception:
+        return False
+
+
+def _autostart_log() -> Path:
+    """自动拉起服务的日志落点。
+
+    刻意不丢 DEVNULL：服务若是"起来了又立刻死"，DEVNULL 会让失败彻底不可诊断
+    （这正是本项目早期 Agent 包装最难受的一点）。写到 data/debug/ 下，出问题
+    时能直接看栈。目录不可写则退回落项目根的单个日志文件。
+    """
+    d = PROJECT_DIR / "data" / "debug"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "server_autostart.log"
+    except Exception:
+        return PROJECT_DIR / "server_autostart.log"
+
+
+def _spawn_server() -> str | None:
+    """后台拉起本地服务。成功返回 None，失败返回原因。
+
+    刻意直接起 uvicorn 而不是跑 run_server.py：后者会在 1.5 秒后
+    `webbrowser.open()` 弹出浏览器窗口——由智能体触发的启动不该抢用户的焦点。
+
+    进程与 MCP 客户端解耦（Windows DETACHED_PROCESS / POSIX start_new_session）：
+    客户端退出后服务继续存活，下次调用直接命中，不必再等一次冷启动。
+    """
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, "-m", "uvicorn", "api_server:app",
+           "--host", _HOST, "--port", str(_PORT), "--log-level", "warning"]
+    try:
+        log = open(_autostart_log(), "ab", buffering=0)   # noqa: SIM115 —— 交给子进程持有
+        kwargs: dict = {"cwd": str(PROJECT_DIR),
+                        "stdin": subprocess.DEVNULL,
+                        "stdout": log, "stderr": subprocess.STDOUT}
+        if os.name == "nt":
+            kwargs["creationflags"] = 0x00000008 | 0x08000000  # DETACHED_PROCESS | CREATE_NO_WINDOW
+        else:
+            kwargs["start_new_session"] = True
+        subprocess.Popen(cmd, **kwargs)
+        return None
+    except Exception as e:                      # 拉不起来也不抛栈，交回排障话术
+        return str(e)
+
+
+async def _ensure_service() -> str | None:
+    """确保本地服务可用：健康则直接过；否则自动拉起一次并等待就绪。
+
+    返回 None 表示可用，否则返回给用户看的排障说明。
+    只对**本机**地址自动拉起——TG_SERVER_URL 指向远端服务时不该在本地乱起进程。
+    """
+    global _autostart_tried
+    if await _healthy():
+        return None
+    if not _IS_LOCAL:
+        return _START_HINT
+    async with _AUTOSTART_LOCK:
+        if await _healthy():            # 等锁期间可能已被别的调用拉起来了
+            return None
+        if _autostart_tried:            # 本进程只尝试一次，避免连续失败时反复 spawn
+            return _START_HINT
+        _autostart_tried = True
+        if err := _spawn_server():
+            return f"{_START_HINT}（自动拉起失败：{err}）"
+        for _ in range(_BOOT_WAIT):     # 冷启动通常 2~4 秒
+            await asyncio.sleep(1)
+            if await _healthy():
+                return None
+    return f"{_START_HINT}（已尝试自动拉起，但 {_BOOT_WAIT} 秒内仍未就绪，请手动排查）"
+
+
 async def _get(path: str, params: dict | None = None):
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30) as c:
+    if hint := await _ensure_service():
+        raise ServiceUnavailable(hint)
+    async with _client(timeout=30) as c:
         r = await c.get(path, params=params)
         r.raise_for_status()
         return r.json()
 
 
 async def _post(path: str, body: dict | None = None):
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30) as c:
+    if hint := await _ensure_service():
+        raise ServiceUnavailable(hint)
+    async with _client(timeout=30) as c:
         r = await c.post(path, json=body or {})
         r.raise_for_status()
         return r.json()
 
 
 def _conn_err(e: Exception) -> dict:
+    if isinstance(e, ServiceUnavailable):
+        return {"ok": False, "error": str(e)}
     return {"ok": False, "error": _START_HINT, "detail": str(e)}
 
 
