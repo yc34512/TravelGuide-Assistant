@@ -35,7 +35,7 @@ if errorlevel 1 (
 )
 
 echo [3/3] Self-check: importing key packages ...
-".venv\Scripts\python.exe" -c "import DrissionPage, openai, fastapi, keyring, rich; print('[OK] all dependencies ready')"
+".venv\Scripts\python.exe" -c "import DrissionPage, openai, fastapi, uvicorn, keyring, rich, jinja2, mcp, yaml, dotenv; print('[OK] all dependencies ready')"
 if errorlevel 1 (
     echo [X] Self-check failed. Re-run this script or check the error above.
     pause

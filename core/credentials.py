@@ -27,12 +27,13 @@ class NoApiKeyError(RuntimeError):
     """未配置任何 API Key。"""
 
 
-# 常见 OpenAI 兼容服务商预设：(名称, base_url, 默认模型)
+# 常见 OpenAI 兼容服务商预设：(名称, base_url, 默认模型, Key 申请入口)
+# 四家均有免费额度；免费额度耗尽「用完即停」等成本设置见 README「成本控制」。
 PROVIDERS = [
-    ("阿里云百炼 DashScope（通义千问）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-turbo"),
-    ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
-    ("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
-    ("Moonshot Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k"),
+    ("阿里云百炼 DashScope（通义千问）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-turbo", "https://bailian.console.aliyun.com/"),
+    ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "https://platform.deepseek.com/"),
+    ("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash", "https://open.bigmodel.cn/"),
+    ("Moonshot Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k", "https://platform.moonshot.cn/"),
 ]
 
 
@@ -106,8 +107,9 @@ def interactive_setup(force: bool = False) -> dict | None:
     print("  Key 将保存进本机系统凭据管理器，")
     print("  不会写入项目文件，也不会被提交到 Git。")
     print("=" * 52)
-    for i, (name, _, _) in enumerate(PROVIDERS, 1):
-        print(f"  {i}. {name}")
+    print("  （1-4 均有免费额度；Key 申请入口如下）")
+    for i, (name, _, _, console) in enumerate(PROVIDERS, 1):
+        print(f"  {i}. {name}  {console}")
     print("  5. 其他 OpenAI 兼容服务（自定义接入点）")
 
     try:
@@ -120,7 +122,7 @@ def interactive_setup(force: bool = False) -> dict | None:
                 base_url = input("base_url（如 https://xxx.com/v1）: ").strip()
                 model = input("模型名（如 qwen-plus）: ").strip()
             else:
-                _, base_url, model = PROVIDERS[int(choice) - 1]
+                _, base_url, model, _ = PROVIDERS[int(choice) - 1]
                 custom = input(f"模型名（回车用默认 {model}）: ").strip()
                 if custom:
                     model = custom
@@ -137,7 +139,9 @@ def interactive_setup(force: bool = False) -> dict | None:
                 continue
             save_llm_config(api_key, base_url, model)
             print("[OK] 验证通过，Key 已安全保存到系统凭据管理器。")
-            print(f"     接入点: {base_url}  模型: {model}\n")
+            print(f"     接入点: {base_url}  模型: {model}")
+            print("     提示：高德 Key 与抖音采集都是可选项——不配也能跑（交通降级为 LLM 估算、")
+            print("     行程走 LLM 基线）；想启用实测交通线路 / 真实评论数据时见 README 对应章节。\n")
             return {"api_key": api_key, "base_url": base_url, "model": model}
     except (EOFError, KeyboardInterrupt):
         print("\n未完成配置；之后运行时会再次提示。")

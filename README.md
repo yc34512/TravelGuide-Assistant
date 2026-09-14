@@ -4,6 +4,8 @@
 
 **基于抖音真实评论数据的避坑型智能行程规划器**：用户说想去哪旅游 → 大模型（基线知识；联网搜索默认关闭以免独立计费，见「成本控制」）给出完整旅游清单建议 → 清单中的景点/网红店铺经浏览器采集验证，让数据更真实 → 生成含避坑专题与热度榜的逐日行程路书（Markdown + HTML 可视化）。
 
+**先看效果（无需安装任何东西）**：[示例路书 · 上海 3 天（Markdown，GitHub 上直接阅读）](examples/示例路书_上海3天.md) ｜ [可视化 HTML 版](examples/示例路书_上海3天.html)（下载后双击打开，含行程全景图、详情弹层与来源链接）。
+
 ## 三大核心卖点（不只是生成一份攻略）
 
 1. **避坑提示**：每个行程点与避坑专题都附**评论原文引用 + 来源视频链接**——不只告诉你哪里好玩，还告诉你哪里会踩坑、坑长什么样；
@@ -28,7 +30,7 @@
 
 - **平台中立的分析内核**：`pipeline/` 只消费统一数据模型（`core/models.py`），不感知数据来自哪个平台；更换/新增数据源无需改内核。
 - **抖音适配器默认关闭（opt-in）**：`SOURCE_DOUYIN_ENABLED` 默认 `false`。全新 clone **不发起任何平台采集**，本地已采缓存仍可读取。启用需在 `.env` 设 `SOURCE_DOUYIN_ENABLED=true`，**启用者自行承担责任**（遵守平台 ToS、仅个人/研究用途、采集专用小号）。
-  - 不启用时两者的表现**不一样**，别被"kernel-only"四个字误导：**行程规划**会降级走 LLM 基线（不抛错，结果里标注 `collect_mode: kernel-only`）；而**攻略报告**会直接失败并给出启用指引——它的价值就是真实评论，没有素材时给出一份"基于大模型常识的攻略"反而是欺骗。第一次使用请照下面「安装」三步走，其中第 3 步会让你决定要不要启用采集。
+  - 不启用时两者的表现**不一样**，别被"kernel-only"四个字误导：**行程规划**会降级走 LLM 基线（不抛错，结果里标注 `collect_mode: kernel-only`）；而**攻略报告**会直接失败并给出启用指引——它的价值就是真实评论，没有素材时给出一份"基于大模型常识的攻略"反而是欺骗。第一次使用请照下面「安装」章节走一遍，其中第 4 步会让你决定要不要启用采集。
 - **合规护栏默认开启**：频控（2.5~5s）、去媒体、评论去标识化为底线；启用 UGC 源前校验频控未被禁用（为 0 则拒绝启用）。
 - **绝不碰绕过技术**：检测到验证码/风控中间页时**只停止本次会话采集**并回退缓存/基线，不尝试任何验证码破解或签名绕过。
 - **规范免责声明**：启用 UGC 源时运行时打印一次性免责告知；报告自带免责声明与来源链接。
@@ -40,25 +42,32 @@
 - `.gitignore` 已排除 `.env`、`data/`、`browser_profile/`（含登录态）等所有本地敏感数据；
 - 报告输出带免责声明与来源链接，原始内容不落库不分发。
 
-## 安装（三步，全程双击）
+## 安装（Windows 三步，约 10 分钟出第一份路书）
 
-环境要求：**Python 3.10+**（Windows；需 Chrome 或 Edge 浏览器，代码会自动检测）。
+需要准备的只有两样：**Python 3.10+**（[官网下载](https://www.python.org/downloads/)，安装时**务必勾选 "Add to PATH"**；需 Chrome 或 Edge 浏览器，代码会自动检测）和**任意一家大模型的 API Key**（[阿里云百炼](https://bailian.console.aliyun.com/) / [DeepSeek](https://platform.deepseek.com/) / [智谱](https://open.bigmodel.cn/) / [Moonshot](https://platform.moonshot.cn/)，均有免费额度，成本设置见「成本控制」）。高德 Key 与抖音采集**全部可选**，不配也能跑。
 
+0. **获取代码**：`git clone https://github.com/YC34512/TravelGuide-Assistant.git`，或在 GitHub 页 **Code → Download ZIP** 后解压；
 1. 双击 **`install.bat`** —— 自动建虚拟环境、装依赖、自检（首次约几分钟，可重复执行）；
-2. **先配一次 API Key**：双击 **`运行.bat`**（不带参数），首次会自动弹出配置向导，配好后按 `Ctrl+C` 退出。
-   ⚠️ 配置向导只挂在 `运行.bat` 上；直接启服务（第 3 步）不会弹向导，只会打印一行提醒。
+2. **配一次 API Key**：双击 **`运行.bat`**（不带参数）首次会自动弹出配置向导，配好后按 `Ctrl+C` 退出即可。直接启服务（第 3 步）时若还没配 Key，也会就地弹出同一个向导——两条路都行，不必记命令；
 3. 双击 **`运行服务.bat`** —— 启动网页版，浏览器自动打开 `http://127.0.0.1:8000`（推荐）；或双击 `运行.bat` 走命令行交互；
-4. （要用到真实评论数据时）把 `.env.example` 复制为 `.env` 并设 `SOURCE_DOUYIN_ENABLED=true`，首次采集时按提示用**采集小号**扫码登录抖音（只需一次）。不启用也能跑通：行程规划降级走 LLM 基线，攻略报告则会明确报错并给出启用指引。
+4. （可选：要用到真实评论数据时）把 `.env.example` 复制为 `.env` 并设 `SOURCE_DOUYIN_ENABLED=true`，首次采集时按提示用**采集小号**扫码登录抖音（只需一次）。不启用也能跑通：行程规划降级走 LLM 基线，攻略报告则会明确报错并给出启用指引。
 
-命令行方式（备选）：
+### 手动安装（macOS / Linux，或偏好命令行的 Windows 用户）
+
+未在 macOS / Linux 真机充分验证，欢迎反馈问题；采集需要本机有 Chrome / Chromium（DrissionPage 自动检测）。
 
 ```bash
+git clone https://github.com/YC34512/TravelGuide-Assistant.git
+cd TravelGuide-Assistant
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+python run_cli.py setup     # 配置 API Key（存入系统凭据管理器 / 钥匙串）
+python run_server.py        # 启动网页版（或 python run_cli.py 走命令行）
 ```
 
 ## 配置 API Key（首次运行一次即可）
 
-双击 `运行.bat`，首次会自动弹出配置向导：
+首次运行（双击 `运行.bat`，或启动服务时检测到未配置）会自动弹出配置向导：
 
 1. 选择服务商（阿里百炼 / DeepSeek / 智谱 / Moonshot / 自定义）；
 2. 粘贴你自己的 API Key（**输入不回显**）；
@@ -186,6 +195,8 @@ API 形态：`POST /api/trip {"city": "大同", "days": 3, "hotel": "大同古�
 │   └── trip_report.html # 行程可视化模板（Jinja2：时间线 + 避坑警示卡 + 热度进度条，离线降级）
 ├── product/
 │   └── PRD.md           # 产品需求文档（避坑型智能行程规划器）
+├── examples/
+│   └── 示例路书_上海3天.*  # 免安装预览：一份完整生成结果（Markdown + 可视化 HTML）
 ├── service/
 │   ├── research.py      # 攻略任务编排：采集 → 提取 → 缺口补全 → 验证 → 报告（支持取消/重试）
 │   ├── trip.py          # 行程任务编排：城市攻略层 → 视频草案审核 → 候选验证 → 逐点调研 → 档案/避坑/热度 → 排线
@@ -214,6 +225,7 @@ API 形态：`POST /api/trip {"city": "大同", "days": 3, "hotel": "大同古�
 | 提示未检测到登录态 | 在弹出的浏览器窗口中用**采集小号**扫码；登录态保存在 `browser_profile/`，一次即可 |
 | 搜到 0 条结果 | 未登录、关键词过冷或页面改版；按上节步骤查 `data/debug/` 快照 |
 | API Key 无效/欠费报错 | `运行.bat setup`（或 `python run_cli.py setup`）重新配置；欠费需到服务商控制台处理 |
+| 提交任务报"未配置 API Key" | 还没配 Key：双击 `运行.bat` 或启动服务时都会自动弹出配置向导；也可手动 `python run_cli.py setup` |
 | 报错含 `AllocationQuota.FreeTierOnly` | 该模型免费额度已用尽且控制台开了「免费额度用完即停」（这是防扣现金的保护，不是故障）；换成仍有额度的模型：`python run_cli.py setup` |
 | 任务跑到一半想停 | 网页版点"取消任务"（当前步骤结束后生效，浏览器安全释放） |
 | 服务重启后看不到进行中的任务 | 终态任务已落库：网页历史报告卡片仍可浏览/下载；运行中的任务重启后视为中断，需重新发起 |
