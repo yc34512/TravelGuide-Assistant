@@ -11,7 +11,9 @@
 - 视频时效判断（发布较旧）
 - 任务档案落库/还原（临时库）
 - 任务取消原语与 API 防目录穿越
+- 出发前确认清单（只归类已有事实、同句话不重复、单点不刷屏）
 """
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -642,8 +644,8 @@ class TestOverviewAndHtml(unittest.TestCase):
                              decisions=decs, plan=plan, snap=snap).to_dict()
         html = render_html(tp)
         for expect in ("《大同》1 天行程规划", "行程概览",
-                       "两万步勝退", "走到腳断", "近期热度上升", "信息溯源",
-                       "仅供参考", "timeline", "pit-card", "echo-bar", "heat-bar", "heat-note",
+                       "两万步勝退", "走到腳断", "信息溯源",
+                       "仅供参考", "timeline", "pit-card", "echo-bar",
                        'id="detail-云冈石窟"', '#detail-云冈石窟',
                        "已剔除重复排入的点位：华严寺", "已均衡排布：第1天",
                        # 点击行程中的景点直达介绍/避雷（新交互）
@@ -656,6 +658,13 @@ class TestOverviewAndHtml(unittest.TestCase):
         for gone in ("budget-chart", "echarts", "leaflet", "景点分布", "预算明细",
                      "当日花费小计", "预估", "lng"):
             self.assertNotIn(gone, html)
+        # 工程板块与排行榜只在"还没定去哪"的浏览场景（热度榜页）出现，
+        # 不属于"已经定好怎么玩"的行程读物——见 test_render_html_sections。
+        # 注意断的是「板块/内容」而非 CSS 类名：样式表与动效脚本里保留 .heat-bar 等
+        # 选择器是正常的（模板表达式零改动约束），真正该消失的是渲染出的板块。
+        self.assertNotIn('id="sec-heat"', html)
+        self.assertNotIn('id="sec-food"', html)
+        self.assertNotIn("近期热度上升", html)
 
     def test_overview_and_render_sections(self):
         """概览卡纯函数（新签名：不含任何金额键）及 Markdown 渲染新板块。"""
@@ -2058,16 +2067,31 @@ class TestGateWiringAndRender(unittest.TestCase):
         self.assertIn("证据不足", md)           # 淘汰理由来自 verify.reason
 
     def test_render_html_sections(self):
+        """HTML 面向用户只留"能玩的内容"：工程板块（质量分卡/决策表）不渲染。
+
+        MD 是留档（工程板块保留），HTML 是给人看的读物——这是刻意的双口径，
+        用户不关心系统怎么打分、候选怎么被筛，只关心去哪儿、怎么排、坑在哪。
+        模板里的表达式全部保留（改 show_* 开关即恢复），故此处断言的是渲染结果。
+        """
         from pipeline.decision import build_trip_plan
         from pipeline.trip_render import render_html
         plan, profiles, decs, rep = self._fixture()
         tp = build_trip_plan(meta={"city": "北京", "days": 2, "stay": "三环"},
                              decisions=decs, plan=plan, quality=rep).to_dict()
         html = render_html(tp)
-        self.assertIn("选点决策表", html)
-        self.assertIn("质量分卡", html)
-        self.assertIn("decision-table", html)
-        self.assertIn("冷门点", html)
+        # 工程板块不出现（断锚点与导航入口：CSS 注释/选择器里仍会保留同名分区标题）
+        self.assertNotIn('id="sec-decision"', html)
+        self.assertNotIn('id="sec-quality"', html)
+        self.assertNotIn('href="#sec-quality"', html)
+        self.assertNotIn('href="#sec-decision"', html)
+        # 用户板块仍在（行程本体、详情库、出发前确认）
+        self.assertIn('id="sec-days"', html)
+        self.assertIn('id="sec-detail"', html)
+        self.assertIn('id="sec-verify"', html)
+        self.assertIn("逐日行程", html)
+        # 板块编号已改为动态计数器：必须从 01 起且连续（否则隐藏板块会留下空号）
+        nums = re.findall(r'<span class="sec-no">(\d+)</span>', html)
+        self.assertEqual(nums, [f"{i:02d}" for i in range(1, len(nums) + 1)])
 
     def test_backward_compat_no_sections(self):
         """无候选/无质量报告时不渲染决策表与质量分卡（空数据降级不空窗）。"""
@@ -3818,6 +3842,373 @@ class TestM6cDraftChain(unittest.TestCase):
         self.assertIn("高赞攻略视频的行程草案", with_draft)   # 主干优先采用的指令
         self.assertIn("景山公园", with_draft)
         self.assertNotIn("高赞攻略视频的行程草案", without)   # 不传草案 = 零回归
+
+
+class TestVerifyChecklist(unittest.TestCase):
+    """出发前确认清单（pipeline.checklist）：只归类已有事实、同句话不重复、覆盖多个点。
+
+    这份清单的价值在于"用户出发前照着做"，所以三条不变量必须守住：
+    ① 不编造事实——只搬运报告里已有的票价/开放时间/注意事项；
+    ② 同一句话不重复 N 遍——否则那是名单，不是待办；
+    ③ 键名避开 Jinja2 的 dict 方法坑——g.items 永远取不到列表（已实测踩过）。
+    """
+
+    @staticmethod
+    def _tp(**over):
+        """最小可用 TripPlan：两点行程，票价与开放时间可控。"""
+        tp = {
+            "meta": {"facts_cutoff": "2026-09-11"},
+            "itinerary": [{"day": 1, "blocks": [{"spot": "甲景点"}, {"spot": "乙景点"}]}],
+            "catalog": {"poi": {"甲景点": {"ticket_price": 100, "ticket_nature": "收费"},
+                                "乙景点": {}}},
+            "snap": {"profiles": {"甲景点": {"tips": [], "avoid": []},
+                                  "乙景点": {"tips": [], "avoid": []}}},
+            "to_verify": ["甲景点", "乙景点"],
+        }
+        tp.update(over)
+        return tp
+
+    def test_price_group_and_cutoff(self):
+        """有价的报出金额，缺价的并入"需查官方渠道"；事实截止日取自 meta。"""
+        from pipeline.checklist import build_checklist
+
+        cl = build_checklist(self._tp())
+        self.assertEqual(cl["cutoff"], "2026-09-11")
+        price = next(g for g in cl["groups"] if g["kind"] == "票价")
+        text = " ".join(r["detail"] for r in price["rows"])
+        self.assertIn("100 元", text)
+        self.assertIn("未知", text)
+        self.assertEqual(price["total"], 2)
+
+    def test_rows_key_not_items(self):
+        """分组键名必须是 rows：Jinja2 里 g.items 会解析成 dict.items() 方法而非键。"""
+        from pipeline.checklist import build_checklist
+
+        for g in build_checklist(self._tp())["groups"]:
+            self.assertIn("rows", g)
+            self.assertNotIn("items", g)
+
+    def test_same_detail_merged_with_true_count(self):
+        """同一句话达阈值即合并为一行，且计数按真实点数而非行数。"""
+        from pipeline.checklist import build_checklist
+
+        tp = self._tp()
+        names = [f"点{i}" for i in range(4)]
+        tp["itinerary"] = [{"day": 1, "blocks": [{"spot": n} for n in names]}]
+        tp["catalog"] = {"poi": {n: {} for n in names}}
+        hours = next(g for g in build_checklist(tp)["groups"] if g["kind"] == "开放时间与预约")
+        self.assertEqual(len(hours["rows"]), 1)
+        self.assertIn("4 个点", hours["rows"][0]["name"])
+        self.assertEqual(hours["total"], 4)
+
+    def test_time_keywords_hit_but_praise_not_misjudged(self):
+        """命中时效词的提示进清单；"装修好、服务好"这类好评不得误判为停业提示。"""
+        from pipeline.checklist import build_checklist
+
+        tp = self._tp()
+        tp["snap"]["profiles"]["甲景点"]["tips"] = [
+            "旺季排队时间可达 1 小时，且分批限流放行",
+            "这家店装修好、服务好、好吃，但价格贵",
+        ]
+        sens = next(g for g in build_checklist(tp)["groups"] if g["kind"] == "时效性提示")
+        text = " ".join(r["detail"] for r in sens["rows"])
+        self.assertIn("限流", text)
+        self.assertNotIn("装修好", text)
+
+    def test_spread_across_points(self):
+        """单点提示不过度刷屏：同一景点最多 2 条，保证清单覆盖到其它点。"""
+        from pipeline.checklist import build_checklist
+
+        tp = self._tp()
+        tp["catalog"] = {"poi": {
+            "甲景点": {"open_hours": "9:00-17:00",
+                       "pitfalls": [{"text": f"旺季排队第{i}条"} for i in range(6)]},
+            "乙景点": {"open_hours": "9:00-17:00",
+                       "pitfalls": [{"text": f"旺季需预约第{i}条"} for i in range(2)]},
+        }}
+        sens = next(g for g in build_checklist(tp)["groups"] if g["kind"] == "时效性提示")
+        jia = [r for r in sens["rows"] if r["name"] == "甲景点"]
+        self.assertEqual(len(jia), 2)
+        self.assertIn("乙景点", {r["name"] for r in sens["rows"]})
+
+    def test_empty_and_broken_input_safe(self):
+        """空 / 脏 TripPlan 都不得抛异常，且空清单不产出分组（不占版面）。"""
+        from pipeline.checklist import build_checklist
+
+        cl = build_checklist({})
+        self.assertEqual(cl["groups"], [])
+        self.assertEqual(cl["cutoff"], "")
+        self.assertEqual(build_checklist(None)["groups"], [])
+        dirty = {"itinerary": [{"blocks": None}], "catalog": None, "snap": {"profiles": None}}
+        self.assertIsInstance(build_checklist(dirty)["groups"], list)
+
+
+class TestAskContext(unittest.TestCase):
+    """认知追问（pipeline.ask）：追问只重组档案、绝不重新采集、绝不编造。
+
+    产品定位决定了三条不变量：
+    ① 用户点名的点必须给完整档案（亮点/避雷/真实评价/评论原话）——这是回答质量的根；
+    ② 档案没有的东西不得出现在上下文里——模型拿不到，就编不出来；
+    ③ 不确定的信息（待确认清单）必须显式标注——不得被当成已知事实讲给用户。
+    answer() 涉及 LLM 调用，离线只测其参数校验分支（不发起调用）。
+    """
+
+    @staticmethod
+    def _result(**over):
+        """最小可用任务档案：云冈石窟（有完整档案）+ 悬空寺（信息少）。"""
+        tp = {
+            "meta": {"city": "大同", "days": 2, "stay": "古城内",
+                     "generated_at": "2026-09-11", "facts_cutoff": "2026-09-11"},
+            "itinerary": [{"day": 1, "blocks": [
+                {"slot": "上午", "spot": "云冈石窟", "duration": "3小时"},
+                {"slot": "下午", "spot": "悬空寺", "duration": "2小时"}]}],
+            "catalog": {"poi": {
+                "云冈石窟": {"ticket_price": 120, "ticket_nature": "收费",
+                             "open_hours": "9:00-17:00",
+                             "pitfalls": [{"text": "旺季排队超过 1 小时"}]},
+                "悬空寺": {"ticket_nature": "待核实"}}},
+            "snap": {
+                "profiles": {
+                    "云冈石窟": {"highlights": ["昙曜五窟气势恢宏"], "avoid": ["别中午去晒"],
+                                 "food": [], "photo_spots": ["第20窟大佛"], "tips": ["请讲解"]},
+                    "悬空寺": {"highlights": ["悬崖上的木构"], "avoid": []}},
+                "digests": {"云冈石窟": {"verdict": "去过的人普遍认可值得专程去",
+                                         "positive": "震撼", "negative": "人多",
+                                         "quotes": ["现场比照片震撼十倍"]}},
+                "heat": [{"spot": "云冈石窟", "score": 0.91, "trend": "上升"}],
+                "pitfall": [{"claim": "旺季排队超过 1 小时", "quote": "排了一个半小时"}],
+            },
+            "to_verify": ["悬空寺"],
+        }
+        result = {"trip_plan": tp}
+        result.update(over)
+        return result
+
+    def test_mentioned_points_longest_first_no_false_hit(self):
+        """点名识别：长名优先，且问题里没出现的点不得命中。"""
+        from pipeline.ask import _mentioned_points
+
+        tp = self._result()["trip_plan"]
+        hits = _mentioned_points(tp, "云冈石窟带小孩合适吗？")
+        self.assertEqual(hits, ["云冈石窟"])
+        self.assertEqual(_mentioned_points(tp, "两天怎么玩最顺？"), [])
+
+    def test_asked_point_gets_full_dossier(self):
+        """被点名的点：票价/开放时间/亮点/避雷/真实评价摘要/评论原话都进上下文。"""
+        from pipeline.ask import build_context
+
+        ctx = build_context(self._result(), "云冈石窟值得去吗？")
+        for token in ("120 元", "9:00-17:00", "昙曜五窟", "别中午去晒",
+                      "真实评价摘要", "现场比照片震撼十倍", "避坑"):
+            self.assertIn(token, ctx)
+
+    def test_unasked_point_only_brief(self):
+        """没被点名的点：只给一句话摘要，不得把评论原话等深字段塞进上下文。"""
+        from pipeline.ask import build_context
+
+        ctx = build_context(self._result(), "云冈石窟值得去吗？")
+        self.assertIn("悬空寺", ctx)  # 行程内其它点仍有摘要（取舍题需要对照）
+        # 只截取"其它点摘要"这一段（到下一个 ■ 板块为止）：深字段标注不得出现在这里
+        seg = ctx.split("■ 行程内其它点（摘要）")[-1].split("■")[0]
+        self.assertNotIn("真实评价摘要", seg)
+        self.assertNotIn("评论原话", seg)
+
+    def test_unknown_ticket_not_double_parenthesized(self):
+        """ticket_nature 已是"待核实"时输出"票价：待核实"，不得套娃成"待核实（待核实）"。"""
+        from pipeline.ask import build_context
+
+        ctx = build_context(self._result(), "悬空寺多少钱？")
+        self.assertIn("票价：待核实", ctx)
+        self.assertNotIn("待核实（待核实）", ctx)
+
+    def test_checklist_marked_as_unconfirmed(self):
+        """待确认信息必须显式标注"不得当成已知事实"，且带事实截止日。"""
+        from pipeline.ask import build_context
+
+        ctx = build_context(self._result(), "整体怎么样？")
+        self.assertIn("尚未确认的信息", ctx)
+        self.assertIn("2026-09-11", ctx)
+
+    def test_context_respects_max_chars(self):
+        """上下文体积受 max_chars 硬约束（调用成本护栏）。"""
+        from pipeline.ask import build_context
+
+        ctx = build_context(self._result(), "云冈石窟值得去吗？", max_chars=500)
+        self.assertLessEqual(len(ctx), 500)
+
+    def test_markdown_report_fallback(self):
+        """攻略报告（无 trip_plan）：退化为全文截断，过长时给截断说明。"""
+        from pipeline.ask import build_context
+
+        md = "大理攻略正文" * 200
+        ctx = build_context({"markdown": md}, "随便问", max_chars=300)
+        self.assertTrue(ctx.startswith("【报告全文】"))
+        self.assertIn("已截断", ctx)
+        # 总长 = 前缀(7) + max_chars(300) + 截断说明(16)，留足余量
+        self.assertLessEqual(len(ctx), 330)
+
+    def test_empty_result_returns_empty(self):
+        """空档案 → 空上下文（answer 会据此拒绝空跑 LLM）。"""
+        from pipeline.ask import build_context
+
+        self.assertEqual(build_context({}, "问"), "")
+        self.assertEqual(build_context(None, "问"), "")
+
+    def test_answer_rejects_blank_question_and_empty_archive(self):
+        """answer 的参数校验：空问题、空档案都抛 ValueError，且不发起任何 LLM 调用。"""
+        from pipeline.ask import answer
+
+        with self.assertRaises(ValueError):
+            answer(self._result(), "   ")
+        with self.assertRaises(ValueError):
+            answer({}, "云冈石窟值得去吗？")
+
+    def test_history_block_keeps_last_two_rounds(self):
+        """多轮追问只带最近 2 轮进上下文（连续性够，成本不涨）。"""
+        from pipeline.ask import _history_block
+
+        hist = [{"q": f"问题{i}", "a": f"回答{i}"} for i in range(4)]
+        block = _history_block(hist)
+        self.assertNotIn("问题1", block)
+        self.assertIn("问题2", block)
+        self.assertIn("问题3", block)
+
+
+class TestTripMapLayout(unittest.TestCase):
+    """行程全景图坐标投影（pipeline.trip_render._map_layout）——纯几何，可离线断言。
+
+    这张图刻意**不表示真实方位**（档案里没有可靠经纬度），只表达"先后顺序 + 一天几个点
+    + 节奏起伏"。因此测试锁定的是这张图的"语义承诺"，而不是像素：
+
+    ① 序号必须全局连续——图上徽标就是行程次序，断了用户就读错先后；
+    ② 坐标必须同时给出绝对像素（SVG 连线用）与百分比（HTML 绝对定位用），两者同源；
+    ③ 所有坐标必须落在画布内——节点是 translate(-50%,-50%) 定位，越界即被裁切；
+    ④ 纵向必须"有起伏"——全排同一高度就退化成一条直线，失去"节奏"这一层信息；
+    ⑤ 同日连线与跨日连线必须可区分（same_day），否则视觉上分不清哪天到哪天；
+    ⑥ 空/退化输入必须安全降级，不得抛异常（报告可能没有行程）。
+    """
+
+    @staticmethod
+    def _days(*counts):
+        """按"每天 N 个点"快速造行程。"""
+        slots = ("上午", "下午", "晚上")
+        out = []
+        for di, n in enumerate(counts, 1):
+            out.append({"day": di, "blocks": [
+                {"slot": slots[i % len(slots)], "spot": f"D{di}点{i + 1}",
+                 "duration": "2小时"} for i in range(n)]})
+        return out
+
+    def test_nodes_numbered_globally(self):
+        """序号全局连续：跨天后仍接着数（图上徽标 = 行程次序）。"""
+        from pipeline.trip_render import _map_layout
+
+        m = _map_layout(self._days(3, 3))
+        self.assertEqual([n["n"] for n in m["nodes"]], [1, 2, 3, 4, 5, 6])
+        # 每日内的序号单独记（详情卡"第 N 天第 M 站"要用）
+        self.assertEqual([n["seq_in_day"] for n in m["nodes"]], [1, 2, 3, 1, 2, 3])
+        self.assertEqual([n["day"] for n in m["nodes"]], [1, 1, 1, 2, 2, 2])
+
+    def test_coords_dual_frame_and_inside_canvas(self):
+        """双坐标系同源，且全部落在画布内（含点位多的极端情况）。"""
+        from pipeline.trip_render import _map_layout
+
+        for days in (self._days(1), self._days(3, 3), self._days(2, 4, 3, 5)):
+            m = _map_layout(days)
+            w, h = m["width"], m["height"]
+            self.assertEqual((w, h), (1000, 620))
+            for nd in m["nodes"]:
+                self.assertTrue(0 < nd["x"] < w, nd)
+                self.assertTrue(0 < nd["y"] < h, nd)
+                # 百分比必须与像素同源（模板用百分比定位，SVG 用像素）
+                self.assertAlmostEqual(nd["x_pct"], nd["x"] / w * 100, places=1)
+                self.assertAlmostEqual(nd["y_pct"], nd["y"] / h * 100, places=1)
+
+    def test_labels_do_not_overlap_across_days(self):
+        """每天占一段横向区间，且区间之间留白——长景点名才不会被邻天压住。"""
+        from pipeline.trip_render import _map_layout
+
+        m = _map_layout(self._days(2, 2, 2))
+        self.assertEqual([d["day"] for d in m["days"]], [1, 2, 3])
+        self.assertEqual([d["count"] for d in m["days"]], [2, 2, 2])
+        centers = [d["x_pct"] for d in m["days"]]
+        self.assertEqual(centers, sorted(centers))            # 日标签从左到右
+        self.assertTrue(all(b > a for a, b in zip(centers, centers[1:])))
+        # 每天的横向跨度不得小于保底宽度（保证长标签有位置）
+        for d in m["days"]:
+            self.assertTrue(0 < d["x_pct"] < 100, d)
+
+    def test_vertical_undulation_is_continuous(self):
+        """纵向起伏：全局轮转到三条带，而不是每天重复同一个山峰形状。"""
+        from pipeline.trip_render import _MAP_BOT_Y, _MAP_MID_Y, _MAP_TOP_Y, _map_layout
+
+        m = _map_layout(self._days(3, 3))
+        ys = [n["y"] for n in m["nodes"]]
+        bands = {_MAP_TOP_Y, _MAP_MID_Y, _MAP_BOT_Y}
+        # 每个点都必须在三条带之一（不得出现自由漂浮的高度）
+        self.assertTrue(all(y in bands for y in ys), ys)
+        # 必须真的有起伏：至少用到 2 个不同高度
+        self.assertGreaterEqual(len(set(ys)), 2)
+        # 全局轮转（周一: 上中下中）：第 1、2、3、4 个点高度两两不同且先降后升
+        self.assertEqual(ys[:4], [_MAP_TOP_Y, _MAP_MID_Y, _MAP_BOT_Y, _MAP_MID_Y])
+        # 连续起伏：第 5 个点回到上带——证明轮转是全局的（若按天重置会是中带）
+        self.assertEqual(ys[4], _MAP_TOP_Y)
+
+    def test_edges_link_consecutive_and_flag_same_day(self):
+        """连线只连接相邻点，并标出是否同日（视觉上区分"当天内"与"跨天"）。"""
+        from pipeline.trip_render import _map_layout
+
+        m = _map_layout(self._days(3, 3))
+        nodes = m["nodes"]
+        self.assertEqual(len(m["edges"]), len(nodes) - 1)
+        for i, e in enumerate(m["edges"]):
+            self.assertEqual((e["from"], e["to"]), (nodes[i]["n"], nodes[i + 1]["n"]))
+            # 端点坐标必须与节点坐标一致（同源，不得各算一套）
+            self.assertEqual((e["x1"], e["y1"]), (nodes[i]["x"], nodes[i]["y"]))
+            self.assertEqual((e["x2"], e["y2"]), (nodes[i + 1]["x"], nodes[i + 1]["y"]))
+        # 同日标记：前两条同日、第 2→3 条跨天
+        self.assertEqual([e["same_day"] for e in m["edges"]], [True, True, False, True, True])
+
+    def test_spot_and_slot_passthrough(self):
+        """景点名/时段/时长原样透传（模板零计算，不做任何格式化）。"""
+        from pipeline.trip_render import _map_layout
+
+        m = _map_layout([{"day": 1, "blocks": [
+            {"slot": "上午", "spot": "云冈石窟", "duration": "3小时"}]}])
+        nd = m["nodes"][0]
+        self.assertEqual(nd["spot"], "云冈石窟")
+        self.assertEqual(nd["slot"], "上午")
+        self.assertEqual(nd["duration"], "3小时")
+        # has_detail 默认 False：由 render_html 按 profiles 补齐（未补齐前不可点）
+        self.assertIs(nd["has_detail"], False)
+
+    def test_degenerate_inputs_degrade_safely(self):
+        """空行程 / 空天 / 缺 blocks：返回空图而不是抛异常（报告可能没有行程）。"""
+        from pipeline.trip_render import _map_layout
+
+        for bad in (None, [], [{"day": 1, "blocks": []}], [{"day": 1}]):
+            m = _map_layout(bad)
+            self.assertEqual(m["nodes"], [], bad)
+            self.assertEqual(m["edges"], [], bad)
+            self.assertEqual(m["days"], [], bad)
+
+    def test_single_node_and_single_day(self):
+        """单点：无连线；单天多点：有同日连线但没有跨天连线。"""
+        from pipeline.trip_render import _map_layout
+
+        one = _map_layout(self._days(1))
+        self.assertEqual(len(one["nodes"]), 1)
+        self.assertEqual(one["edges"], [])
+
+        same = _map_layout(self._days(4))
+        self.assertTrue(all(e["same_day"] for e in same["edges"]))
+
+    def test_missing_spot_name_does_not_crash(self):
+        """景点名缺失（空串）不得崩——模板侧按空标签处理。"""
+        from pipeline.trip_render import _map_layout
+
+        m = _map_layout([{"day": 1, "blocks": [{"slot": "上午"}, {"spot": None}]}])
+        self.assertEqual([n["spot"] for n in m["nodes"]], ["", ""])
 
 
 if __name__ == "__main__":

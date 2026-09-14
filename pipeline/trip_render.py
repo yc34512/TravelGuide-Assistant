@@ -15,6 +15,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from pipeline.checklist import build_checklist   # 待确认清单：只归类已有事实，不产生新结论
 from pipeline.planner import normalize_notes   # notes 字符串归一化（planner 不反向依赖，无环）
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -263,16 +264,34 @@ def render_markdown(plan: dict) -> str:
                 lines.append(f"   > 来源：{row['source']}")
         lines.append("")
 
-    # 6 Plan B 与待核实
+    # 6 Plan B（排队/天气等预期之外的情况怎么换）
     plan_b = plan.get("plan_b") or []
-    to_verify = plan.get("to_verify") or []
-    if plan_b or to_verify:
-        lines += ["## Plan B 与待你核实", ""]
+    if plan_b:
+        lines += ["## Plan B（预期之外时怎么换）", ""]
         for p in plan_b:
-            lines.append(f"- 备选方案：{p}")
-        if to_verify:
-            lines.append(f"- 以下入选点暂无官方来源，票价/开放时间请出发前自行核实：{'、'.join(to_verify)}")
+            lines.append(f"- {p}")
         lines.append("")
+
+    # 6b 出发前请自行确认：把"会随时间变化的事实"归拢成待办，而不是罗列名单。
+    # 报告只承诺"给个大概"，那"哪些必须你自己核实"就该显式写清楚——
+    # 这与质量门禁「已知妥协如实列出」是同一种诚实，只是站到了用户一侧。
+    checklist = build_checklist(plan)
+    if checklist["groups"] or checklist["footnote"]:
+        lines += ["## 出发前请自行确认", ""]
+        if checklist["cutoff"]:
+            lines += [f"> 本报告信息截至 {checklist['cutoff']}；以下事项来自网络公开信息，"
+                      "会随时间变化，出发前请以官方渠道为准。", ""]
+        for g in checklist["groups"]:
+            lines.append(f"**{g['icon']} {g['kind']}**")
+            lines.append(f"> {g['lead']}")
+            lines.append("")
+            for it in g["rows"]:
+                lines.append(f"- **{it['name']}**：{it['detail']}")
+            if g.get("more"):
+                lines.append(f"- （另有 {g['more']} 条同类提示，详见下方详情库）")
+            lines.append("")
+        if checklist["footnote"]:
+            lines += [f"> {checklist['footnote']}", ""]
 
     # 7 热度榜（可下钻）
     heat_ranking = plan.get("heat_ranking") or []
@@ -418,6 +437,89 @@ def _decision_rows_for_template(decision_table: list[dict]) -> list[dict]:
     return rows
 
 
+# —— 行程全景图：纯几何投影（把 itinerary 摆到一张平面图上） ——
+
+# 画布坐标系（逻辑尺寸 1000×620；模板用 aspect-ratio 等比缩放，故坐标与像素无关）
+_MAP_W, _MAP_H = 1000.0, 620.0
+_MAP_PAD_X = 86.0          # 左右内边距：给序号徽标与长景点名留位
+# 垂直三带（上 / 中 / 下）。节点圆点直径约 42px，其下还有"景点名 + 时长"两行
+# （约 46px），故 y 不可贴边。取值按"A 型路线"排布：
+#   1 号点在上带 → 逐点下沉到中带、下带 → 再回到上带，呈山峰状；
+#   上带 190（圆点顶 169，让开 top:8 的日标签）／下带 440（标签底约 503，留底部呼吸）。
+_MAP_TOP_Y, _MAP_MID_Y, _MAP_BOT_Y = 190.0, 312.0, 440.0
+_MAP_DAY_GAP = 30.0        # 天与天之间的横向间隔
+
+
+def _map_layout(itinerary: list[dict]) -> dict:
+    """把行程摆成平面图上的节点（纯函数，可离线断言）。
+
+    设计取舍：**不表示真实地理**（报告里没有可靠经纬度，硬凑方位会骗人），
+    改为"按行程顺序排布"——同一天的点聚成一簇，簇内按时段从左到右，
+    簇与簇之间留白并用日标签分隔。这样表达的语义是"顺序与节奏"而非"方位"，
+    与产品定位（给个大概认知）一致：用户看图知道"先去哪、再去哪、一天几个点"。
+
+    纵向用三带轮转（上→中→下→中→上…，按 **全局序号** 而非每日重置）：
+    这样从第 1 个点到最后一个点是一条连绵起伏的线，而不是每天重复同一个
+    山峰形状。全局轮转还有个附带好处——跨天衔接处高度自然错开，
+    不会出现"第 1 天末尾与第 2 天开头并列同高"的割裂感。
+    坐标同时输出绝对像素（给 SVG 连线）与百分比（给 HTML 节点绝对定位），模板零计算。
+    """
+    days = [d for d in (itinerary or []) if d and (d.get("blocks") or [])]
+    if not days:
+        return {"nodes": [], "edges": [], "width": 0, "height": 0, "days": []}
+
+    counts = [len(d.get("blocks") or []) for d in days]
+    total = sum(counts) or 1
+    span = _MAP_W - 2 * _MAP_PAD_X - _MAP_DAY_GAP * (len(days) - 1)
+    # 上行（上→中→下）与下行（下→中→上）交替，避免锯齿状来回跳
+    bands = (_MAP_TOP_Y, _MAP_MID_Y, _MAP_BOT_Y)
+
+    nodes: list[dict] = []
+    day_bands: list[dict] = []
+    cursor = _MAP_PAD_X
+    idx = 0
+    for d in days:
+        blocks = d.get("blocks") or []
+        # 本天占据的横向宽度（按点位数加权，最少给 130 保证长标签不互相压）
+        share = max(span * (len(blocks) / total) if total else span, 130.0)
+        band_x0 = cursor
+        step = share / len(blocks) if blocks else 0
+        for bi, b in enumerate(blocks):
+            idx += 1
+            x = band_x0 + step * (bi + 0.5)
+            # 全局序号轮转：0→上带, 1→中带, 2→下带, 3→下带, 4→中带, 5→上带…（镜像往复）
+            period = len(bands) * 2 - 2          # 4：上中下中
+            k = (idx - 1) % period
+            y = bands[k if k < len(bands) else period - k]
+            nodes.append({
+                "n": idx,                                   # 全局序号（图上徽标）
+                "day": d.get("day"),
+                "seq_in_day": bi + 1,
+                "spot": b.get("spot") or "",
+                "slot": b.get("slot") or "",
+                "duration": b.get("duration") or "",
+                # 双坐标系：SVG 用绝对像素，节点用百分比（绝对定位）
+                "x": round(x, 2), "y": round(y, 2),
+                "x_pct": round(x / _MAP_W * 100, 2),
+                "y_pct": round(y / _MAP_H * 100, 2),
+                "has_detail": False,                        # 由调用方按 profiles 补齐
+            })
+        day_bands.append({
+            "day": d.get("day"), "count": len(blocks),
+            "x_pct": round((band_x0 + share / 2) / _MAP_W * 100, 2),
+        })
+        cursor = band_x0 + share + _MAP_DAY_GAP
+
+    edges = [{"from": nodes[i]["n"], "to": nodes[i + 1]["n"],
+              "x1": nodes[i]["x"], "y1": nodes[i]["y"],
+              "x2": nodes[i + 1]["x"], "y2": nodes[i + 1]["y"],
+              "same_day": nodes[i]["day"] == nodes[i + 1]["day"]}
+             for i in range(len(nodes) - 1)]
+
+    return {"nodes": nodes, "edges": edges, "width": _MAP_W, "height": _MAP_H,
+            "days": day_bands}
+
+
 def render_html(plan: dict) -> str:
     """把 TripPlan 投影成 templates/trip_report.html 的 context（只读，零计算）。"""
     meta = plan.get("meta") or {}
@@ -456,6 +558,10 @@ def render_html(plan: dict) -> str:
                       autoescape=select_autoescape(["html"]))
     tpl = env.get_template("trip_report.html")
     generated = meta.get("generated_at") or datetime.now().isoformat(timespec="seconds")
+    # 全景图节点：坐标由纯函数算好（模板零计算）；has_detail 决定是否可点开弹层
+    trip_map = _map_layout(plan.get("itinerary") or [])
+    for nd in trip_map["nodes"]:
+        nd["has_detail"] = nd["spot"] in profiles
     return tpl.render(
         city=meta.get("city"), days=meta.get("days"), hotel=meta.get("stay"),
         plan=plan_shaped, profiles=profiles, spot_sources=spot_sources,
@@ -468,6 +574,8 @@ def render_html(plan: dict) -> str:
         legs=snap.get("legs") or [],
         decision_rows=_decision_rows_for_template(plan.get("decision_table") or []),
         quality=plan.get("quality") or None,
+        checklist=build_checklist(plan),   # 出发前确认清单（归类已有事实，不产生新结论）
+        trip_map=trip_map,                 # 行程全景图：平面节点坐标（纯几何，不表真实方位）
         generated=generated.replace("T", " ")[:16],
         total_slots=sum(len(d.get("blocks") or []) for d in plan.get("itinerary") or []),
     )

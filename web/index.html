@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="zh" data-page-node-id="klVP6NEbIUW1VPl0tG0Y2M">
+<head data-page-node-id="4ZXtJxkXd6fGk5H8ieBeDm">
+<meta charset="utf-8" data-page-node-id="YyY1e2yAsRUwL3NzamHc9H">
+<meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="3ickg1QOevGmau1qTQbyho">
 <title>旅游攻略助手 · 行旅志</title>
 <script>
 document.documentElement.className += ' js';
@@ -20,11 +20,11 @@ setTimeout(function () {
 }, 1800);
 </script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com" data-page-node-id="PYAEyPRGZoQFwyLwARMY8l">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin data-page-node-id="5VZFyHQyzLJw3wcWXbbSux">
 <link rel="stylesheet" media="print" onload="this.media='all'"
-      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap"></noscript>
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" data-page-node-id="hKVERVFSxSpquqkFCV275N">
+<noscript data-page-node-id="Ibk6z75QycwrQNTqzHVu5H"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap" data-page-node-id="Rk9MIRHTykTBM2k5iw6tTY"></noscript>
 <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
 <style>
@@ -194,7 +194,7 @@ main{ position:relative; z-index:1; max-width:var(--w); margin:0 auto; padding:2
 .trio-go{ margin-top:6px; font-size:12px; letter-spacing:.14em; color:var(--jade); font-family:var(--serif); }
 .trio-ghost{
   position:absolute; right:12px; bottom:2px; z-index:-1; font-family:var(--serif); font-weight:900;
-  font-size:76px; line-height:1; color:rgba(26,60,52,.05); pointer-events:none;
+  font-size:76px; line-height:1; color:rgba(26,60,52,.08); pointer-events:none;
 }
 /* ============================================================
    04 检索台：胶囊 Tab（FLIP 指示器）+ 表单
@@ -277,7 +277,7 @@ select{ appearance:none; cursor:pointer; padding-right:34px;
   font-family:var(--serif); font-size:15px; font-weight:700; letter-spacing:.12em; color:#fdfaf3;
   background:linear-gradient(135deg,#24493e,#15302a);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.12), 0 12px 26px -16px rgba(26,60,52,.95);
-  transition:transform .45s var(--ease), box-shadow .45s var(--ease), filter .3s ease;
+  transition:box-shadow .45s var(--ease), filter .3s ease;   /* transform 交给 JS 磁吸直写，避免 .45s 过渡拖慢跟随 */
   will-change:transform;
 }
 .btn-primary::after{
@@ -673,6 +673,35 @@ body.ready .hfx,body.ready .hfx-x{
 .js .hfx-fade{ opacity:0; }
 body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
 /* ============================================================
+   09b 追问区：就这份报告继续问（后端只读档案回答，不重新采集）
+   ============================================================ */
+.ask-wrap{ margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
+.ask-head{ display:flex; align-items:center; gap:9px; margin-bottom:12px;
+           font-family:var(--serif); font-size:16px; font-weight:700; letter-spacing:.05em; color:var(--ink); }
+.ask-dot{ flex:0 0 auto; width:8px; height:8px; border-radius:50%; background:var(--cinnabar);
+          box-shadow:0 0 0 4px rgba(192,57,43,.13); }
+.ask-thread{ display:flex; flex-direction:column; gap:12px; margin-bottom:14px; }
+.ask-thread:empty{ display:none; }
+.ask-q,.ask-a{ max-width:min(680px,92%); padding:10px 15px; border-radius:var(--r-md);
+               font-size:14px; line-height:1.75; white-space:pre-wrap; word-wrap:break-word; }
+.ask-q{ align-self:flex-end; font-family:var(--serif); color:#fdfaf3;
+        background:linear-gradient(135deg,#24493e,#15302a);
+        box-shadow:0 10px 22px -18px rgba(26,60,52,.95); }
+.ask-a{ align-self:flex-start; color:var(--ink-2); background:var(--paper-3); border:1px solid var(--line); }
+.ask-a.err{ color:var(--cinnabar-d); background:var(--cinnabar-s); border-color:rgba(192,57,43,.3); }
+.ask-loading{ display:inline-flex; align-items:center; gap:8px; color:var(--ink-3); }
+.ask-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.ask-chip{ padding:5px 14px; cursor:pointer; font-family:var(--sans); font-size:12.5px;
+           color:var(--jade); background:var(--paper-2); border:1px solid var(--line);
+           border-radius:var(--r-pill); box-shadow:none;
+           transition:color .25s ease, border-color .25s ease, background .25s ease, transform .3s var(--ease-out); }
+.ask-chip:hover{ color:var(--cinnabar-d); border-color:rgba(192,57,43,.35); background:#fff;
+                 transform:translate3d(0,-1px,0); }
+.ask-row{ display:flex; gap:10px; align-items:center; }
+.ask-row input{ flex:1 1 auto; }
+.ask-tip{ margin:10px 0 0; font-size:11.5px; line-height:1.7; color:var(--ink-4); }
+
+/* ============================================================
    10 响应式：移动端单列 / hero 字号 clamp / 翻转降级为点击展开
    ============================================================ */
 @media (max-width:980px){
@@ -756,220 +785,237 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
 }
 </style>
 </head>
-<body>
-<header class="hero">
-  <div class="hero-sun" aria-hidden="true"></div>
-  <div class="hero-mt" aria-hidden="true">
-    <svg class="mt mt-far" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true"><path fill="currentColor" d="M0,238 C138,208 232,138 358,152 C486,166 552,108 678,122 C810,137 872,198 1000,176 C1120,156 1200,112 1302,138 C1362,153 1404,170 1440,176 L1440,320 L0,320 Z"/></svg>
-    <svg class="mt mt-mid" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true"><path fill="currentColor" d="M0,272 C120,258 210,212 330,222 C452,232 520,280 640,270 C760,260 828,204 950,212 C1064,220 1148,258 1250,244 C1322,235 1392,244 1440,252 L1440,320 L0,320 Z"/></svg>
-    <svg class="mt mt-near" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true"><path fill="currentColor" d="M0,302 C160,292 288,264 420,280 C556,297 660,280 800,288 C940,296 1060,278 1200,288 C1302,295 1382,296 1440,300 L1440,320 L0,320 Z"/></svg>
-    <div class="hero-mist" aria-hidden="true"><i></i><i></i></div>
+<body data-page-node-id="JjgoRjxoaq3gTCm95tlqZJ">
+<header class="hero" data-page-node-id="Hlv91e68csNgzNCxc3yyg8">
+  <div class="hero-sun" aria-hidden="true" data-page-node-id="l5lZCcbesCssftohfsU1FB"></div>
+  <div class="hero-mt" aria-hidden="true" data-page-node-id="asPxFxtisia5pjWyC3UB3U">
+    <svg class="mt mt-far" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true" data-page-node-id="HjWxnlsQV6KUCDzMVTGWuU"><path fill="currentColor" d="M0,238 C138,208 232,138 358,152 C486,166 552,108 678,122 C810,137 872,198 1000,176 C1120,156 1200,112 1302,138 C1362,153 1404,170 1440,176 L1440,320 L0,320 Z" data-page-node-id="eueyijrAMX6psJR0vWNth9"/></svg>
+    <svg class="mt mt-mid" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true" data-page-node-id="W2BAxx9x1un9WZfShCAomS"><path fill="currentColor" d="M0,272 C120,258 210,212 330,222 C452,232 520,280 640,270 C760,260 828,204 950,212 C1064,220 1148,258 1250,244 C1322,235 1392,244 1440,252 L1440,320 L0,320 Z" data-page-node-id="KTogw06ADqLtAlMV71zrkP"/></svg>
+    <svg class="mt mt-near" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true" data-page-node-id="Hdnnml4Guiz7gYlQxsKv3H"><path fill="currentColor" d="M0,302 C160,292 288,264 420,280 C556,297 660,280 800,288 C940,296 1060,278 1200,288 C1302,295 1382,296 1440,300 L1440,320 L0,320 Z" data-page-node-id="F0QTO75U4GKUEOr1EzXhJA"/></svg>
+    <div class="hero-mist" aria-hidden="true" data-page-node-id="g9yCh5a8VCWmACEYuXtuTP"><i data-page-node-id="WGlzpj8esyxlwQbDvhrzyE"></i><i data-page-node-id="8GgbdsxzI5Pt8UEjUKLYau"></i></div>
   </div>
-  <div class="hero-grain" aria-hidden="true"></div>
-  <div class="hero-inner">
-    <span class="hero-seal hfx-fade" style="--d:80ms" aria-hidden="true"><b>行</b><b>旅</b></span>
-    <span class="hero-eyebrow hfx" style="--d:100ms">TRAVEL GUIDE · DOUYIN UGC × AI</span>
-    <h1 class="hero-title" id="heroTitle">旅游攻略助手</h1>
-    <p class="hero-sub hfx" style="--d:680ms">抖音 UGC 挖掘 · AI 整合 · 来源可溯</p>
-    <p class="hero-en hfx" style="--d:760ms">The Itinerant Journal</p>
+  <div class="hero-grain" aria-hidden="true" data-page-node-id="CKKclYmZ1WxE07zB1PEjrF"></div>
+  <div class="hero-inner" data-page-node-id="nunkyE70KHI5iNxp4hhh9A">
+    <span class="hero-seal hfx-fade" style="--d:80ms" aria-hidden="true" data-page-node-id="xrTBZ0zD86eFRC4sLsdQI5"><b data-page-node-id="wmP5EqIoGuBeDdRXcPSALd">行</b><b data-page-node-id="isWynz77FkTWbNb0vZ4Cx3">旅</b></span>
+    <span class="hero-eyebrow hfx" style="--d:100ms" data-page-node-id="b5wfHVXPNdn3tHJWFzKyy4">TRAVEL GUIDE · DOUYIN UGC × AI</span>
+    <h1 class="hero-title" id="heroTitle" data-page-node-id="LhUttDH5i8Kh3gSNBpJn0H">旅游攻略助手</h1>
+    <p class="hero-sub hfx" style="--d:680ms" data-page-node-id="cfdDrKAVjMyGEMlfVtzlot">抖音 UGC 挖掘 · AI 整合 · 来源可溯</p>
+    <p class="hero-en hfx" style="--d:760ms" data-page-node-id="qFF14yVZaILlBFGFZMicaT">The Itinerant Journal</p>
   </div>
-  <div class="hero-side hfx-x" style="--d:860ms" aria-hidden="true">纸上行旅 · 落笔成路</div>
-  <div class="hero-foot hfx" style="--d:960ms" aria-hidden="true">
-    <span class="hero-rule"></span><span>攻略 · 行程 · 热度 —— 一本会呼吸的行旅杂志</span>
+  <div class="hero-side hfx-x" style="--d:860ms" aria-hidden="true" data-page-node-id="GBETpxwpyAGC69D0qHtkgQ">纸上行旅 · 落笔成路</div>
+  <div class="hero-foot hfx" style="--d:960ms" aria-hidden="true" data-page-node-id="c9G8EGnU2JrwdwJgEoUdtZ">
+    <span class="hero-rule" data-page-node-id="4VR64Efh85b85mpw1EnIHl"></span><span data-page-node-id="CFCZCutqm9VGgxRAfd4ONc">攻略 · 行程 · 热度 —— 一本会呼吸的行旅杂志</span>
   </div>
 </header>
 
-<main>
+<main data-page-node-id="BdlBmcABdvkWogHqAO7o9S">
   <!-- 本期导读：三张功能卡片（点击直达对应页签） -->
-  <section class="contents" aria-label="功能导读">
-    <div class="trio">
-      <div class="trio-cell reveal" style="--d:0ms">
-      <button type="button" class="trio-card" onclick="jumpTo('research')">
-        <span class="trio-no" aria-hidden="true">壹</span>
-        <span class="trio-title">攻略报告</span>
-        <span class="trio-en" aria-hidden="true">Field Notes</span>
-        <span class="trio-desc">输入景点关键词，挖掘抖音公开内容，先给你「值得做 / 别踩坑 / 有争议」三栏速览。</span>
-        <span class="trio-go">去检索 →</span>
-        <span class="trio-ghost" aria-hidden="true">報</span>
+  <section class="contents" aria-label="功能导读" data-page-node-id="pVSCzRJ5GKaze9LvVBWWo6">
+    <div class="trio" data-page-node-id="s5x6vq3gwCqF4unki4TKYy">
+      <div class="trio-cell reveal" style="--d:0ms" data-page-node-id="OEyN2EP6lwp0DZDPfAahDn">
+      <button type="button" class="trio-card" onclick="jumpTo('research')" data-page-node-id="Z44lgzgMwGdsbbUoB43WfT">
+        <span class="trio-no" aria-hidden="true" data-page-node-id="EbcV7HcA3A66uwmwAVPcDF">壹</span>
+        <span class="trio-title" data-page-node-id="KQgev9VIGzVSuYlpqLQDer">攻略报告</span>
+        <span class="trio-en" aria-hidden="true" data-page-node-id="x4ITAm6AiT5Mq4AQ3pDNOz">Field Notes</span>
+        <span class="trio-desc" data-page-node-id="UuuKdkr1PV2lH8epD0QE2N">输入景点关键词，挖掘抖音公开内容，先给你「值得做 / 别踩坑 / 有争议」三栏速览。</span>
+        <span class="trio-go" data-page-node-id="CRiPjCckAVnHBGUBxsctWx">去检索 →</span>
+        <span class="trio-ghost" aria-hidden="true" data-page-node-id="ll80IZpjLOrEyztGiD9Qp3">報</span>
       </button>
       </div>
-      <div class="trio-cell reveal" style="--d:80ms">
-      <button type="button" class="trio-card" onclick="jumpTo('trip')">
-        <span class="trio-no" aria-hidden="true">贰</span>
-        <span class="trio-title">行程规划</span>
-        <span class="trio-en" aria-hidden="true">Itinerary</span>
-        <span class="trio-desc">城市 + 天数 + 酒店位置，逐日分时段排线，附避坑专题与可视化 HTML 路书。</span>
-        <span class="trio-go">去规划 →</span>
-        <span class="trio-ghost" aria-hidden="true">程</span>
+      <div class="trio-cell reveal" style="--d:80ms" data-page-node-id="lLYqoaFBViGnE1gvsUeYza">
+      <button type="button" class="trio-card" onclick="jumpTo('trip')" data-page-node-id="Msn8DMUVkwfNBGoH2kmreb">
+        <span class="trio-no" aria-hidden="true" data-page-node-id="zQ1v26TGen4mB2fZo2uyxg">贰</span>
+        <span class="trio-title" data-page-node-id="HwJaEClLwTPAZTpG2DDCRV">行程规划</span>
+        <span class="trio-en" aria-hidden="true" data-page-node-id="p3uisxFDZvqMHZGifGjcuN">Itinerary</span>
+        <span class="trio-desc" data-page-node-id="wnpdDad1BHGDBU6hOdFpR2">城市 + 天数 + 酒店位置，逐日分时段排线，附避坑专题与可视化 HTML 路书。</span>
+        <span class="trio-go" data-page-node-id="MsamXR49efgyZX7nFyfPPJ">去规划 →</span>
+        <span class="trio-ghost" aria-hidden="true" data-page-node-id="gZORoxTqv2FpuIBM6KeUZy">程</span>
       </button>
       </div>
-      <div class="trio-cell reveal" style="--d:160ms">
-      <button type="button" class="trio-card" onclick="jumpTo('heat')">
-        <span class="trio-no" aria-hidden="true">叁</span>
-        <span class="trio-title">热度榜</span>
-        <span class="trio-en" aria-hidden="true">Heat Index</span>
-        <span class="trio-desc">城市景点与美食热度分、四态趋势判定，红涨绿跌，附营销号占比预警。</span>
-        <span class="trio-go">去看榜 →</span>
-        <span class="trio-ghost" aria-hidden="true">榜</span>
+      <div class="trio-cell reveal" style="--d:160ms" data-page-node-id="QyrBWVUyfQSwKfeH1yrhq2">
+      <button type="button" class="trio-card" onclick="jumpTo('heat')" data-page-node-id="tWcXlbUc2nYXFFMMqRlz7F">
+        <span class="trio-no" aria-hidden="true" data-page-node-id="ZfxKYxcnELCanYIcAUQmE8">叁</span>
+        <span class="trio-title" data-page-node-id="Xp9OiSF2IDW1to4rXZ1lTH">热度榜</span>
+        <span class="trio-en" aria-hidden="true" data-page-node-id="s4gLNIZQtG8PGwIFe9k5ej">Heat Index</span>
+        <span class="trio-desc" data-page-node-id="UKBHHrQPxH6BMMMPH1R7oG">城市景点与美食热度分、四态趋势判定，红涨绿跌，附营销号占比预警。</span>
+        <span class="trio-go" data-page-node-id="TV0s9WyKtI8HdQnXISlIJi">去看榜 →</span>
+        <span class="trio-ghost" aria-hidden="true" data-page-node-id="j5T03aez3HnYE6enBK39pM">榜</span>
       </button>
       </div>
     </div>
   </section>
 
   <!-- 01 检索台 -->
-  <div class="card console reveal" style="--d:60ms">
-    <div class="sec-head">
-      <span class="sec-no" aria-hidden="true">01</span>
-      <div class="sec-title"><h2>检索台</h2><p class="sec-en">SEARCH DESK</p></div>
-      <span class="sec-rule" aria-hidden="true"></span>
+  <div class="card console reveal" style="--d:60ms" data-page-node-id="0Lp2GhvDFSjVtXiGgnllkI">
+    <div class="sec-head" data-page-node-id="byM4ot2ODy7XJF0injhsSP">
+      <span class="sec-no" aria-hidden="true" data-page-node-id="yw6WQ79NlW9LRk5Uzv9GxT">01</span>
+      <div class="sec-title" data-page-node-id="2lFZWO4E5f2LHkpD7Fq8Jm"><h2 data-page-node-id="BSSsvomgO98gKklAjXLEDk">检索台</h2><p class="sec-en" data-page-node-id="iK9bWrkXRQXkLaVUvEOHFH">SEARCH DESK</p></div>
+      <span class="sec-rule" aria-hidden="true" data-page-node-id="GpXZFVvXXZfluPcG5M4C69"></span>
     </div>
-    <div class="tabs">
-      <span class="tab-pill" aria-hidden="true"></span>
-      <button id="tab-research" class="tab active" onclick="switchTab('research')">攻略报告</button>
-      <button id="tab-trip" class="tab" onclick="switchTab('trip')">行程规划</button>
-      <button id="tab-heat" class="tab" onclick="switchTab('heat')">热度榜</button>
+    <div class="tabs" data-page-node-id="HrpHcGFUB82rw9ydvkwmlP">
+      <span class="tab-pill" aria-hidden="true" data-page-node-id="YYN6dK5aHtWHpzOAzO1mbd"></span>
+      <button id="tab-research" class="tab active" onclick="switchTab('research')" data-page-node-id="po24VMcGasaTt5q4JZ7DKH">攻略报告</button>
+      <button id="tab-trip" class="tab" onclick="switchTab('trip')" data-page-node-id="AHo9yGTgaDePB1AARp8KFa">行程规划</button>
+      <button id="tab-heat" class="tab" onclick="switchTab('heat')" data-page-node-id="U11ywXkHQOa7jkZTV616hC">热度榜</button>
     </div>
-    <div id="form-research" class="form">
-      <div class="row">
-        <div class="field field-grow">
-          <label for="kw">景点关键词</label>
-          <input type="text" id="kw" placeholder="输入景点关键词，如：西湖攻略" onkeydown="if(event.key==='Enter')go()">
+    <div id="form-research" class="form" data-page-node-id="WoJNcCwOExcLe23WDKYAWW">
+      <div class="row" data-page-node-id="2yYVES2UZKpGLEU6pPZjmU">
+        <div class="field field-grow" data-page-node-id="OMWLkdlxMW5Bqs936xkvxK">
+          <label for="kw" data-page-node-id="PrPDfzuo9aEyGVkDtAZVoa">景点关键词</label>
+          <input type="text" id="kw" placeholder="输入景点关键词，如：西湖攻略" onkeydown="if(event.key==='Enter')go()" data-page-node-id="ZpfGQwECit92fGr9uCeVse">
         </div>
-        <button id="btn" class="btn-primary" onclick="go()">生成攻略报告</button>
+        <button id="btn" class="btn-primary" onclick="go()" data-page-node-id="5RAf5w8qAeFubun9stifPR">生成攻略报告</button>
       </div>
-      <div class="field">
-        <label>调研深度</label>
-        <div class="modes">
-          <label class="mode"><input type="radio" name="mode" value="fast"><span class="mode-box"><b>快速</b><i>约 3 分钟 · 5 条视频</i></span></label>
-          <label class="mode"><input type="radio" name="mode" value="standard" checked><span class="mode-box"><b>标准</b><i>约 6 分钟 · 8 条视频</i></span></label>
-          <label class="mode"><input type="radio" name="mode" value="deep"><span class="mode-box"><b>深度</b><i>15~25 分钟 · 含口播转写（出发前用）</i></span></label>
-        </div>
-      </div>
-      <label class="check"><input id="force" type="checkbox"><span>忽略知识库缓存，强制重新采集</span></label>
-    </div>
-    <div id="form-trip" class="form hidden">
-      <div class="row">
-        <div class="field" style="flex:0 0 168px">
-          <label for="city">目的地城市</label>
-          <input type="text" id="city" placeholder="如：大同">
-        </div>
-        <div class="field" style="flex:0 0 92px">
-          <label for="days">天数</label>
-          <input type="number" id="days" value="2" min="1" max="7">
-        </div>
-        <div class="field field-grow">
-          <label for="hotel">酒店 / 住宿位置</label>
-          <input type="text" id="hotel" placeholder="如：大同古城内（用于排线）">
+      <div class="field" data-page-node-id="cniWFL2AdDDC1GAQbyy9AM">
+        <label data-page-node-id="FIivgFeChfwHTqMv1Vd38Z">调研深度</label>
+        <div class="modes" data-page-node-id="Or5LCKYQaSJsAs4BnKFKPH">
+          <label class="mode" data-page-node-id="DMOTPVzz4U6BQfz0tJJdqm"><input type="radio" name="mode" value="fast" data-page-node-id="7uWn6CwDJYr5SngOv7Pcx1"><span class="mode-box" data-page-node-id="8BmydTsyf5WFGdylCCBQk8"><b data-page-node-id="wTjKhVeyYuBlveQGjlrHz4">快速</b><i data-page-node-id="ydiiT16R5i1ZgKfypfNClV">约 3 分钟 · 5 条视频</i></span></label>
+          <label class="mode" data-page-node-id="bvNP74eltPBAGmWYYiYXCK"><input type="radio" name="mode" value="standard" checked data-page-node-id="eYBwvA0VZuHNYPHVvgzAzK"><span class="mode-box" data-page-node-id="r70oWdegQRYcKhDvtLxv3h"><b data-page-node-id="nOGOo5yfdC3DE9HRPadd5A">标准</b><i data-page-node-id="0OJg6YSctP6MUHbjBlTfSt">约 6 分钟 · 8 条视频</i></span></label>
+          <label class="mode" data-page-node-id="aFDtI404sPM7MZInARJMao"><input type="radio" name="mode" value="deep" data-page-node-id="t2nWx5xqI6ENrbFrQqctlb"><span class="mode-box" data-page-node-id="nqiVNiy0kfMhACUFMa110K"><b data-page-node-id="k91e7lrWph1RZBrLprIqL9">深度</b><i data-page-node-id="54FYYlIqFj7geMrfEWcstb">15~25 分钟 · 含口播转写（出发前用）</i></span></label>
         </div>
       </div>
-      <div class="row">
-        <div class="field field-grow">
-          <label for="prefs">偏好（可选）</label>
-          <input type="text" id="prefs" placeholder="如 带老人、喜欢历史、想拍日落">
+      <label class="check" data-page-node-id="ejGzvBQTGBCpopC6zVlhOE"><input id="force" type="checkbox" data-page-node-id="DrtJT6HhUujuL5Q59weGiK"><span data-page-node-id="XEzLapMxnFzOBjbVslXT73">忽略知识库缓存，强制重新采集</span></label>
+    </div>
+    <div id="form-trip" class="form hidden" data-page-node-id="QwpvKy3QsGowAuUzyClCAp">
+      <div class="row" data-page-node-id="slSNQT1tNrJBRGGRYHsqbV">
+        <div class="field" style="flex:0 0 168px" data-page-node-id="CB2ZZKNtHKVZ964ZCyFxoi">
+          <label for="city" data-page-node-id="m8wHTGXiqOwJh3xeLyeHtC">目的地城市</label>
+          <input type="text" id="city" placeholder="如：大同" data-page-node-id="GCQ21fQ3tNIoo8VdXLn2ze">
         </div>
-        <div class="field" style="flex:0 0 150px">
-          <label for="prefMode">选点倾向</label>
-          <select id="prefMode" title="影响选点倾向（免费/平价 vs 特色体验），不再计算预算">
-            <option value="均衡">均衡</option>
-            <option value="省钱优先">省钱优先</option>
-            <option value="体验优先">体验优先</option>
+        <div class="field" style="flex:0 0 92px" data-page-node-id="pu4D9506awLtW8FZFF1YlA">
+          <label for="days" data-page-node-id="XKZrEzdLnYqEGGx7gB3dz4">天数</label>
+          <input type="number" id="days" value="2" min="1" max="7" data-page-node-id="iKebQO8KOMO1GZjCm23vZs">
+        </div>
+        <div class="field field-grow" data-page-node-id="h2lpugqbp1hdLSc9VvjiDC">
+          <label for="hotel" data-page-node-id="kwldbXJ4jCL1eBOWCGwVxK">酒店 / 住宿位置</label>
+          <input type="text" id="hotel" placeholder="如：大同古城内（用于排线）" data-page-node-id="kNFF1cVuoRSqgOw6kisH4K">
+        </div>
+      </div>
+      <div class="row" data-page-node-id="TnbyfJohxFHNQxcbhZokaG">
+        <div class="field field-grow" data-page-node-id="AxUQqFj7oJWnBV2CxyKEWv">
+          <label for="prefs" data-page-node-id="BQDwyvptrkbDe7sJ8hj0Cf">偏好（可选）</label>
+          <input type="text" id="prefs" placeholder="如 带老人、喜欢历史、想拍日落" data-page-node-id="tgjlaDDcA0kLFhjjd1dzDS">
+        </div>
+        <div class="field" style="flex:0 0 150px" data-page-node-id="MACuVMe4vIsq9iweau2ODe">
+          <label for="prefMode" data-page-node-id="WZHvy7l3KFA8lZUlq8Cjh1">选点倾向</label>
+          <select id="prefMode" title="影响选点倾向（免费/平价 vs 特色体验），不再计算预算" data-page-node-id="MXdF9hMCkRCADrbCu7s7d3">
+            <option value="均衡" data-page-node-id="oWNNEZJ90epIIcGuUUMqSl">均衡</option>
+            <option value="省钱优先" data-page-node-id="KMKj633XAlKsmMionJmMKL">省钱优先</option>
+            <option value="体验优先" data-page-node-id="5Hb9BBOqTDAWO8j9AH9sis">体验优先</option>
           </select>
         </div>
       </div>
-      <div class="row">
-        <div class="field field-grow">
-          <label for="spots">指定景点（可选）</label>
-          <input type="text" id="spots" placeholder="顿号/逗号分隔；留空则自动圈定并经抖音验证筛选">
+      <div class="row" data-page-node-id="FHWxo4DezfbMtDy497xiGE">
+        <div class="field field-grow" data-page-node-id="bvaLU8VUgkyvqccWHszTfL">
+          <label for="spots" data-page-node-id="gETDDqp7FuRb7hTbbKwm8E">指定景点（可选）</label>
+          <input type="text" id="spots" placeholder="顿号/逗号分隔；留空则自动圈定并经抖音验证筛选" data-page-node-id="P35aK0HsLmqLRRy8BZfhA9">
         </div>
-        <div class="field" style="flex:0 0 186px">
-          <label for="startDate">出发日期（可选）</label>
-          <input type="date" id="startDate" title="提供后自动避开故宫/国博等周一闭馆日">
+        <div class="field" style="flex:0 0 186px" data-page-node-id="3bBEeYlyR2X2hJpDiCW1ZN">
+          <label for="startDate" data-page-node-id="M1bcBPxlBtDsxAHM5ck8hk">出发日期（可选）</label>
+          <input type="date" id="startDate" title="提供后自动避开故宫/国博等周一闭馆日" data-page-node-id="AZr474JyltL6SGyeGiqUdk">
         </div>
-        <button id="tripBtn" class="btn-primary" onclick="goTrip()">生成行程规划</button>
+        <button id="tripBtn" class="btn-primary" onclick="goTrip()" data-page-node-id="WEPUOfLdwWSnlr9AORHsNn">生成行程规划</button>
       </div>
-      <p class="hint">7 天内调研过的景点自动命中缓存；未命中的逐个调研（约 5 分钟/个），全程可取消。输出含逐日行程、避坑专题、热度榜与 HTML 可视化路书（不再做预算估算）。</p>
+      <p class="hint" data-page-node-id="LwNSTh4lySrvHBuBCvCdy4">7 天内调研过的景点自动命中缓存；未命中的逐个调研（约 5 分钟/个），全程可取消。输出含逐日行程、避坑专题、热度榜与 HTML 可视化路书（不再做预算估算）。</p>
     </div>
-    <div id="form-heat" class="form hidden">
-      <div class="row">
-        <div class="field" style="flex:0 0 220px">
-          <label for="heatCity">城市</label>
-          <input type="text" id="heatCity" placeholder="输入城市，如：大同" onkeydown="if(event.key==='Enter')viewHeat()">
+    <div id="form-heat" class="form hidden" data-page-node-id="WOWR30Ehn0WAMyfRbsUXYR">
+      <div class="row" data-page-node-id="rkr1KpXtwAk2K5619S2L0m">
+        <div class="field" style="flex:0 0 220px" data-page-node-id="fJgJvkza7kB4CoZcEYLv0S">
+          <label for="heatCity" data-page-node-id="G6VXvFT55A16SXiD5rSc7M">城市</label>
+          <input type="text" id="heatCity" placeholder="输入城市，如：大同" onkeydown="if(event.key==='Enter')viewHeat()" data-page-node-id="yybHzKGaJDt80aiBo3b30m">
         </div>
-        <button class="mini-btn" onclick="viewHeat()">查看榜单</button>
-        <button id="heatBtn" class="btn-primary" onclick="goHeatRefresh()">刷新榜单（实时采集，约3~5分钟）</button>
+        <button class="mini-btn" onclick="viewHeat()" data-page-node-id="D6rVTZhA2YqwJ1cp0YHQju">查看榜单</button>
+        <button id="heatBtn" class="btn-primary" onclick="goHeatRefresh()" data-page-node-id="Y1XOvt19QlU9FbNwwy3QLK">刷新榜单（实时采集，约3~5分钟）</button>
       </div>
-      <p class="hint">基于抖音近 7 天/60 天内容分布判定：🔥 本周最火 / ✨ 长盛不衰 / 🔻 正在降温 / ➖ 平稳。刷榜只采元数据（点赞与发布时间），不采评论。</p>
+      <p class="hint" data-page-node-id="vHWJumTuZOwsiPom5KH1RT">基于抖音近 7 天/60 天内容分布判定：🔥 本周最火 / ✨ 长盛不衰 / 🔻 正在降温 / ➖ 平稳。刷榜只采元数据（点赞与发布时间），不采评论。</p>
     </div>
   </div>
 
   <!-- 02 采录中 -->
-  <div id="progress" class="card progress-card hidden">
-    <div class="sec-head">
-      <span class="sec-no" aria-hidden="true">02</span>
-      <div class="sec-title"><h2>采录中</h2><p class="sec-en">IN PROGRESS</p></div>
-      <span class="sec-rule" aria-hidden="true"></span>
+  <div id="progress" class="card progress-card hidden" data-page-node-id="o1NK5Vwm3T0oZzfEDGjhwO">
+    <div class="sec-head" data-page-node-id="uaRxrbPfJsJxAeVLFklCX7">
+      <span class="sec-no" aria-hidden="true" data-page-node-id="4wbkFSmSAgxaHXagG6Y6TG">02</span>
+      <div class="sec-title" data-page-node-id="nC2eHzVPIy1MuxtcY7Sqsl"><h2 data-page-node-id="vBTQTEe7zXxQ4i6db47vO8">采录中</h2><p class="sec-en" data-page-node-id="UucLifsa4D7osuOVA8ZC8l">IN PROGRESS</p></div>
+      <span class="sec-rule" aria-hidden="true" data-page-node-id="aAwUmY7NS4LogQ6XxNx6JR"></span>
     </div>
-    <div class="stage-row">
-      <div class="stage" id="stage" data-step=""></div>
-      <button id="cancelBtn" class="mini-btn" onclick="cancelJob()">取消任务</button>
+    <div class="stage-row" data-page-node-id="CABZGgDaDodmqCa4AOFkA1">
+      <div class="stage" id="stage" data-step="" data-page-node-id="1pKbk2vg9AU3GaHsEXwHgS"></div>
+      <button id="cancelBtn" class="mini-btn" onclick="cancelJob()" data-page-node-id="3oclWZqYYr9TuMizaQBHrH">取消任务</button>
     </div>
-    <div class="step-rail" id="stepRail" aria-hidden="true">
-      <span class="step-track"><i></i></span>
-      <span class="step" data-i="1"><b>01</b>采集</span>
-      <span class="step" data-i="2"><b>02</b>分析</span>
-      <span class="step" data-i="3"><b>03</b>成稿</span>
+    <div class="step-rail" id="stepRail" aria-hidden="true" data-page-node-id="LbNlTeJ4YMYm2QnMo1h1ng">
+      <span class="step-track" data-page-node-id="aRR0gd78BCaeCa6eHuMs4w"><i data-page-node-id="y77qdA3M396CjC5HlYNRlM"></i></span>
+      <span class="step" data-i="1" data-page-node-id="r1wiqSofLMd9TZgaEJO9ty"><b data-page-node-id="bUU5l4is1SyKdM5ySZBM9k">01</b>采集</span>
+      <span class="step" data-i="2" data-page-node-id="eMrK2GSSkWSRyfo7sSj9Co"><b data-page-node-id="yG0g7lK1rNQFzX8fSWgGTR">02</b>分析</span>
+      <span class="step" data-i="3" data-page-node-id="BmbU2BzIFgr2Y6vDrADfx0"><b data-page-node-id="7JFNGD2L2rnsE3ykzDBuRL">03</b>成稿</span>
     </div>
-    <div class="term">
-      <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span class="term-title">运行日志 · LOG</span></div>
-      <pre class="log" id="log"></pre>
+    <div class="term" data-page-node-id="8dP3F2pdnCTKUO3iDn6YSf">
+      <div class="term-bar" aria-hidden="true" data-page-node-id="6UC5BE3i8lRiJdoQjUiDhH"><i data-page-node-id="JqwxvDShkdqGkvz0pkrhVt"></i><i data-page-node-id="0cGQRzJwzroUmGMzgUsl1w"></i><i data-page-node-id="Om0VVDEq2kChJq0SjqRfY6"></i><span class="term-title" data-page-node-id="JpeTx6Ob9CUEzPKTZ90sU4">运行日志 · LOG</span></div>
+      <pre class="log" id="log" data-page-node-id="bBEjEr6wSnqS0hCd70qJ7O"></pre>
     </div>
   </div>
 
   <!-- 03 成稿 -->
-  <div id="result" class="card hidden">
-    <div class="sec-head">
-      <span class="sec-no" aria-hidden="true">03</span>
-      <div class="sec-title"><h2>成稿</h2><p class="sec-en">THE REPORT</p></div>
-      <span class="sec-rule" aria-hidden="true"></span>
+  <div id="result" class="card hidden" data-page-node-id="VNjLV8Ro6axxkNfI8ZcZwG">
+    <div class="sec-head" data-page-node-id="PEAjQ7xFEN7oWXoQprkuD7">
+      <span class="sec-no" aria-hidden="true" data-page-node-id="YNb90tuZZfZWMltKclR5hu">03</span>
+      <div class="sec-title" data-page-node-id="WaSNhorC83d0SPEIXn6QQU"><h2 data-page-node-id="6QcA9Y43FspofFmdGu1dyf">成稿</h2><p class="sec-en" data-page-node-id="aLj9x6qs51CsJAOWgYj3E3">THE REPORT</p></div>
+      <span class="sec-rule" aria-hidden="true" data-page-node-id="XtOCzmBUVELbCtrMcSeKpx"></span>
     </div>
-    <div class="toolbar">
-      <div class="stats" id="stats"></div>
-      <div class="tool-actions">
-        <a id="dlHtml" class="mini-btn btn-solid hidden" href="#" target="_blank">📊 打开可视化路书</a>
-        <a id="dl" class="mini-btn" download>下载 Markdown</a>
+    <div class="toolbar" data-page-node-id="SFnk5aoWC3GjrgVYClmjKf">
+      <div class="stats" id="stats" data-page-node-id="SgFo2lGc2S62hsFGWHd8Q3"></div>
+      <div class="tool-actions" data-page-node-id="in7uTQVDgI5AKdPf0vC9JN">
+        <a id="dlHtml" class="mini-btn btn-solid hidden" href="#" target="_blank" data-page-node-id="cUMq1zgSEYhMunE8H3itsX">📊 打开可视化路书</a>
+        <a id="dl" class="mini-btn" download data-page-node-id="607Ew5RRmswVv5gMcYDZIJ">下载 Markdown</a>
       </div>
     </div>
-    <div class="toc hidden" id="toc"></div>
-    <article id="report"></article>
+    <div class="toc hidden" id="toc" data-page-node-id="MbPy7QBJRJMpkxG7yZBIgK"></div>
+    <article id="report" data-page-node-id="aLDxgwhNv5BfaeXFDrTG0W"></article>
+    <!-- 追问区：答案全部来自这份报告已有的档案，不触发任何采集 -->
+    <div class="ask-wrap hidden" id="askWrap" data-page-node-id="O57CDta3Yr7c5qt24X0nOF">
+      <div class="ask-head" data-page-node-id="lIu7Ojpd27UaQF5SgQ4SQK"><span class="ask-dot" aria-hidden="true" data-page-node-id="nLhJsIPHzIKPwS7j7dPnSH"></span>对这份报告还有疑问？</div>
+      <div class="ask-thread" id="askThread" aria-live="polite" data-page-node-id="LFQd7beO2Gaz5wBErawFGG"></div>
+      <div class="ask-chips" id="askChips" data-page-node-id="AQmqOf0uaqftrQlP7IbJVn">
+        <button type="button" class="ask-chip" data-page-node-id="rEPaGzM2HlaVTt95xJzJGS">哪些点需要提前预约？</button>
+        <button type="button" class="ask-chip" data-page-node-id="GeVyy6HDqZ8pgKogODFzkK">带小孩去合适吗？</button>
+        <button type="button" class="ask-chip" data-page-node-id="RSb0pwWu8z3x33AVegiCgv">只能去一个的话选哪个？</button>
+        <button type="button" class="ask-chip" data-page-node-id="9i77dGjmHWv46mJeibaerX">怎么安排更省体力？</button>
+      </div>
+      <div class="ask-row" data-page-node-id="exoVBQEad1K7vnVDRI5B9h">
+        <input type="text" id="askInput" placeholder="例如：两个景点只能去一个，选哪个？为什么？"
+               onkeydown="if(event.key==='Enter')askQuestion()" data-page-node-id="xaF1ihotnVkM5NS484Hprj">
+        <button id="askBtn" class="btn-primary" onclick="askQuestion()" data-page-node-id="SkDoWdOXFwzBYILDMhSkt6">提问</button>
+      </div>
+      <p class="ask-tip" data-page-node-id="1NT28Vx7kshJgn91vJQWGM">回答只依据这份报告已有的档案，不会重新采集数据；票价、开放时间等时效信息请以官方渠道为准。</p>
+    </div>
   </div>
 
   <!-- 04 旧稿书阁 -->
-  <div id="history" class="card hidden">
-    <div class="sec-head">
-      <span class="sec-no" aria-hidden="true">04</span>
-      <div class="sec-title"><h2>旧稿书阁</h2><p class="sec-en">ARCHIVE · 历史报告（知识库）</p></div>
-      <span class="sec-rule" aria-hidden="true"></span>
+  <div id="history" class="card hidden" data-page-node-id="j998GUGOBlttERCSt2EO3z">
+    <div class="sec-head" data-page-node-id="JM69xSSLEXdBdoDOElJzfa">
+      <span class="sec-no" aria-hidden="true" data-page-node-id="RwjN8s14CjnoySDuZv9Rb0">04</span>
+      <div class="sec-title" data-page-node-id="US1vuS6pAHVYi3dTNTR30n"><h2 data-page-node-id="loAJup7xod4ayQ6phFIuen">旧稿书阁</h2><p class="sec-en" data-page-node-id="KKFkJG00Zs3xnIfYEYqpCC">ARCHIVE · 历史报告（知识库）</p></div>
+      <span class="sec-rule" aria-hidden="true" data-page-node-id="wnmPtbAQSkuZfsTwHzgC0d"></span>
     </div>
-    <ul class="hist" id="hist"></ul>
+    <ul class="hist" id="hist" data-page-node-id="5pHm8ucMTs1nYRonLwgttp"></ul>
   </div>
 </main>
 
-<footer>
-  <div class="foot-seal" aria-hidden="true">行旅</div>
-  <p>报告由 AI 汇总抖音公开内容生成，仅供参考；价格/政策等时效信息出发前请务必官方核实。</p>
+<footer data-page-node-id="qPcpxyb669C4xN5fGNJemb">
+  <div class="foot-seal" aria-hidden="true" data-page-node-id="jvUJcOI68ZeiCAudEH7OLW">行旅</div>
+  <p data-page-node-id="oBca5DeKbC1GY9GzKzq7Bz">报告由 AI 汇总抖音公开内容生成，仅供参考；价格/政策等时效信息出发前请务必官方核实。</p>
 </footer>
-<button class="to-top" id="toTop" title="回到顶部" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+<button class="to-top" id="toTop" title="回到顶部" onclick="window.scrollTo({top:0,behavior:'smooth'})" data-page-node-id="fHR0vfGw8gm1Dxy5hmw6Xf">↑</button>
 
 <!-- 详情弹层：点开即看，关闭即回（页面位置不动） -->
-<div class="modal-mask" id="modalMask">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modal-head">
-      <span class="m-title" id="modalTitle">详情</span>
-      <span class="m-tip">介绍 · 避雷 · 贴士 · 来源</span>
-      <button class="modal-close" id="modalClose" title="关闭（Esc）" aria-label="关闭">✕</button>
+<div class="modal-mask" id="modalMask" data-page-node-id="LSit5DvNOehaNbl11Be1kA">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" data-page-node-id="vPlfYyoAkDd86oOX7OUCjI">
+    <div class="modal-head" data-page-node-id="AlfldXVSDH6BawJbNcGOuB">
+      <span class="m-title" id="modalTitle" data-page-node-id="oNAEnVarG4OKVOrizydKaE">详情</span>
+      <span class="m-tip" data-page-node-id="yeRFaUtsLz7rMt5oZZIUUc">介绍 · 避雷 · 贴士 · 来源</span>
+      <button class="modal-close" id="modalClose" title="关闭（Esc）" aria-label="关闭" data-page-node-id="lHkHdEpCZYwBQdxsNcT9lb">✕</button>
     </div>
-    <div class="modal-body" id="modalBody"></div>
-    <div class="modal-foot"><button class="btn-close" id="modalFootClose">关闭，继续看报告</button></div>
+    <div class="modal-body" id="modalBody" data-page-node-id="LoevvWAmDPjuEGMKtmqzmd"></div>
+    <div class="modal-foot" data-page-node-id="R6jCdnXji0pgBDOF8PkCiu"><button class="btn-close" id="modalFootClose" data-page-node-id="jsEH0QeXBuunrfeFirh4bh">关闭，继续看报告</button></div>
   </div>
 </div>
 <script>
@@ -1139,6 +1185,8 @@ async function poll(id) {
     return;
   }  const r = job.result, s = r.stats;
   $('result').classList.remove('hidden');
+  // 追问上下文：指向本次任务（后端按 job_id 取这份报告的档案来回答）
+  setAskCtx({ job_id: id, report_name: r.report_name });
   $('dl').classList.remove('hidden');
   $('dl').href = '/api/reports/download?name=' + encodeURIComponent(r.report_name);
   if (r.html_name) {
@@ -1211,26 +1259,36 @@ function trendTag(t) {
   return '<span class="trend-flat">➖ ' + (t || '平稳') + '</span>';
 }
 
-function heatTable(rows) {
-  return '<table class="heat-tbl">' +
-    '<tr><th>#</th><th>名称</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>营销号占比</th><th>情感趋势</th><th>更新时间</th></tr>' +
+function heatTable(rows, opts) {
+  const food = !!(opts && opts.food);
+  // 美食与景点共用同一份热度快照，但"什么算好"不一样：
+  // 景点看趋势与新鲜度（是不是正在火），吃饭更看口碑与是否越来越差。
+  // 故美食榜换掉"近7天新视频"这类内容运营指标，改用新鲜度 + 情感趋势两列，
+  // 并保留营销号占比——餐馆被探店号刷量的情况比景点更常见，这个警示更要紧。
+  const head = food
+    ? '<tr><th>#</th><th>店名</th><th>趋势</th><th>推荐分</th><th>近90天新内容</th><th>点赞总量</th><th>视频数</th><th>营销号占比</th><th>口碑趋势</th><th>更新时间</th></tr>'
+    : '<tr><th>#</th><th>名称</th><th>趋势</th><th>热度分</th><th>近7天新视频</th><th>点赞总量</th><th>视频数</th><th>营销号占比</th><th>情感趋势</th><th>更新时间</th></tr>';
+  return '<div class="tbl-wrap"><table class="heat-tbl">' + head +
     rows.map((h, i) => {
       const mkt = h.mkt_ratio || 0;
       const senti = h.sentiment || '';
       const sentiColor = senti === '好评下降' ? 'color:#c0392b;font-weight:600;' : (senti === '好评上升' ? 'color:#1e8449;' : '');
+      const fresh = food ? (h.fresh60 || 0) : (h.fresh7 || 0);
       return `<tr><td>${i + 1}</td><td>${h.spot}</td><td>${trendTag(h.trend)}</td>` +
-        `<td>${h.score.toFixed(2)}</td><td>${Math.round(h.fresh7 * 100)}%</td>` +
+        `<td>${h.score.toFixed(2)}</td><td>${Math.round(fresh * 100)}%</td>` +
         `<td>${h.likes}</td><td>${h.videos}</td>` +
         `<td style="${mkt >= 0.5 ? 'color:#c0392b;font-weight:700;' : ''}">${Math.round(mkt * 100)}%${mkt >= 0.5 ? ' ⚠️' : ''}</td>` +
         `<td style="${sentiColor}">${senti || '—'}</td>` +
         `<td>${(h.updated_at || '').replace('T', ' ')}</td></tr>`;
-    }).join('') + '</table>';
+    }).join('') + '</table></div>';
 }
 
 const HEAT_EXPLAIN = '<p style="font-size:12px;color:#7f8c8d;margin:2px 0 10px;">热度分 = 点赞 40%（对数归一）+ 评论密度 30% + 新鲜度 30%（近90天发布占比）；营销号占比 ≥50% 需谨慎看待；情感趋势 = 近30天评论好评率与更早对比（判断是不是越做越差）。</p>';
+const FOOD_EXPLAIN = '<p style="font-size:12px;color:#7f8c8d;margin:2px 0 10px;">餐馆同样按抖音内容热度排：热度分 = 点赞 40% + 评论密度 30% + 新鲜度 30%；「近90天新内容」比景点的「近7天」放宽——苍蝇馆子更新慢，卡太紧会把老店全滤掉；「口碑趋势」看近30天好评率是升还是降，比总量更能说明现在值不值得去。</p>';
 
 function renderHeat(r) {
   $('result').classList.remove('hidden');
+  setAskCtx(null);   // 热度榜是数据表，没有可追问的报告档案
   $('dl').classList.add('hidden');
   $('dlHtml').classList.add('hidden');
   $('stats').innerHTML = `<span>城市 <b>${r.city}</b></span>` +
@@ -1240,7 +1298,7 @@ function renderHeat(r) {
   if (!r.ranking.length && !hasFood) { $('report').innerHTML = `<p>${r.hint || '暂无数据'}</p>`; clearToc(); syncOutput(); return; }
   let html = HEAT_EXPLAIN;
   if (r.ranking.length) html += '<h3>🏞️ 景点热度榜</h3>' + heatTable(r.ranking);
-  if (hasFood) html += '<h3 style="margin-top:14px;">🍜 美食热度榜</h3>' + heatTable(r.food_ranking);
+  if (hasFood) html += `<h3 style="margin-top:22px;">🍜 美食热度榜</h3>` + FOOD_EXPLAIN + heatTable(r.food_ranking, { food: true });
   $('report').innerHTML = html;
   clearToc();
   syncOutput();
@@ -1332,12 +1390,66 @@ async function viewReport(name) {
   const md = await resp.text();
   outputTab = currentTab;  // 从历史点开的内容归属当前页签
   $('result').classList.remove('hidden');
+  // 历史报告没有 job_id：用文件名让后端反查生成它的任务档案
+  setAskCtx({ report_name: decodeURIComponent(name) });
   $('dl').href = '/api/reports/download?name=' + encodeURIComponent(decodeURIComponent(name));
   $('stats').innerHTML = `<span>文件：${decodeURIComponent(name)}</span>`;
   $('report').innerHTML = renderMd(md);
   enhanceArticle();
   window.scrollTo({ top: $('result').offsetTop - 20, behavior: 'smooth' });
 }
+
+// —— 追问：就当前报告继续问（后端只读该报告的档案回答，不重新采集、不重排行程）——
+let askCtx = null;      // {job_id} 或 {report_name}：定位要追问的那份报告
+let askHistory = [];    // 最近几轮问答（随请求带上，保持多轮连续）
+
+function setAskCtx(ctx) {
+  askCtx = ctx || null;
+  askHistory = [];
+  $('askThread').innerHTML = '';
+  $('askWrap').classList.toggle('hidden', !askCtx);
+}
+
+function askBubble(cls, text) {
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = text || '';
+  $('askThread').appendChild(d);
+  d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  return d;
+}
+
+async function askQuestion(preset) {
+  const q = String(preset || $('askInput').value || '').trim();
+  if (!q || !askCtx) return;
+  $('askInput').value = '';
+  $('askBtn').disabled = true;
+  askBubble('ask-q', q);
+  const box = askBubble('ask-a', '');
+  box.innerHTML = '<span class="ask-loading"><span class="spin"></span>正在翻这份报告的档案…</span>';
+  try {
+    const resp = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q, ...askCtx, history: askHistory }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || '追问失败');
+    box.textContent = data.answer;
+    askHistory.push({ q: q, a: data.answer });
+    if (askHistory.length > 4) askHistory = askHistory.slice(-4);
+  } catch (e) {
+    box.className = 'ask-a err';
+    box.textContent = '没能回答：' + e.message;
+  } finally {
+    $('askBtn').disabled = false;
+  }
+}
+
+$('askChips').addEventListener('click', (e) => {
+  const b = e.target.closest ? e.target.closest('.ask-chip') : null;
+  if (b) askQuestion(b.textContent.trim());
+});
 
 $('heatCity').value = localStorage.getItem('heatCity') || '';
 loadHistory();
@@ -1378,10 +1490,12 @@ syncToTop();
     if (!h || h.dataset.split === '1') return;
     const txt = (h.textContent || '').trim();
     h.dataset.split = '1';
+    h.setAttribute('aria-label', txt);   // 拆字后读屏仍朗读完整标题
     const frag = document.createDocumentFragment();
     [...txt].forEach((ch, i) => {
       const s = document.createElement('span');
       s.className = 'ch';
+      s.setAttribute('aria-hidden', 'true');
       s.style.setProperty('--i', i);
       s.textContent = ch === ' ' ? '\u00a0' : ch;
       frag.appendChild(s);
@@ -1692,6 +1806,7 @@ syncToTop();
   function initMagnet() {
     if (reduce() || !HOVER.matches) return;
     [].slice.call(document.querySelectorAll('.btn-primary')).forEach((btn) => {
+      btn.addEventListener('mouseenter', () => { btn.style.transition = 'transform .09s linear'; }, { passive: true });
       btn.addEventListener('mousemove', (e) => {
         const r = btn.getBoundingClientRect();
         if (!r.width || !r.height) return;
@@ -1699,7 +1814,10 @@ syncToTop();
         const dy = ((e.clientY - (r.top + r.height / 2)) / r.height) * 5;
         btn.style.transform = 'translate3d(' + dx.toFixed(2) + 'px,' + (dy - 1).toFixed(2) + 'px,0)';
       }, { passive: true });
-      btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
+      btn.addEventListener('mouseleave', () => {
+        btn.style.transition = 'transform .55s cubic-bezier(.2,.9,.3,1.1)';   // 松手弹性复位
+        btn.style.transform = '';
+      });
     });
   }
 

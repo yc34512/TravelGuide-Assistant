@@ -6,6 +6,7 @@
     POST /api/research         发起攻略研究任务 {keyword, mode, force} -> {job_id}
     POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?, preference_mode?, start_date?} -> {job_id}
     POST /api/heat/refresh     发起城市热度刷榜任务 {city} -> {job_id}（元数据轻量采集）
+    POST /api/ask              就一份已生成的报告追问 {question, job_id?/report_name?} -> {answer}
     GET  /api/heat/{city}      查询城市实时热度榜（本周最火/长盛不衰/正在降温/平稳）
     GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
     POST /api/jobs/{id}/cancel 取消运行中的任务（攻略/行程通用）
@@ -21,6 +22,7 @@ from pydantic import BaseModel
 
 from config import KB_TTL_DAYS, REPORT_DIR
 from core import geo, knowledge
+from pipeline import ask as ask_engine
 from service import heatrefresh, research, trip
 
 app = FastAPI(
@@ -56,6 +58,44 @@ class TripIn(BaseModel):
 
 class HeatRefreshIn(BaseModel):
     city: str
+
+
+class AskIn(BaseModel):
+    question: str
+    job_id: str | None = None          # 刚生成的报告：前端手里已有 job_id
+    report_name: str | None = None     # 从历史列表点开的报告：用文件名反查任务档案
+    history: list[dict] | None = None  # 最近几轮追问 [{q, a}]，用于多轮连续
+
+
+@app.post("/api/ask", summary="就一份已生成的报告追问（基于档案回答，不重新采集）")
+def ask_report(body: AskIn):
+    """针对报告内容追问（"这个为什么值得去""两个只能选一个选哪个"）。
+
+    答案来自该任务**已有的档案**（亮点/避雷/真实评价/热度/待确认项）：
+    不触发采集、不开浏览器、不重排行程，成本仅一次 LLM 调用。
+    """
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="问题不能为空")
+    job = None
+    if body.job_id:
+        job = research.JOBS.get(body.job_id)
+        if not job or not job.get("result"):
+            job = knowledge.load_job(body.job_id) or job
+    if (not job or not job.get("result")) and body.report_name:
+        job = knowledge.find_job_by_report(body.report_name) or job
+    if not job or not job.get("result"):
+        raise HTTPException(
+            status_code=404,
+            detail="找不到这份报告的任务档案，无法追问（可重新生成一份后再问）",
+        )
+    try:
+        text = ask_engine.answer(job["result"], question, body.history)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"追问失败：{e}")
+    return {"answer": text, "job_id": job.get("id"), "keyword": job.get("keyword")}
 
 
 @app.post("/api/heat/refresh", summary="发起城市热度刷榜（元数据轻量采集）")

@@ -362,6 +362,31 @@ def load_job(job_id: str) -> dict | None:
     }
 
 
+def find_job_by_report(report_name: str) -> dict | None:
+    """按报告文件名反查生成它的终态任务（供"就历史报告追问"取档案）。
+
+    前端从历史列表点开报告时只拿得到文件名、没有 job_id，故先 LIKE 粗筛再用
+    result.report_name 精确比对（文件名带时间戳，本就唯一）。
+    """
+    name = Path(str(report_name or "").strip()).name
+    if not name:
+        return None
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, result_json FROM jobs WHERE result_json LIKE ?"
+            " ORDER BY finished_at DESC LIMIT 10",
+            (f"%{name}%",),
+        ).fetchall()
+    for row in rows:
+        try:
+            res = json.loads(row["result_json"] or "{}")
+        except Exception:
+            continue
+        if Path(str(res.get("report_name") or "")).name == name:
+            return load_job(row["id"])
+    return None
+
+
 def list_jobs(limit: int = 20) -> list[dict]:
     """最近的终态任务摘要（供网页展示历史任务）。"""
     with _conn() as conn:
