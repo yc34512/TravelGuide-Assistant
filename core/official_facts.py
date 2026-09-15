@@ -1,4 +1,4 @@
-"""官方事实三层降级（PRD §6.4 / F-C1）。
+"""官方事实三层降级。
 
 来源优先级（逐点解析，宁缺不编）：
 ① 仓库种子 ``data/official_facts/<城市>.yaml``——人工/社区策展，离线可断言，Demo 与黄金用例走此层；
@@ -7,7 +7,7 @@
 ③ 都没有——不返回该点，下游 ``normalize_official`` 后全空并标"待核实"，严禁填无来源数字。
 
 只产出普通 dict（字段贴合 pipeline.decision.OfficialFact），不改任何旧签名；YAML 缺失 /
-解析失败 / 高德不可用一律静默降级，绝不抛异常中断主流程（PRD §0 硬约束 6）。
+解析失败 / 高德不可用一律静默降级，绝不抛异常中断主流程。
 """
 from __future__ import annotations
 

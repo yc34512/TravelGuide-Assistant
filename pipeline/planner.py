@@ -16,11 +16,11 @@ from core.llm import chat_json
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 ALLOWED_SLOTS = {"上午", "下午", "晚上", "全天"}
-# —— M2b 时间/交通模型常量（PRD F-D1/F-D5）——
+# ——  时间/交通模型常量——
 CN_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-ALL_DAY_HOURS = 5.0            # 建议时长 ≥ 此值视为“全天型”，宜独占一天（F-D1）
+ALL_DAY_HOURS = 5.0            # 建议时长 ≥ 此值视为“全天型”，宜独占一天
 
-# 选点决策表状态图标（F7.1）与质量门禁状态图标（§5.3）
+# 选点决策表状态图标（F7.1）与质量门禁状态图标
 _QC_ICONS = {"pass": "✅", "warn": "⚠️", "fail": "❌", "skip": "➖"}
 
 CANDIDATE_SYSTEM = """你是旅行规划师。根据城市与出行天数，列出该城市最值得去的景点名单。
@@ -390,7 +390,7 @@ def transport_hints(city: str, hotel: str, spots: list[str], max_routes: int = 1
     return out
 
 
-# ============================ M2b：时间模型 + 结构化交通 Leg ============================
+# ============================ ：时间模型 + 结构化交通 Leg ============================
 def day_weekdays_from(start_date: str | None, days: int) -> list[str]:
     """由出发日推算每日星期（中文）。无日期/非法格式返回 []（R3 闭馆校验据此降级为不判定）。纯函数可测。"""
     if not start_date:
@@ -469,7 +469,7 @@ def _make_leg(a: str, b: str, locs: dict[str, str], travel_lines: list[str] | No
 
 def build_legs(city: str, hotel: str, plan: dict, locs: dict[str, str],
                travel_lines: list[str] | None = None) -> list[dict]:
-    """为已排入行程的相邻停留点（含酒店往返）生成结构化交通 Leg（F-D5）。纯构造、可测。"""
+    """为已排入行程的相邻停留点（含酒店往返）生成结构化交通 Leg。纯构造、可测。"""
     hl = locs.get("酒店") or (locs.get(hotel) if hotel else "")
     use_hotel = bool(hl or (hotel and hotel.strip()))   # 给了酒店名即使无坐标也补酒店往返段（估算）
     legs: list[dict] = []
@@ -499,11 +499,11 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
     问题一起写进回炉提示；采纳条件放宽为"覆盖率不变差即返回重试版"，最终是否采纳由调用方
     用 qc.problem_count 权威判定（无 extra_issues 时保持原有"严格变少才采纳"行为）。
 
-    guide_hints（M6-B）：城市高赞攻略视频提炼出的真实编排建议（串线顺序/住宿片区/
+    guide_hints：城市高赞攻略视频提炼出的真实编排建议（串线顺序/住宿片区/
     可跳过项）。传入时拼进提示词，使排线有实证依据而非只靠模型基线常识；
     不传则行为与从前完全一致（零回归）。
 
-    draft_plan（M6-C）：高赞攻略视频的行程草案（已由 LLM 审核增删改）——传入时作为主干
+    draft_plan：高赞攻略视频的行程草案（已由 LLM 审核增删改）——传入时作为主干
     注入提示词，优先保留视频实证的点位与顺序；不传则按景点档案自行编排。"""
     profile_lines = []
     for name, p in profiles.items():
@@ -525,10 +525,10 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         f"交通方案数据（实测或估算，transport 优先引用）：\n"
         + ("\n".join(travel_lines) if travel_lines else "（无，按距离给出大致方案并标注'以地图App为准'）")
     )
-    # F-A4：热度与证据在规划前已算好并喂入，引导优先安排证据强、口碑好的点
+    # 热度与证据在规划前已算好并喂入，引导优先安排证据强、口碑好的点
     if heat_summary:
         user += "\n\n已知热度与证据（优先排入证据强、热度高且趋势向好的点）：\n" + heat_summary
-    # M6-B：城市攻略层的真实编排知识（来自高赞攻略视频，不是模型常识）——
+    # 城市攻略层的真实编排知识（来自高赞攻略视频，不是模型常识）——
     # 串线顺序/住宿片区/可跳过项据此判断；与景点档案冲突时以档案的实测数据为准
     if guide_hints:
         hints = [str(h).strip() for h in guide_hints if str(h).strip()][:10]
@@ -536,7 +536,7 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
             user += ("\n\n真实攻略的编排建议（来自该城市高赞攻略视频，优先参考；"
                      "与上述景点档案冲突时以档案为准）：\n"
                      + "\n".join(f"- {h}" for h in hints))
-    # M6-C：高赞攻略视频的行程草案（已审核增删改）作为主干注入——用户要的就是
+    # 高赞攻略视频的行程草案（已审核增删改）作为主干注入——用户要的就是
     # “先看热门视频怎么排，再逐点验证”，草案优先于模型自行编排
     if draft_plan:
         draft_txt = format_draft_plan(draft_plan)
@@ -559,8 +559,8 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         # 有门禁指令：覆盖率不变差即返回重试版，权威采纳交调用方（qc.problem_count 比较）
         if base2 < len(base_issues) or (extra and base2 <= len(base_issues)):
             plan = plan2
-    # 餐饮解耦（PRD §9.3）：行程时间线不排具体餐厅，一律清空 slot.food（传空候选集→全部置空）；
-    # 餐厅调研结果仅供美食推荐榜（M4）与详情卡使用
+    # 餐饮解耦：行程时间线不排具体餐厅，一律清空 slot.food（传空候选集→全部置空）；
+    # 餐厅调研结果仅供美食推荐榜与详情卡使用
     plan = _filter_fabricated_food(plan, set())
     # 排布兜底：LLM 排出“某天只有 1 个时段”时，把过满天的点位移过来（确定性修复）
     return rebalance_days(plan, profiles, days)
@@ -604,7 +604,7 @@ def _coverage_issues(plan: dict, profiles: dict[str, dict], days: int) -> list[s
     for i, dd in enumerate(plan_days, start=1):
         sl = dd.get("slots") or []
         if len(sl) == 1 and str(sl[0].get("spot") or "") in all_day_names:
-            all_day_days += 1   # 全天型点独占一天：单条 slot="全天" 为合法排法（F-D1）
+            all_day_days += 1   # 全天型点独占一天：单条 slot="全天" 为合法排法
         elif len(sl) <= 1:
             thin_days.append(i)
     if thin_days and len(slots) >= 2 * len(plan_days) - all_day_days:

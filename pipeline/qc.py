@@ -1,4 +1,4 @@
-"""规划质量门禁（PRD Epic 5 / F5.1，M1 技术核心）。
+"""规划质量门禁。
 
 独立于生成模型的确定性规则集：规划产出后逐条裁判 R1~R10，产出可展示的
 QualityReport。生成与裁判分离——门禁只读统一决策对象（pipeline.decision）与
@@ -8,8 +8,8 @@ QualityReport。生成与裁判分离——门禁只读统一决策对象（pipe
 纯函数、可离线断言：所有规则对缺失数据保守处理——无数据一律标 skip（不冒充
 pass，也不无端 fail），绝不抛异常中断主流程。
 
-M1 落地 R1/R2/R3/R4/R7/R8/R10（当前数据即可判定）；R5（动线，F3.3）与
-R9（时效，Epic 6）依赖 M2 数据，无数据时如实标 skip，接数据后自动生效。
+R1/R2/R3/R4/R7/R8/R10 依据现有数据判定；R5（动线）与
+R9（时效）依赖官方事实数据，无数据时如实标 skip，接数据后自动生效。
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from pipeline.decision import (
     official_expired,
 )
 
-# —— 裁判状态（PRD §5.3：pass/warn/fail，另加 skip 表"本期无数据未判定"）——
+# —— 裁判状态：pass/warn/fail，另加 skip 表"无数据未判定" ——
 PASS, WARN, FAIL, SKIP = "pass", "warn", "fail", "skip"
 
 # —— 门禁阈值（集中便于调参，与 planner._coverage_issues / trip 口径一致）——
@@ -55,7 +55,7 @@ class Check:
 
 @dataclass
 class QualityReport:
-    """质量门禁产物（PRD §5.3，必须可展示、可落库、可离线断言）。"""
+    """质量门禁产物（必须可展示、可落库、可离线断言）。"""
 
     checks: list[Check] = field(default_factory=list)
     repair_rounds: int = 0
@@ -109,7 +109,7 @@ class QualityReport:
 def finalize(report: QualityReport, repair_rounds: int = 0) -> QualityReport:
     """回炉结束后定稿：仍 fail 的项写入 unresolved（已知妥协），供表达层显式列出。
 
-    PRD F5.3：回炉后仍 fail 的项进 unresolved，配原因与可选动作，绝不静默。
+    回炉后仍 fail 的项进 unresolved，配原因与可选动作，绝不静默。
     warn 不列入 unresolved（软提示，仍在 checks 中可见）。"""
     report.repair_rounds = repair_rounds
     report.unresolved = [f"[{c.rule_id} {c.name}] {c.note}" for c in report.checks
@@ -121,7 +121,7 @@ def _planned_slots(plan: dict) -> list[dict]:
     return [s for d in (plan or {}).get("days", []) for s in d.get("slots", [])]
 
 
-# —— R1 覆盖密度：天数不完整 / 入选点过少（地标静默丢弃）/ 过密（体力透支）；全天型独占一天为合法（F-D1）——
+# —— R1 覆盖密度：天数不完整 / 入选点过少（地标静默丢弃）/ 过密（体力透支）；全天型独占一天为合法——
 def _r1_coverage(plan: dict, profiles: dict, days: int) -> Check:
     from pipeline.planner import is_all_day
     d = max(1, int(days or 1))
@@ -276,7 +276,7 @@ def _r4_time_feasible(plan: dict, profiles: dict, legs: list[dict] | None = None
     return Check("R4", "时间可行", PASS, "各日时长可行", "未超出单日可用时间窗")
 
 
-# —— R5 动线：同日折返/绕路检测（F-D3）——需坐标；无坐标如实 skip（不假 pass/fail）——
+# —— R5 动线：同日折返/绕路检测——需坐标；无坐标如实 skip（不假 pass/fail）——
 def _r5_route(plan: dict, locs: dict | None = None) -> Check:
     if not locs:
         return Check("R5", "动线", SKIP, "无坐标数据",
@@ -354,12 +354,12 @@ def _r8_pitfall_attribution(pitfall: list[dict] | None, decisions: list[SpotDeci
     return Check("R8", "避坑归属", PASS, f"{checked} 条均可归属", "避坑条目都属于入选/备选点")
 
 
-# —— R9 时效：官方事实过期（Epic 6）——无官方数据时 skip ——
+# —— R9 时效：官方事实过期——无官方事实数据时 skip ——
 def _r9_timeliness(decisions: list[SpotDecision], today: str | None = None) -> Check:
     facts = [d for d in decisions if not d.official.missing]
     if not facts:
         return Check("R9", "时效", SKIP, "无官方事实数据",
-                     "Epic 6 时效治理在 M2 落地，本期未启用")
+                     "接入官方事实数据后自动生效")
     expired = [d.name for d in facts if today and official_expired(d.official, today)]
     if expired:
         return Check("R9", "时效", WARN, f"{len(expired)} 点官方事实已过期",
@@ -379,11 +379,11 @@ def _r10_sources(decisions: list[SpotDecision]) -> Check:
     return Check("R10", "来源完备", PASS, f"{n_in} 个入选点均有来源", "溯源完备")
 
 
-# —— R11 榜单无死链 / R12 两处同源：catalog 驱动的一致性（F-C4，M4 接真实判定）——
+# —— R11 榜单无死链 / R12 两处同源：catalog 驱动的一致性 ——
 def _r11_no_dead_link(trip_plan: dict | None = None) -> Check:
-    """R11（§6.8/§11）：每个 RankItem.ref_id 必须在 catalog 有唯一详情；无 trip_plan 则 skip。"""
+    """R11：每个 RankItem.ref_id 必须在 catalog 有唯一详情；无 trip_plan 则 skip。"""
     if not trip_plan:
-        return Check("R11", "榜单无死链", SKIP, "未传 trip_plan（M4a 契约就绪，待 service 接线）",
+        return Check("R11", "榜单无死链", SKIP, "未传 trip_plan（契约就绪，待 service 接线）",
                      "榜单→详情映射未接入，本期不判定；传入 trip_plan 后自动生效")
     cat = trip_plan.get("catalog") or {}
     poi_cat = cat.get("poi") or {}
@@ -406,12 +406,12 @@ def _r11_no_dead_link(trip_plan: dict | None = None) -> Check:
 
 
 def _r12_triple_consistency(trip_plan: dict | None = None) -> Check:
-    """R12（§6.9/宪法第 4 条）：同一事实（票价）在行程槽位与 catalog 详情取值一致；无则 skip。
+    """R12：同一事实（票价）在行程槽位与 catalog 详情取值一致；无则 skip。
 
     预算模块退役后本规则由“三处同源”收敛为“行程 ↔ 详情”两处同源。"""
     if not trip_plan:
         return Check("R12", "两处同源", SKIP, "未传 trip_plan",
-                     "行程/详情尚未共享同一 catalog，本次不判定；接入后自动生效")
+                     "行程与详情未共享同一 catalog，本次不判定；共享后自动生效")
     cat = (trip_plan.get("catalog") or {}).get("poi") or {}
     mismatches = []
     n_blocks = 0

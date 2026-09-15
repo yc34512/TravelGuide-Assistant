@@ -1,9 +1,9 @@
-"""统一 POI 决策对象（PRD §4.2 / §5.1，M1 地基）。
+"""统一 POI 决策对象。
 
 一个地点从"被基线提名"到"最终落稿/落选"，全程携带同一组证据属性，
 任何阶段不得把证据压扁成布尔值或一段自由文本后丢弃结构化字段。
 
-**双写过渡约定（PRD §4.2 迁移策略）**：本模块只做"从现有平行结构组装统一对象"，
+**双写过渡约定**：本模块只做"从现有平行结构组装统一对象"，
 不改动任何既有函数的签名与返回结构。质量门禁（pipeline/qc.py）与选点决策表只读
 本模块产物，其余渲染路径继续读旧结构；逐模块切换完成后再删旧拼装代码。
 
@@ -22,7 +22,7 @@ STATE_ALT = "备选"
 STATE_OUT = "淘汰"
 DECISION_STATES = (STATE_IN, STATE_ALT, STATE_OUT)
 
-# —— R2 硬理由闭集（PRD F5.1）——
+# —— R2 硬理由闭集——
 # 高价值点未入选时，decision.reason 必须命中其一才算"有硬理由"；
 # 自由文本理由不通过，防止规划器随便给句话就绕过门禁。
 HARD_REASONS = (
@@ -32,7 +32,7 @@ HARD_REASONS = (
     "需整天而剩余天数不够",
 )
 
-# —— 证据强度：对外只暴露这一套（PRD §5.1 映射约定）——
+# —— 证据强度：对外只暴露这一套——
 EVIDENCE_STRONG, EVIDENCE_MID, EVIDENCE_WEAK = "强", "中", "弱"
 EVIDENCE_LEVELS = (EVIDENCE_STRONG, EVIDENCE_MID, EVIDENCE_WEAK)
 
@@ -43,7 +43,7 @@ _CONF_HIGH, _CONF_MID = "高置信度", "中置信度"
 def evidence_from_conf(conf_level: str | None, n_sources: int | None) -> str:
     """把既有置信度分级映射成对外证据强度。纯函数可测。
 
-    映射规则（PRD §5.1）：强 = 高置信度且独立来源 ≥3；中 = 中置信度；
+    映射规则：强 = 高置信度且独立来源 ≥3；中 = 中置信度；
     弱 = 低置信度（含单源与营销号来源）。信息缺失时保守给"弱"。"""
     n = int(n_sources or 0)
     if conf_level == _CONF_HIGH and n >= 3:
@@ -104,7 +104,7 @@ class HeatInfo:
 
 @dataclass
 class OfficialFact:
-    """官方事实（PRD F2.2，M2 落地）：无则全空，不得编造。
+    """官方事实：无则全空，不得编造。
 
     来源三层降级：seed_yaml（仓库内种子事实）> amap（高德 POI）> 空（标待核实）。"""
 
@@ -145,7 +145,7 @@ class DecisionInfo:
 
 @dataclass
 class SpotDecision:
-    """单个地点的全生命周期对象（PRD §5.1 字段契约）。"""
+    """单个地点的全生命周期对象。"""
 
     name: str
     category: str = "景点"       # 景点 / 美食 / 体验 / 购物
@@ -221,7 +221,7 @@ def normalize_official(raw: dict | None) -> OfficialFact:
 
 
 def official_expired(fact: OfficialFact, today: str) -> bool:
-    """官方事实是否已过有效期（PRD F6.1）。纯函数可测。
+    """官方事实是否已过有效期。纯函数可测。
 
     无 valid_until 视为未过期（宁可继续用并提示核实，也不静默丢弃）；
     日期字符串按 ISO 前 10 位比较，格式非法时保守判未过期。"""
@@ -313,7 +313,7 @@ def build_decisions(*, candidates: list[dict] | None = None,
             sentiment=str(h.get("sentiment") or "").strip(),
         )
 
-    # 5) 官方事实（M2 落地；当前无数据则全空并标待核实）
+    # 5) 官方事实（当前无数据则全空并标待核实）
     for name, raw in (official_facts or {}).items():
         d = ensure(name)
         d.official = normalize_official(raw)
@@ -341,7 +341,7 @@ def build_decisions(*, candidates: list[dict] | None = None,
 
 
 def apply_plan(decisions: list[SpotDecision], plan: dict) -> None:
-    """按规划结果就地标注决策状态与排程位置（PRD §5.1 decision 字段组）。
+    """按规划结果就地标注决策状态与排程位置。
 
     判定顺序：
     1. 排进 slots → 入选，写 day/slot/order；
@@ -401,7 +401,7 @@ def apply_plan(decisions: list[SpotDecision], plan: dict) -> None:
                 state=STATE_OUT,
                 reason=d.verify.reason or "交叉验证未通过（无有效正面证据）")
         elif d.is_food:
-            # 餐饮解耦（PRD §9.3）：餐厅不排入行程时间线属预期，不当作景点式“静默丢弃”
+            # 餐饮解耦：餐厅不排入行程时间线属预期，不当作景点式“静默丢弃”
             d.decision = DecisionInfo(
                 state=STATE_ALT, reason="餐饮不排入行程时间线（见美食推荐榜），属解耦设计")
         elif d.researched:
@@ -428,16 +428,16 @@ def sort_decisions(decisions: list[SpotDecision]) -> list[SpotDecision]:
     )
 
 
-# ==================== 来源性质标签（F-D4 口径说明，M1a）====================
+# ==================== 来源性质标签====================
 # 预算契约（BudgetLine/BudgetPlan/R6 恒等）已退役：报告不再输出金额估算。
 # 下面三个标签仍被详情卡使用（票价/人均价的“官方确定/UGC参考/待核实”性质标注）。
 NATURE_OFFICIAL, NATURE_UGC, NATURE_TODO = "官方确定", "UGC参考", "待核实"
 
 
-# ==================== F-A3 主体归属校验（PRD §8 Epic A，M1a）====================
+# ==================== 主体归属校验====================
 
 def find_misattributed(texts: list[str], subject: str, other_names) -> tuple[list[str], list[str]]:
-    """挑出「描述了别处、却挂在 subject 档案里」的文本（串档）。（F-A3 硬要求）
+    """挑出「描述了别处、却挂在 subject 档案里」的文本（串档）。
 
     规则：一条文本提到了 other_names 里某个别处主体、且未提到 subject 本身，判为可疑；
     容忍 substring 撞名（如“西湖”⊂“西湖醋鱼”）——只要同时出现 subject 就不算串档。
@@ -459,7 +459,7 @@ def find_misattributed(texts: list[str], subject: str, other_names) -> tuple[lis
 
 
 def apply_attribution_check(profiles: dict[str, dict]) -> dict[str, list[str]]:
-    """就地过滤所有档案中描述别处的条目（F-A3）：highlights/avoid/tips 逐条校验。
+    """就地过滤所有档案中描述别处的条目：highlights/avoid/tips 逐条校验。
 
     返回 {地点: [被剔除的可疑文本]}，供上层记入 removed_items / 质量报告。
     以“其他所有地点名”为别处集；宁可漏剔不误删（仅当提到别处且未提本人才剔）。"""
@@ -477,8 +477,8 @@ def apply_attribution_check(profiles: dict[str, dict]) -> dict[str, list[str]]:
     return removed
 
 
-# ==================== M4 表达层数据契约（PRD §6.8 / §6.9 / §6.11）====================
-# 决策层唯一产物 TripPlan；Markdown / HTML / API 三端只读渲染同一个对象（F-G1 生成-呈现分离）。
+# ====================  表达层数据契约====================
+# 决策层唯一产物 TripPlan；Markdown / HTML / API 三端只读渲染同一个对象。
 # 本层只做「从 SpotDecision 等已有对象投影」，绝不二次调用 LLM、绝不新造数字；
 # 缺字段留空并由渲染层标「待核实」。当前以 name 作为 poi_id / food_id（无独立 id 体系）。
 
@@ -488,7 +488,7 @@ RANK_KIND_FOOD = "food"
 
 @dataclass
 class RankItem:
-    """榜单条目（§6.8）：ref_id 必须能在 catalog 找到唯一详情（R11 无死链）。"""
+    """榜单条目：ref_id 必须能在 catalog 找到唯一详情（R11 无死链）。"""
     ref_id: str
     kind: str = RANK_KIND_POI            # poi / food
     rank: int = 0
@@ -505,7 +505,7 @@ class RankItem:
 
 @dataclass
 class PoiDetail:
-    """地点详情档案（§6.8 / F-F3），由 SpotDecision 投影，不二次编造。"""
+    """地点详情档案，由 SpotDecision 投影，不二次编造。"""
     poi_id: str
     name: str
     category: str = "景点"
@@ -538,7 +538,7 @@ class PoiDetail:
 
 @dataclass
 class FoodDetail:
-    """美食详情档案（§6.8 / F-F2）：人均区分正餐/小吃，禁单极值当人均。"""
+    """美食详情档案：人均区分正餐/小吃，禁单极值当人均。"""
     food_id: str
     name: str
     area: str = ""
@@ -562,7 +562,7 @@ class FoodDetail:
 
 @dataclass
 class IntroSection:
-    """攻略介绍小节（§6.9 / Epic E）：facts_ref 指向引用的证据对象 id，保证不另造事实（R12）。"""
+    """攻略介绍小节：facts_ref 指向引用的证据对象 id，保证不另造事实（R12）。"""
     key: str
     title: str
     body: str
@@ -640,7 +640,7 @@ def build_food_detail(d: SpotDecision, *, nearest_poi: str = "") -> FoodDetail:
 def build_catalog(decisions: list[SpotDecision], *, legs: list[dict] | None = None,
                   pitfall_by_spot: dict[str, list[dict]] | None = None,
                   selected_order: dict[str, tuple] | None = None) -> dict:
-    """由决策列表投影 catalog={poi:{id:detail}, food:{id:detail}}（F-F3）。榜单-详情一一对应的基准。"""
+    """由决策列表投影 catalog={poi:{id:detail}, food:{id:detail}}。榜单-详情一一对应的基准。"""
     poi: dict[str, dict] = {}
     food: dict[str, dict] = {}
     legs_by_spot: dict[str, list] = {}
@@ -695,7 +695,7 @@ def to_rank_items(decisions: list[SpotDecision], catalog: dict, *, kind: str = R
     return out
 
 
-# —— F-F2 美食榜独立口径：多维可复算排序（好评/人均/热度/口碑/排队） ——
+# —— 美食榜独立口径：多维可复算排序（好评/人均/热度/口碑/排队） ——
 
 _EVIDENCE_W = {"强": 1.0, "中": 0.6, "弱": 0.3}
 _QUEUE_W = {"低": 1.0, "中": 0.5, "高": 0.0}
@@ -704,7 +704,7 @@ _REPUTATION_NEG = ("网红", "打卡")
 _FOOD_WEIGHTS = {"evidence": 0.35, "price": 0.25, "heat": 0.15,
                  "reputation": 0.15, "queue": 0.10}
 
-# —— 攻略层实证补位（M6-B 与 F-F2 美食榜的接线）——
+# —— 攻略层实证补位——
 # 餐厅候选常因逐点验证撞风控而拿不到独立视频：heat_score=0、evidence 空，
 # 美食榜推荐分会全部并列（实测 5 家全 0.24），排序失去意义。而城市攻略层
 # 已经证明这些店被高赞攻略真实提及过，这份证据不该浪费。
@@ -760,7 +760,7 @@ def apply_guide_evidence(catalog: dict, guide: dict | None) -> dict:
 
 
 def food_score_breakdown(det: dict) -> dict:
-    """美食详情 → 各维归一化得分（F-F2，可复算）：
+    """美食详情 → 各维归一化得分：
     evidence 好评证据强度 / price 人均信息完备度（有值且≥2样本最高）/
     heat 抖音热度 / reputation 口碑标签（老字号加分、网红扣分）/ queue 排队风险低加分。纯函数可测。"""
     ev = str(det.get("evidence") or det.get("positive_density") or "")
@@ -815,7 +815,7 @@ def to_food_rank_items(decisions: list[SpotDecision], catalog: dict,
 
 def build_intro(*, city: str, days: int, decisions: list[SpotDecision],
                 legs: list[dict] | None = None) -> list[dict]:
-    """Epic E 攻略介绍：只读证据对象、facts_ref 挂引用、不新造票价/时间数字。纯函数可测。"""
+    """攻略介绍：只读证据对象、facts_ref 挂引用、不新造票价/时间数字。纯函数可测。"""
     sel = [d for d in decisions if d.decision.state == STATE_IN and not d.is_food]
     alt = [d for d in decisions if d.decision.state == STATE_ALT and not d.is_food]
     intro: list[IntroSection] = []
@@ -856,7 +856,7 @@ def build_intro(*, city: str, days: int, decisions: list[SpotDecision],
 
 @dataclass
 class TripPlan:
-    """决策层唯一顶层对象（§6.11）。三端只读它渲染，同一事实全局同源。"""
+    """决策层唯一顶层对象。三端只读它渲染，同一事实全局同源。"""
     meta: dict = field(default_factory=dict)
     intro: list[dict] = field(default_factory=list)
     itinerary: list[dict] = field(default_factory=list)
@@ -884,12 +884,12 @@ def build_trip_plan(*, meta: dict, decisions: list[SpotDecision], plan: dict,
                     food_min_samples: int | None = None,
                     snap: dict | None = None,
                     guide: dict | None = None) -> TripPlan:
-    """从已有统一对象投影出 TripPlan（M4a：双写新增，不改/不替换现有渲染）。纯函数可测。
+    """从已有统一对象投影出 TripPlan（双写新增，不改/不替换现有渲染）。纯函数可测。
 
     票价同源：先建 catalog（权威价），再据此回填 itinerary 每槽的 ticket_price/open_hours，
     使 R12 能断言「行程/详情同一事实一致」（构造即一致，任一处被改动即暴露）。
 
-    guide（M6-B）：城市攻略层提炼结果；其 heat/note 在算榜单之前补进 catalog，
+    guide：城市攻略层提炼结果；其 heat/note 在算榜单之前补进 catalog，
     让因风控拿不到独立视频的餐厅在美食榜仍有区分度（不覆盖已有实测数据）。"""
     catalog = apply_guide_evidence(
         build_catalog(decisions, legs=legs, pitfall_by_spot=pitfall_by_spot), guide)
@@ -908,7 +908,7 @@ def build_trip_plan(*, meta: dict, decisions: list[SpotDecision], plan: dict,
         itinerary.append({**{k: v for k, v in day.items() if k != "slots"}, "blocks": blocks})
     heat_ranking = to_rank_items(decisions, catalog, kind=RANK_KIND_POI, limit=ranking_limit)
     food_ranking = to_food_rank_items(decisions, catalog, limit=ranking_limit)
-    # F-F2：样本低于配置下限时显式说明而非静默只列几家（宁缺不编）
+    # 样本低于配置下限时显式说明而非静默只列几家（宁缺不编）
     snap_out = dict(snap or {})
     if food_min_samples and len(food_ranking) < food_min_samples:
         snap_out["food_sample_note"] = (

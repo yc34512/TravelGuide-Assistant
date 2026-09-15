@@ -77,7 +77,7 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | Non
     """浏览器采集（多角度扩池 + 质量闸择优 + 候补补采）。浏览器阶段持锁：同一时刻只跑一个采集任务；
     转写在锁释放后进行。原始 JSON 落盘由调用方在缺口补全后统一做（含补采视频）。
 
-    queries（M6-B）：自定义搜索查询矩阵，城市攻略层用它发"{城市}旅游攻略／N天N夜／避雷"；
+    queries：自定义搜索查询矩阵，城市攻略层用它发"{城市}旅游攻略／N天N夜／避雷"；
     不传则用默认三角度 [原词, 原词+攻略, 原词+避雷]。"""
     from crawler import base
     base.require_ugc_source(log=log)   # 开源合规闸门 + 免责告知；未启用抛 SourceDisabled

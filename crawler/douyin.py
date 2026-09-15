@@ -435,7 +435,7 @@ class DouyinCrawler:
             like = _wait_any(self.page, SEL_VIDEO_LIKE, timeout=2)
             if like:
                 item.like_count = parse_count(like.text)
-        # 质量指标读全（M6）：以前只读 digg_count，播放量/收藏/分享/评论数/时长白白丢弃
+        # 质量指标读全：以前只读 digg_count，播放量/收藏/分享/评论数/时长白白丢弃
         # （comment_count 字段甚至定义了却从未赋值），质量闸与热度计算都缺原料
         item.play_count = _stat_int(stats.get("play_count"))
         item.comment_count = _stat_int(stats.get("comment_count"))

@@ -139,7 +139,7 @@ def _conn() -> sqlite3.Connection:
         )
         """
     )
-    # 城市攻略层缓存（M6-B）："{城市}旅游攻略/N天N夜"高赞视频的采集与提炼成果。
+    # 城市攻略层缓存："{城市}旅游攻略/N天N夜"高赞视频的采集与提炼成果。
     # 独立成表而不复用 spot_cache：①keyword 归一会把"攻略"当噪音后缀剥掉；
     # ②find_fresh 的前缀回退（LIKE keyword||'%'）会让"北京·城市攻略"误命中"北京"的景点缓存。
     # guide_json 存已提炼的候选与编排建议，二次请求连 LLM 提取都省（TTL 也比景点长）。
@@ -212,7 +212,7 @@ def find_fresh(keyword: str, ttl_days: int) -> dict | None:
 
 
 def record_guide(city: str, raw_path: str, video_count: int, guide: dict | None = None) -> int:
-    """登记城市攻略层采集（M6-B），返回记录 id。
+    """登记城市攻略层采集，返回记录 id。
 
     提炼结果（候选 + 编排建议）一并入库：保鲜期内再次规划同城行程时，
     既免重采也免重复调 LLM 提炼。"""

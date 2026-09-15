@@ -1,8 +1,8 @@
-"""TripPlan 只读双渲染（PRD F-G1 / F-G2 / §12，M4b-2）。
+"""TripPlan 只读双渲染。
 
 表达层铁律：本模块只读 pipeline.decision.build_trip_plan 产出的统一对象，
 不做任何计算、补数或改结论；概览/避坑/交通等渲染输入由编排层预先整理进 plan["snap"]。
-- render_markdown：0~10 报告信息架构（§12.1），榜单→详情库锚点下钻（§11.4）。
+- render_markdown：0~10 报告信息架构，榜单→详情库锚点下钻。
 - render_html：把 TripPlan 投影成既有 Jinja2 模板 context（零计算），复用模板资产。
 
 报告不输出任何金额估算（预算模块已退役，只保留调研到的确定门票价这一事实信息）。
@@ -157,7 +157,7 @@ def render_markdown(plan: dict) -> str:
         lines.append(spot_line)
         lines += [f"- 亮点 **{ov.get('highlights', 0)} 条** ｜ 避坑提示 **{ov.get('pitfalls', 0)} 条**"]
     if snap.get("guide_note"):
-        # 数据来源透明化（M6-B）：圈定与排线的实证依据到底从哪来，用户看得见
+        # 数据来源透明化：圈定与排线的实证依据到底从哪来，用户看得见
         lines.append(f"- 📚 {snap['guide_note']}")
     if snap.get("summary_note"):
         lines.append(f"- 规划说明：{snap['summary_note']}")
@@ -307,7 +307,7 @@ def render_markdown(plan: dict) -> str:
                          f" ｜ [详情](#spot-{r.get('ref_id')}){extra}")
         lines.append("")
 
-    # 8 美食榜（可下钻；F-F2 独立口径：多维可复算推荐分，不蹭景点热度）
+    # 8 美食榜
     food_ranking = plan.get("food_ranking") or []
     if food_ranking:
         lines += ["## 美食榜（未排入行程时间线，按就近/人均自选）", ""]

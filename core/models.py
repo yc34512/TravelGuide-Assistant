@@ -42,7 +42,7 @@ class VideoItem:
     transcript: str = ""  # 口播转写文本（ASR 开启时才有；随原始 JSON 持久化，缓存命中可复用）
     play_urls: list[str] = field(default_factory=list)  # 媒体 CDN 临时地址（含纯视频/纯音频流，签名会过期，不持久化）
     comments: list[Comment] = field(default_factory=list)
-    # 质量闸产物（M6）：分数供排序，reject 供"绝不静默丢弃"的透明化呈现
+    # 质量闸产物：分数供排序，reject 供"绝不静默丢弃"的透明化呈现
     quality_score: float | None = None
     quality_reject: str = ""           # 未过闸原因（低赞/过旧/过短/营销号）；空=通过
 

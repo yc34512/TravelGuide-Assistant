@@ -1,10 +1,10 @@
-"""混合候选生成与验证筛选（P0 核心）。
+"""混合候选生成与验证筛选。
 
 链路：大模型圈定 15~20 个候选（景点/美食/体验/购物）→ 逐个抖音验证采集
 （由 service.trip 驱动，命中缓存免采）→ 大模型交叉验证筛选出 8~12 个优质候选。
 
 营销号过滤：视频文案命中营销话术正则即被标记，不参与候选评分——
-本 P0 数据基线以"文案 + 评论"为主，文案的首要价值就是存在性验证与营销号识别。
+本数据基线以"文案 + 评论"为主，文案的首要价值就是存在性验证与营销号识别。
 """
 from config import LLM_WEB_SEARCH
 from core.llm import chat_json
@@ -38,7 +38,7 @@ GUIDE_HINTS_MAX = 12           # 编排建议上限
 GUIDE_ITINERARY_MAX = 3        # 保留的视频行程草案条数上限（审核输入长度闸）
 GUIDE_COMMENTS_PER_VIDEO = 15  # 每条视频取的高赞评论数
 
-# 城市攻略层（M6-B）：从"{城市}旅游攻略/N天N夜"这类综合攻略视频里读真实编排知识。
+# 城市攻略层：从"{城市}旅游攻略/N天N夜"这类综合攻略视频里读真实编排知识。
 # 从前圈定完全靠 LLM 凭空想象（一次采集都没有），城市级的"几天合适/住哪/怎么串线/
 # 哪个点可以跳过"根本没有数据来源——这正是报告"泛泛而谈"的根源。
 GUIDE_SYSTEM = """你是旅行攻略分析专家。输入是若干条该城市高赞攻略视频的文案与高赞评论，
@@ -189,7 +189,7 @@ def empty_guide_knowledge() -> dict:
 
 
 def extract_guide_knowledge(items, city: str = "", days: int = 0) -> dict:
-    """从城市高赞攻略视频提炼"真实候选 + 编排知识 + 视频行程草案"（M6-B）。只调 LLM，不做采集。
+    """从城市高赞攻略视频提炼"真实候选 + 编排知识 + 视频行程草案"。只调 LLM，不做采集。
 
     返回 {guide_candidates, plan_hints, guide_itineraries, days_advice, stay_advice, sources, videos}。
     素材为空或提炼失败一律返回空骨架（绝不抛错阻断主流程，也绝不编造内容）。"""
@@ -228,7 +228,7 @@ def extract_guide_knowledge(items, city: str = "", days: int = 0) -> dict:
     }
 
 
-# 视频行程草案审核（M6-C）：先把高赞攻略视频里怎么排的读进来，审核增删改后作为规划主干，
+# 视频行程草案审核：先把高赞攻略视频里怎么排的读进来，审核增删改后作为规划主干，
 # 再把草案点位逐个丢给验证采集——"先看别人怎么玩，再逐个查证"，用户踩过的坑不重踩。
 REVIEW_SYSTEM = """你是行程草案审核专家。输入是若干条高赞攻略视频里提炼的"逐日行程编排"（可能互不一致）
 与一份候选点池，请合并审核成一份供最终规划使用的行程草案。
@@ -247,7 +247,7 @@ REVIEW_SYSTEM = """你是行程草案审核专家。输入是若干条高赞攻�
 
 def review_guide_itinerary(city: str, days: int, preferences: str,
                            guide: dict | None) -> dict:
-    """审核"视频行程草案"（M6-C）：合并多条视频的逐日编排 -> 对齐用户天数 -> 增删改点位。
+    """审核"视频行程草案"：合并多条视频的逐日编排 -> 对齐用户天数 -> 增删改点位。
 
     返回 {"days": [{"day": 1, "slots": [{"slot": "上午", "spot": "..."}]}], "notes": "..."}；
     无草案素材或审核失败返回 {}（调用方据此跳过注草案，零回归）。只调 LLM，不做采集。"""
@@ -306,9 +306,9 @@ def generate_candidates(city: str, days: int, preferences: str, *,
                         draft_plan: dict | None = None) -> list[dict]:
     """大模型圈定候选：按类别配额裁剪后返回（上限 TOTAL_CANDIDATES_MAX）。
 
-    guide_evidence（M6-B）：城市高赞攻略视频的真实提炼结果。传入时候选以"攻略里
+    guide_evidence：城市高赞攻略视频的真实提炼结果。传入时候选以"攻略里
     真实被反复提到的点"为底稿、LLM 只做补充与配额平衡，取代从前凭空想象；
-    draft_plan（M6-C）：审核后的视频行程草案。草案点位确定性前置进候选清单且不受
+    draft_plan：审核后的视频行程草案。草案点位确定性前置进候选清单且不受
     类别配额限制（行程主干，必须逐个进验证采集），LLM 补充点仍受配额约束；
     两者不传则保持原纯 LLM 行为（kernel-only / 攻略层未启用时零回归）。
     联网搜索随配置生效（服务商不支持时自动降级为纯基线）。"""
@@ -363,7 +363,7 @@ def select_verify_candidates(cands: list[dict], verify_max: int = VERIFY_MAX,
                              priority: list[str] | None = None) -> list[dict]:
     """按类别配额公平挑选进入验证采集的候选，取代"按返回顺序硬截断 [:verify_max]"。
 
-    priority（M6-C）：视频行程草案点位，先占验证名额（行程主干必须逐个搜验证），
+    priority：视频行程草案点位，先占验证名额（行程主干必须逐个搜验证），
     剩余名额再按类别配额公平分配；不传则保持原行为。
     先按 VERIFY_QUOTA 给每类保底名额（取 min(配额, 实际数)），名额有剩再把余量
     按"景点→美食→体验→购物"优先补给还有候选的类别，直到用满 verify_max。

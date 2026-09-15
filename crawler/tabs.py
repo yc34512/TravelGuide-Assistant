@@ -132,7 +132,7 @@ def fetch_videos_gated(page, candidates, target_n: int, *,
                        level: str | None = None, workers: int | None = None,
                        log=None, cancelled=None, on_error=None,
                        max_fetch: int | None = None) -> dict:
-    """质量闸驱动的分批候补补采（M6-A 核心）：深采一批 → 校验 → 不达标的从候补顶上。
+    """质量闸驱动的分批候补补采（核心）：深采一批 → 校验 → 不达标的从候补顶上。
 
     为何分批而不是一次全采：搜索页能解析到点赞时，质量筛选已在那里完成，
     这里第一批就达标，详情页导航次数与从前完全相同（最好情况零额外成本）；

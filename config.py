@@ -32,7 +32,7 @@ CRAWL_TABS = int(os.getenv("CRAWL_TABS", "3"))
 # ASR 开启时自动放行视频域（否则捕获不到播放地址）
 BLOCK_MEDIA = os.getenv("BLOCK_MEDIA", "true").lower() == "true"
 
-# —— 采集质量闸（M6：先筛后采，宁缺勿滥）——
+# —— 采集质量闸（先筛后采，宁缺勿滥）——
 # 三档门槛：strict 只留头部内容；素材不足时按 QUALITY_RELAX_ORDER 自动降档，
 # 降档事实必须进日志与报告（绝不静默放宽）。质量分五维：播放量 20% + 点赞 35%
 # + 收藏 20% + 评论数 10% + 新鲜度 15%（详情接口 statistics 已实跑确认下发 play_count）。
@@ -64,7 +64,7 @@ SEARCH_SORT_BY_LIKES = os.getenv("SEARCH_SORT_BY_LIKES", "true").lower() == "tru
 # 单个对象的详情页导航硬上限。抖音是会话级风控：连续 5~6 次视频页导航后弹 3D 验证码，
 # 之后整个会话返回 0 结果，所以"超额深采"不可行——质量筛选必须尽量前移到搜索页
 MAX_DETAIL_FETCH = int(os.getenv("MAX_DETAIL_FETCH", "10"))
-# 城市攻略层（M6-B）：搜"{城市}旅游攻略/N天N夜/避雷"取行程编排知识，按城市缓存
+# 城市攻略层：搜"{城市}旅游攻略/N天N夜/避雷"取行程编排知识，按城市缓存
 CITY_GUIDE_VIDEOS = int(os.getenv("CITY_GUIDE_VIDEOS", "6"))     # 攻略层深采条数（成本闸）
 CITY_GUIDE_TTL_DAYS = int(os.getenv("CITY_GUIDE_TTL_DAYS", "14"))  # 攻略缓存保鲜期（比景点长：编排知识变化慢）
 CITY_GUIDE_ENABLED = os.getenv("CITY_GUIDE_ENABLED", "true").lower() == "true"

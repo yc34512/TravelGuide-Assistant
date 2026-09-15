@@ -1,8 +1,8 @@
 """行程规划任务编排：圈定景点 -> 逐点调研 -> 景点档案 -> 通行矩阵 -> 规划生成 -> 渲染。
 
-P0 升级：混合候选验证（大模型圈定 -> 抖音验证采集 -> 交叉验证筛选）、
+关键链路：混合候选验证（大模型圈定 -> 抖音验证采集 -> 交叉验证筛选）、
 营销号过滤、热度榜、避坑专题（附评论原文引用）、HTML 可视化输出。
-M6-C 升级：先读高赞攻略视频的逐日行程编排（视频行程草案）-> LLM 审核增删改 ->
+先读高赞攻略视频的逐日行程编排（视频行程草案）-> LLM 审核增删改 ->
 草案点位逐个验证采集 -> 规划以草案为主干。预算估算整体退役（估算金额不可靠，
 预算交由用户自行考虑），报告只保留调研到的确定事实价。
 复用 research 的任务框架（JOBS/取消/终态落库/历史查询）与采集管道；
@@ -69,7 +69,7 @@ TRIP_SPOT_COMMENTS = 100
 MAX_SPOTS_PER_DAY = 3    # 候选景点上限 = 天数 × 3（简单路径）
 MIN_USABLE_SPOTS = 2     # 低于此数的可用调研结果无法排行程
 TRIP_FOOD_LIMIT = 3      # 餐厅调研数上限（美食推荐榜用，不排入时间线，成本闸）
-# F-F2 美食榜样本下限（可 env 调高；配额取与本限的较大者，默认不增采集成本）
+# 美食榜样本下限（可 env 调高；配额取与本限的较大者，默认不增采集成本）
 FOOD_RANK_MIN_SAMPLES = max(1, int(os.getenv("FOOD_SAMPLE_MIN", "3")))
 QC_REPAIR_ROUNDS = 1     # 质量门禁不达标时的回炉轮次上限（F5.2；每轮多一次规划 LLM 调用，成本敏感故设 1）
 
@@ -116,7 +116,7 @@ def _try_crawl(name: str, job_id: str | None, log, limit: int = TRIP_SPOT_LIMIT,
                queries: list[str] | None = None) -> list:
     """现场采集的安全阀：UGC 源未启用（kernel-only）时不抛错，返回空并提示走缓存/LLM 基线。
 
-    limit/queries（M6）：采集条数与自定义搜索查询矩阵——城市攻略层用攻略词矩阵，
+    limit/queries：采集条数与自定义搜索查询矩阵——城市攻略层用攻略词矩阵，
     逐点验证用默认（景点名 + 攻略 + 避雷 三角度）。"""
     global _UGC_WARNED
     try:
@@ -147,7 +147,7 @@ def _city_guide_queries(city: str, days: int) -> list[str]:
 
 
 def _city_guide_layer(city: str, days: int, job_id: str | None, log) -> dict:
-    """第 0 阶段：城市攻略层（M6-B）。返回 extract_guide_knowledge 结构（失败给空骨架）。
+    """第 0 阶段：城市攻略层。返回 extract_guide_knowledge 结构（失败给空骨架）。
 
     缓存优先：同城保鲜期内采过就直接复用已提炼结果（免采集、也免重复调 LLM）。
     本层是增强项不是必需项：UGC 源未启用、采集失败、提炼为空都返回空骨架，
@@ -276,7 +276,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             log(f"任务档案落库失败（不影响结果）：{e}")
 
     try:
-        # 0) 城市攻略层（M6-B）：先搜"{城市}旅游攻略／N天N夜／避雷"这类综合攻略视频，
+        # 0) 城市攻略层：先搜"{城市}旅游攻略／N天N夜／避雷"这类综合攻略视频，
         #    从中提炼"真实被反复提到的点"与编排知识（串线/住宿片区/可跳过项）。
         #    从前圈定完全靠 LLM 凭空想象、排线只靠模型常识，这是报告"泛泛而谈"的根源。
         #    本层是增强项：未启用 UGC 源、采集失败或提炼为空都自动降级为纯 LLM 圈定。
@@ -289,7 +289,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if _cancelled():
             raise Cancelled()
 
-        # 0.5) 视频行程草案（M6-C）：先看高赞攻略视频“实际是怎么排的”（逐日编排），
+        # 0.5) 视频行程草案：先看高赞攻略视频“实际是怎么排的”（逐日编排），
         #      由 LLM 审核合并/对齐用户天数/判断增删改，拿到草案后再把点位逐个丢去验证采集，
         #      最终规划以草案为主干——用户踩过的坑不重踩（无草案素材时自动跳过，零回归）。
         job["stage"] = "审核行程草案"
@@ -574,13 +574,13 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if _cancelled():
             raise Cancelled()
 
-        # 4.5) F-A3 主体归属校验：剔除挂错地点、实为描述别处的要点（串档），宁可漏剔不误删
+        # 4.5) 主体归属校验：剔除挂错地点、实为描述别处的要点（串档），宁可漏剔不误删
         misattr = apply_attribution_check(profiles)
         if misattr:
             n_rm = sum(len(v) for v in misattr.values())
-            log(f"F-A3 归属校验：剔除 {n_rm} 条疑似描述别处的条目（涉及 {'、'.join(list(misattr)[:4])}）")
+            log(f"归属校验：剔除 {n_rm} 条疑似描述别处的条目（涉及 {'、'.join(list(misattr)[:4])}）")
 
-        # 与 plan 无关的先算（F-A4：热度/证据在规划前就绪并喂给规划器）：避坑专题 + 热度榜
+        # 与 plan 无关的先算：避坑专题 + 热度榜
         all_points = [p for pts in spot_points.values() for p in pts] \
             + [p for pts in food_points.values() for p in pts]
         pitfall = pitfall_digest(all_points)
@@ -593,7 +593,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 h["sentiment"] = sentiment_trend([c for it in items for c in it.comments])["trend"]
                 heat_rows.append(h)
         heat_rows.sort(key=lambda r: r["score"], reverse=True)
-        # 热度+证据摘要喂规划：优先证据强、热度高的点（F-A4）
+        # 热度+证据摘要喂规划：优先证据强、热度高的点
         heat_by_name = {h["spot"]: h for h in heat_rows}
         hs_lines: list[str] = []
         for name in list(profiles.keys())[:12]:
@@ -612,16 +612,16 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         if not plan["days"]:
             raise RuntimeError("规划生成失败：未产出有效行程，请重试或减少天数/景点")
 
-        # 5.5) 统一决策对象 + 质量门禁 + 有限回炉（PRD Epic 5，M1 技术核心）：
+        # 5.5) 统一决策对象 + 质量门禁 + 有限回炉：
         #      生成与裁判分离——门禁是独立确定性规则，不达标带 issues 回炉，仍不达标进已知妥协
         job["stage"] = "质量门禁"
         today = datetime.now().strftime("%Y-%m-%d")
-        # 出发日→每日星期（F-D2）：有则 R3 运行期真校闭馆日，无则 [] 使 R3 退回不判闭馆
+        # 出发日→每日星期：有则 R3 运行期真校闭馆日，无则 [] 使 R3 退回不判闭馆
         day_weekdays = day_weekdays_from(start_date, days)
         if day_weekdays:
             log(f"出发日 {start_date}：行程各日星期 {'、'.join(day_weekdays)}（R3 将据官方闭馆日校验）")
 
-        # 官方事实层（F-C1 三层降级）：命中种子/高德的点喂决策与门票同源展示；无则留空标"待核实"
+        # 官方事实层：命中种子/高德的点喂决策与门票同源展示；无则留空标"待核实"
         _of_names = list(profiles) + [str(c.get("name") or "").strip()
                                       for c in (cands or []) if isinstance(c, dict)]
         official_map = load_city_facts(city, _of_names, with_amap=geo.available())
@@ -670,7 +670,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 break
         finalize(report, repair_rounds=rounds)
 
-        # 定稿 Leg 汇总（F-D5）：交通方案随最终 plan 重算，供报告"分段交通"与 R4/R5 复用
+        # 定稿 Leg 汇总：交通方案随最终 plan 重算，供报告"分段交通"与 R4/R5 复用
         legs = build_legs(city, hotel, plan, locs, travel_lines)
         log(f"行程定稿：{len(plan.get('days') or [])} 天；避坑 {len(pitfall)} 条；"
             f"热度榜 {len(heat_rows)} 个；质量分 {report.score}"
@@ -691,8 +691,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         # 6) 渲染落盘：Markdown + HTML 可视化双输出（共享同一时间戳文件名）
         job["stage"] = "渲染路书"
         ts = datetime.now()
-        # M4b-1：决策层产出唯一 TripPlan（§6.11），并据它补判 R11/R12（输出完整性，不入回炉）
-        # M4b-2：呈现快照由编排层用决策层纯函数预先整理（表达层只读，零计算）
+        # 决策层产出唯一 TripPlan，并据它补判 R11/R12（输出完整性，不入回炉）
+        # 呈现快照由编排层用决策层纯函数预先整理（表达层只读，零计算）
         snap = {
             "user_spots": user_spots,
             "overview": build_overview(days, plan, profiles, pitfall, food_profiles or None),
@@ -757,7 +757,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             "heat_rank": heat_rows,
             "quality": report.to_dict(),
             "decision_table": [d.to_row() for d in decisions],
-            "trip_plan": trip_plan.to_dict(),   # §6.11 唯一顶层对象，API/MCP 直接可取
+            "trip_plan": trip_plan.to_dict(),   # 唯一顶层对象，API/MCP 直接可取
             "stats": {
                 "spots": len(spot_points),
                 "foods": len(food_points),

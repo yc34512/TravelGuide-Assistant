@@ -700,7 +700,7 @@ class TestOverviewAndHtml(unittest.TestCase):
 
 
 class TestPlanQualityGuards(unittest.TestCase):
-    """北京样例 P0 修复：覆盖率兜底 + 排布均衡兜底 + 门票唯一口径（预算模块退役，只留事实价提取）。"""
+    """北京样例修复：覆盖率兜底 + 排布均衡兜底 + 门票唯一口径（预算模块退役，只留事实价提取）。"""
 
     def test_coverage_issues(self):
         from pipeline.planner import _coverage_issues
@@ -718,7 +718,7 @@ class TestPlanQualityGuards(unittest.TestCase):
         self.assertTrue(any("低于下限" in x for x in issues))
         self.assertTrue(any("什刹海" in x and "晚上" in x for x in issues))
         self.assertTrue(any("环球影城" in x for x in issues))
-        self.assertTrue(any("行程天数不完整" in x for x in issues))   # P0 新增的缺天检查
+        self.assertTrue(any("行程天数不完整" in x for x in issues))   # 新增的缺天检查
         # 排够点数 + 晚上型归位 + summary_note 提到备选 → 无问题
         good = {"summary_note": "天坛列为备选，时间不够", "days": [
             {"day": 1, "slots": [{"slot": "全天", "spot": "环球影城"},
@@ -1833,7 +1833,7 @@ class TestFoodsRender(unittest.TestCase):
 
 
 class TestSpotDecision(unittest.TestCase):
-    """M1-1 统一决策对象（pipeline.decision）：证据映射、组装、状态标注、排序。"""
+    """ 统一决策对象（pipeline.decision）：证据映射、组装、状态标注、排序。"""
 
     def test_evidence_mapping(self):
         from pipeline.decision import evidence_from_conf, spot_evidence
@@ -1918,7 +1918,7 @@ class TestSpotDecision(unittest.TestCase):
 
 
 class TestQualityGate(unittest.TestCase):
-    """M1-3 质量门禁（pipeline.qc）：逐条正反夹具 + 报告聚合（R6 预算随预算模块退役）。"""
+    """ 质量门禁（pipeline.qc）：逐条正反夹具 + 报告聚合（R6 预算随预算模块退役）。"""
 
     def _dec(self, name, *, state="", evidence="弱", heat=0.0, videos=0,
              sources=None, reason="", close_day="", official_price=None,
@@ -2039,7 +2039,7 @@ class TestQualityGate(unittest.TestCase):
 
 
 class TestGateWiringAndRender(unittest.TestCase):
-    """M1-4/M1-8：门禁接线（plan_itinerary 回炉）+ 选点决策表/质量分卡渲染。"""
+    """ 门禁接线（plan_itinerary 回炉）+ 选点决策表/质量分卡渲染。"""
 
     def _fixture(self):
         from pipeline.decision import build_decisions
@@ -2264,12 +2264,12 @@ class TestAmapQuota(unittest.TestCase):
         self.assertFalse(g._quota_exhausted())
 
 
-class TestM1GoldenCases(unittest.TestCase):
-    """M1 出口黄金用例（PRD §15 Case A 子集 + Case B）新增保证的离线断言。
+class TestGoldenCases(unittest.TestCase):
+    """ 出口黄金用例新增保证的离线断言。
 
-    仅测 M1 新增部分（#3/#4/#6/#8/#9 已由既有 R3/R8/决策表/finalize/R4 测试覆盖）：
+    仅测  新增部分（#3/#4/#6/#8/#9 已由既有 R3/R8/决策表/finalize/R4 测试覆盖）：
     #12 餐饮解耦（时间线不排餐厅）、#10/#11 R11/R12 接口位、
-    Case B#2 主体归属校验（F-A3）。预算模块已退役，恒等/弹性用例随之删除。"""
+    Case B#2 主体归属校验。预算模块已退役，恒等/弹性用例随之删除。"""
 
     def _profiles(self):
         return {
@@ -2300,7 +2300,7 @@ class TestM1GoldenCases(unittest.TestCase):
         self.assertNotIn("R11", [c.rule_id for c in rep.fails])
         self.assertNotIn("R12", [c.rule_id for c in rep.fails])
 
-    # Case B#2：F-A3 主体归属校验 + substring 容忍
+    # Case B#2：主体归属校验 + substring 容忍
     def test_attribution_check(self):
         from pipeline.decision import apply_attribution_check, find_misattributed
 
@@ -2347,8 +2347,8 @@ class TestM1GoldenCases(unittest.TestCase):
             pp.chat_json = orig
 
 
-class TestM2aGoldenCases(unittest.TestCase):
-    """M2a 出口黄金用例（PRD §15 Case A #2/#5 + F-C1/F-C3）。
+class TestGoldenTimeCases(unittest.TestCase):
+    """ 出口黄金用例。
 
     官方事实三层降级（种子 YAML 可断言）、门票以官方为准并带来源、
     多源冲突仲裁取官方、过期事实仍挂决策对象供 R9 警示。
@@ -2365,7 +2365,7 @@ class TestM2aGoldenCases(unittest.TestCase):
         return {"summary_note": "", "days": [{"day": 1, "slots": [
             {"slot": "下午", "spot": "甲", "food": ""}]}]}
 
-    # F-C1：种子层读回与 YAML 一致、带 source_url、支持别名、无城市不抛
+    # 种子层读回与 YAML 一致、带 source_url、支持别名、无城市不抛
     def test_seed_loader(self):
         from core.official_facts import load_city_facts, load_seed_facts
         from pipeline.decision import normalize_official
@@ -2384,7 +2384,7 @@ class TestM2aGoldenCases(unittest.TestCase):
         f = normalize_official(facts["故宫博物院"])
         self.assertEqual(f.price, 60.0)
 
-    # F-C1/F-D4：官方价优先并带来源；无来源不得编造数字（预算退役后口径落在 catalog 详情）
+    # -D4：官方价优先并带来源；无来源不得编造数字（预算退役后口径落在 catalog 详情）
     def test_official_price_wins_in_catalog(self):
         from pipeline.decision import build_catalog, build_decisions
 
@@ -2401,7 +2401,7 @@ class TestM2aGoldenCases(unittest.TestCase):
         self.assertIsNone(det2["ticket_price"])
         self.assertEqual(det2["ticket_nature"], "待核实")
 
-    # F-C3：官方覆盖评论（评论免费/评论高价两夹具）
+    # 官方覆盖评论（评论免费/评论高价两夹具）
     def test_arbitration_official_wins(self):
         from pipeline.decision import build_catalog, build_decisions
 
@@ -2422,7 +2422,7 @@ class TestM2aGoldenCases(unittest.TestCase):
         self.assertEqual(det3["ticket_price"], 120.0)
         self.assertEqual(det3["ticket_nature"], "UGC参考")
 
-    # F-D11/#5：过期官方事实仍挂在决策对象上供 R9 警示（不静默丢弃）
+    # /#5：过期官方事实仍挂在决策对象上供 R9 警示（不静默丢弃）
     def test_expired_official_still_attached_for_r9(self):
         from pipeline.decision import normalize_official, official_expired, build_decisions
 
@@ -2451,9 +2451,9 @@ class TestM2aGoldenCases(unittest.TestCase):
         self.assertIn("official", d.source_tags)
 
 
-class TestM2bGoldenCases(unittest.TestCase):
-    """M2b：时间模型（day_weekdays/is_all_day）+ 结构化 Leg（F-D5，只留方式/耗时）
-    + 动线折返（R5/F-D3）。全离线夹具，不打网络（强制 geo.available=False）。预算相关用例已退役。"""
+class TestTimeModelCases(unittest.TestCase):
+    """ 时间模型（day_weekdays/is_all_day）+ 结构化 Leg
+    + 动线折返。全离线夹具，不打网络（强制 geo.available=False）。预算相关用例已退役。"""
 
     def test_day_weekdays_from(self):
         from pipeline.planner import day_weekdays_from
@@ -2521,8 +2521,8 @@ class TestM2bGoldenCases(unittest.TestCase):
         self.assertEqual(_r1_coverage(shared, profiles2, 1).status, WARN)
 
 
-class TestM4aTripPlanCatalog(unittest.TestCase):
-    """M4a：TripPlan 顶层契约（§6.11）+ catalog/RankItem/Intro 投影 + R11 无死链 / R12 同源。
+class TestTripPlanCatalog(unittest.TestCase):
+    """ TripPlan 顶层契约+ catalog/RankItem/Intro 投影 + R11 无死链 / R12 同源。
     全离线夹具，不调 LLM、不打网络。"""
 
     def _decs(self):
@@ -2567,7 +2567,7 @@ class TestM4aTripPlanCatalog(unittest.TestCase):
         decs, plan, legs = self._decs()
         d = build_trip_plan(meta={"city": "北京", "days": 1}, decisions=decs, plan=plan,
                            legs=legs).to_dict()
-        # M4b-2 起新增增量字段 snap（呈现快照）；预算退役后 §6.11 收敛为十一键
+        #  起新增增量字段 snap（呈现快照）；预算退役后 收敛为十一键
         self.assertEqual(
             {"meta", "intro", "itinerary", "heat_ranking", "food_ranking", "catalog",
              "quality", "decision_table", "plan_b", "to_verify", "appendix"},
@@ -2626,8 +2626,8 @@ class TestM4aTripPlanCatalog(unittest.TestCase):
         self.assertEqual(r2.get("R12").status, PASS)
 
 
-class TestM4b1TripPlanWiring(unittest.TestCase):
-    """M4b-1：决策层产出唯一 TripPlan + 定稿后 apply_trip_plan_checks 端到端激活 R11/R12。"""
+class TestTripPlanWiring(unittest.TestCase):
+    """ 决策层产出唯一 TripPlan + 定稿后 apply_trip_plan_checks 端到端激活 R11/R12。"""
 
     def _decs_plan_legs(self):
         from pipeline.decision import build_decisions
@@ -2675,8 +2675,8 @@ class TestM4b1TripPlanWiring(unittest.TestCase):
         self.assertIn("周一闭馆", pit)     # 未传 pitfall_by_spot 时从 avoid 回退
 
 
-class TestM4b2TripRender(unittest.TestCase):
-    """M4b-2：TripPlan 只读双渲染（0~11 报告 IA + 榜单→详情库锦点下钻 + 表达层零计算）。"""
+class TestTripRender(unittest.TestCase):
+    """ TripPlan 只读双渲染（0~11 报告 IA + 榜单→详情库锦点下钻 + 表达层零计算）。"""
 
     def _plan_dict(self):
         from pipeline.decision import build_decisions, build_trip_plan
@@ -2729,7 +2729,7 @@ class TestM4b2TripRender(unittest.TestCase):
                     "## 选点决策表", "## 第 1 天", "## 分段交通",
                     "## 避坑专题", "## 热度榜", "## 美食榜", "## 详情库"):
             self.assertIn(sec, md)
-        # 0 需求回显：生成时间（字符串 ISO 不崩溃，回归 M4b-2 修复）+ 来源/路线依据行
+        # 0 需求回显：生成时间（字符串 ISO 不崩溃，回归  修复）+ 来源/路线依据行
         self.assertIn("生成时间：2026-09-08 12:00", md)
         self.assertIn("数据来源：2 个景点 + 1 家餐厅", md)
         self.assertIn("路线依据：LLM 交通估算", md)
@@ -2765,8 +2765,8 @@ class TestM4b2TripRender(unittest.TestCase):
         self.assertIn("60", html)   # catalog 同源票价进模板 context
 
 
-class TestM4b3FoodRank(unittest.TestCase):
-    """M4b-3：美食榜独立口径（F-F2）——多维可复算排序 + 样本下限显式标注。"""
+class TestFoodRank(unittest.TestCase):
+    """ 美食榜独立口径——多维可复算排序 + 样本下限显式标注。"""
 
     def _decs_cat(self):
         from pipeline.decision import build_catalog, build_decisions
@@ -2945,7 +2945,7 @@ class TestDayCoverageGuard(unittest.TestCase):
 
 
 class TestDetailCardAndTicketLine(unittest.TestCase):
-    """P1/P2：详情库空壳卡与"待核实（待核实）"重复。"""
+    """详情库空壳卡与"待核实（待核实）"重复。"""
 
     def test_ticket_line_no_duplicate_todo(self):
         """nature 兜底成"待核实"时不得再套一层括号（实测一份报告 15 处）。"""
@@ -3201,7 +3201,7 @@ class TestBugfixTicketSameSource(unittest.TestCase):
 
 
 class TestVideoQualityGate(unittest.TestCase):
-    """M6-A 质量闸：门槛判定 / 质量分 / 候选池预筛 / 自动降档 / 详情页候补校验。"""
+    """ 质量闸：门槛判定 / 质量分 / 候选池预筛 / 自动降档 / 详情页候补校验。"""
 
     def _item(self, like=50000, days_ago=10, duration=120.0, desc="三天两夜攻略", **kw):
         from datetime import datetime, timedelta
@@ -3417,7 +3417,7 @@ class TestVideoQualityGate(unittest.TestCase):
 
 
 class TestCrawlQualityWiring(unittest.TestCase):
-    """M6-A 采集层接线：搜索地址排序参数 / 指标归一 / 排序向后兼容 / 多查询词扩池。"""
+    """ 采集层接线：搜索地址排序参数 / 指标归一 / 排序向后兼容 / 多查询词扩池。"""
 
     def test_search_url_carries_sort_param(self):
         from crawler.douyin import search_url
@@ -3523,7 +3523,7 @@ class TestCrawlQualityWiring(unittest.TestCase):
 
 
 class TestCityGuideLayer(unittest.TestCase):
-    """M6-B 城市攻略层：查询矩阵 / 提炼归一 / 圈定与排线接线 / 缓存往返 / 渲染透明化。"""
+    """ 城市攻略层：查询矩阵 / 提炼归一 / 圈定与排线接线 / 缓存往返 / 渲染透明化。"""
 
     def test_guide_queries_matrix(self):
         """用户要去某地旅游，搜的应该是"{城市}旅游攻略""{城市}三天两夜"，不是单个景点名。"""
@@ -3593,7 +3593,7 @@ class TestCityGuideLayer(unittest.TestCase):
         self.assertEqual(g["stay_advice"], "前门/王府井")
         self.assertEqual(g["videos"], 1)
         self.assertEqual(g["sources"], ["https://x/1"])
-        # 视频行程草案一并提炼（M6-C）；非法项不污染草案
+        # 视频行程草案一并提炼；非法项不污染草案
         self.assertEqual(g["guide_itineraries"],
                          [{"days": [{"day": 1, "slots": [{"slot": "上午", "spot": "故宫"}]}]}])
 
@@ -3729,8 +3729,8 @@ class TestCityGuideLayer(unittest.TestCase):
         self.assertNotIn("📚", render_markdown(tp2))
 
 
-class TestM6cDraftChain(unittest.TestCase):
-    """M6-C：视频行程草案链路——提炼草案 → LLM 审核增删改 → 候选前置 → 验证优先 → 规划注入。"""
+class TestDraftChain(unittest.TestCase):
+    """ 视频行程草案链路——提炼草案 → LLM 审核增删改 → 候选前置 → 验证优先 → 规划注入。"""
 
     _GUIDE = {
         "guide_candidates": [{"name": "故宫", "category": "景点", "heat": "高", "note": ""}],
