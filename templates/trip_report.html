@@ -47,7 +47,7 @@
   --w:1020px;
 }
 *,*::before,*::after{ box-sizing:border-box; }
-html{ scroll-behavior:smooth; -webkit-text-size-adjust:100%; }
+html{ scroll-behavior:smooth; -webkit-text-size-adjust:100%; scrollbar-gutter:stable; }
 body{
   margin:0; color:var(--ink); font-family:var(--sans); font-size:14.5px; line-height:1.78;
   background:
@@ -1185,11 +1185,17 @@ body.modal-open{ overflow:hidden; }
   var body = document.getElementById('modalBody');
   var title = document.getElementById('modalTitle');
   var lastFocus = null;
+  var savedScrollY = 0;   // 打开弹层时的页面滚动位置，关闭时用它恢复
 
   function openModal(id) {
     var node = document.getElementById(id);
     if (!node) return false;
     lastFocus = document.activeElement;
+    // 记下打开前的滚动位置。锁滚动靠 body{overflow:hidden}，但 body 因
+    // overflow-x:hidden 本来就计算成 overflow-y:auto（本身是滚动容器），
+    // 锁定/解锁定之间**位置保不保在各引擎上不一致**（Safari 与 iOS 上实测会丢，
+    // 表现为关闭后回到页首、要重新往下滚）。所以不依赖引擎脾气，关闭时自己恢复。
+    savedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
     var clone = node.cloneNode(true);
     clone.removeAttribute('id');
     body.innerHTML = '';
@@ -1200,7 +1206,8 @@ body.modal-open{ overflow:hidden; }
     document.body.classList.add('modal-open');
     body.scrollTop = 0;
     var btn = document.getElementById('modalClose');
-    if (btn) btn.focus();
+    // preventScroll 不能省：否则聚焦关闭按钮会把页面拽过去（恢复焦点那行已用同款写法）
+    if (btn) { try { btn.focus({ preventScroll: true }); } catch (e) { try { btn.focus(); } catch (e2) {} } }
     return true;
   }
   function closeModal() {
@@ -1209,6 +1216,8 @@ body.modal-open{ overflow:hidden; }
     document.body.classList.remove('modal-open');
     setTimeout(function () { if (!mask.classList.contains('open')) body.innerHTML = ''; }, 200);
     if (lastFocus && lastFocus.focus) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} }
+    // 放在最后：先让 focus 归位，再压回记录的滚动位置，避免被它带偏
+    window.scrollTo(0, savedScrollY);
   }
 
   document.addEventListener('click', function (e) {

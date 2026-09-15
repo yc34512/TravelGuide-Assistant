@@ -4702,5 +4702,64 @@ class TestHeatFallback(unittest.TestCase):
         self.assertIn("行程规划", r["hint"])
 
 
+class TestTripReportModalScroll(unittest.TestCase):
+    """详情弹层关闭后必须回到原滚动位置（用户实测反馈的 bug）。
+
+    成因值得写下来：`body{overflow-x:hidden}` 会让计算值 `overflow-y` 变成 `auto`
+    ——body 自己成了滚动容器；而 `body.modal-open{overflow:hidden}` 又把它锁掉。
+    于是"锁定/解锁之间滚动位置保不保"完全取决于引擎（Chromium 实测保得住，
+    Safari / iOS 会丢，表现为关闭后跳回页首、得重新往下滚）。
+
+    结论：**不能依赖引擎脾气**，必须显式记录并恢复。另外聚焦关闭按钮也要
+    `preventScroll`，否则聚焦动作本身就会把页面拽走。
+
+    这条测试的价值在于：报告正文明确对用户承诺了"看完点「关闭」回到原位置"，
+    下面的断言就是保证代码别偷偷违背这句承诺。
+    """
+
+    @staticmethod
+    def _tpl() -> str:
+        from pathlib import Path
+
+        return (Path(__file__).parent / "templates" / "trip_report.html").read_text(encoding="utf-8")
+
+    def test_scroll_position_is_explicitly_saved_and_restored(self):
+        tpl = self._tpl()
+        self.assertIn("savedScrollY", tpl, "缺少滚动位置记录")
+        self.assertIn("window.scrollTo(0, savedScrollY)", tpl, "关闭时未恢复滚动位置")
+
+    def test_close_button_focus_does_not_scroll_page(self):
+        """聚焦关闭按钮必须带 preventScroll，否则聚焦会把页面拽到按钮处。"""
+        self.assertIn("btn.focus({ preventScroll: true })", self._tpl())
+
+    def test_unlock_happens_before_restoring_scroll(self):
+        """顺序要对：先解除 overflow 锁定、再恢复滚动。
+
+        若在仍锁定状态下调用 scrollTo，位置会被随后的解锁重排带走。
+        """
+        tpl = self._tpl()
+        close_fn = tpl[tpl.index("function closeModal"):]
+        close_fn = close_fn[:close_fn.index("document.addEventListener")] \
+            if "document.addEventListener" in close_fn else close_fn
+        self.assertLess(close_fn.index("classList.remove('modal-open')"),
+                        close_fn.index("window.scrollTo(0, savedScrollY)"))
+
+    def test_rendered_report_carries_the_fix(self):
+        """真实产物（磁盘上的路书 HTML）必须带上修复——模板改了不重渲染等于没改。"""
+        import sqlite3
+        from pathlib import Path
+
+        db = Path(__file__).parent / "data" / "knowledge.db"
+        reports = Path(__file__).parent / "data" / "reports"
+        if not db.exists() or not reports.exists():
+            self.skipTest("无本地数据，跳过产物回归")
+        htmls = sorted(reports.glob("行程_*.html"))
+        if not htmls:
+            self.skipTest("本地没有路书 HTML")
+        stale = [f.name for f in htmls
+                 if "window.scrollTo(0, savedScrollY)" not in f.read_text(encoding="utf-8")]
+        self.assertEqual(stale, [], f"这些路书未重渲染，仍缺修复：{stale}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
