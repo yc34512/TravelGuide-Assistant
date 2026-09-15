@@ -28,7 +28,7 @@ class NoApiKeyError(RuntimeError):
 
 
 # 常见 OpenAI 兼容服务商预设：(名称, base_url, 默认模型, Key 申请入口)
-# 四家均有免费额度；免费额度耗尽「用完即停」等成本设置见 README「成本控制」。
+# 四家均有免费额度；Key 申请入口如下。
 PROVIDERS = [
     ("阿里云百炼 DashScope（通义千问）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-turbo", "https://bailian.console.aliyun.com/"),
     ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat", "https://platform.deepseek.com/"),

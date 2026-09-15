@@ -2,9 +2,7 @@
 
 [![Offline Tests](https://github.com/YC34512/TravelGuide-Assistant/actions/workflows/test.yml/badge.svg)](https://github.com/YC34512/TravelGuide-Assistant/actions/workflows/test.yml)
 
-**基于抖音真实评论数据的避坑型智能行程规划器**：用户说想去哪旅游 → 大模型（基线知识；联网搜索默认关闭以免独立计费，见「成本控制」）给出完整旅游清单建议 → 清单中的景点/网红店铺经浏览器采集验证，让数据更真实 → 生成含避坑专题与热度榜的逐日行程路书（Markdown + HTML 可视化）。
-
-**先看效果（无需安装任何东西）**：[示例路书 · 上海 3 天（Markdown，GitHub 上直接阅读）](examples/示例路书_上海3天.md) ｜ [可视化 HTML 版](examples/示例路书_上海3天.html)（下载后双击打开，含行程全景图、详情弹层与来源链接）。
+**基于抖音真实评论数据的避坑型智能行程规划器**：用户说想去哪旅游 → 大模型（基线知识）给出完整旅游清单建议 → 清单中的景点/网红店铺经浏览器采集验证，让数据更真实 → 生成含避坑专题与热度榜的逐日行程路书（Markdown + HTML 可视化）。
 
 ## 三大核心卖点（不只是生成一份攻略）
 
@@ -22,11 +20,7 @@
 |---|---|
 | ![控制台首页](assets/console-home.jpg) | ![行程规划](assets/console-trip.jpg) |
 
-HTML 可视化路书（示例：上海 3 天）——逐日时间线、行程全景图、避坑警示卡，每条要点附来源链接（下方动图为**全页滚动**，约 19 秒）：
-
-![路书全页滚动预览：概览 → 逐日行程 → 避坑专题 → 详情库 → 出发前确认](assets/report-scroll.gif)
-
-![路书顶部：输入回显、质量分卡与速览](assets/report-top.jpg)
+生成结果是一份 HTML 可视化路书（逐日时间线、行程全景图、避坑警示卡，每条要点附来源链接），任务完成后自动输出到本地 `data/reports/`，浏览器直接打开即可。
 
 ## 合规声明（请务必阅读）
 
@@ -56,7 +50,7 @@ HTML 可视化路书（示例：上海 3 天）——逐日时间线、行程全
 
 ## 安装（Windows 三步，约 10 分钟出第一份路书）
 
-需要准备的只有两样：**Python 3.10+**（[官网下载](https://www.python.org/downloads/)，安装时**务必勾选 "Add to PATH"**；需 Chrome 或 Edge 浏览器，代码会自动检测）和**任意一家大模型的 API Key**（[阿里云百炼](https://bailian.console.aliyun.com/) / [DeepSeek](https://platform.deepseek.com/) / [智谱](https://open.bigmodel.cn/) / [Moonshot](https://platform.moonshot.cn/)，均有免费额度，成本设置见「成本控制」）。高德 Key 与抖音采集**全部可选**，不配也能跑。
+需要准备的只有两样：**Python 3.10+**（[官网下载](https://www.python.org/downloads/)，安装时**务必勾选 "Add to PATH"**；需 Chrome 或 Edge 浏览器，代码会自动检测）和**任意一家大模型的 API Key**（[阿里云百炼](https://bailian.console.aliyun.com/) / [DeepSeek](https://platform.deepseek.com/) / [智谱](https://open.bigmodel.cn/) / [Moonshot](https://platform.moonshot.cn/)，均有免费额度）。高德 Key 与抖音采集**全部可选**，不配也能跑。
 
 0. **获取代码**：`git clone https://github.com/YC34512/TravelGuide-Assistant.git`，或在 GitHub 页 **Code → Download ZIP** 后解压；
 1. 双击 **`install.bat`** —— 自动建虚拟环境、装依赖、自检（首次约几分钟，可重复执行）；
@@ -90,38 +84,6 @@ python run_server.py        # 启动网页版（或 python run_cli.py 走命令�
 
 - 重新配置：`运行.bat setup`（或 `python run_cli.py setup`）；
 - 备选方式：也可以把 `​.env.example` 复制为 `.env` 手工填写（明文文件，已被 `.gitignore` 排除，安全性弱于凭据管理器）。
-
-## 成本控制（只花免费额度与代金券，不扣现金余额）
-
-大模型调用是本项目唯一可能产生现金费用的环节。以阿里云百炼为例：
-
-- **免费额度**：首次开通自动发放，每个模型各有独立 100 万 Token（90 天有效，70+ 模型合计超 7000 万）；
-- **抵扣顺序**：`免费额度 > 资源包 > 节省计划 > 按量付费`，代金券只在最后「按量付费」出账单时抵扣；
-- **联网搜索默认关闭**（`LLM_WEB_SEARCH=false`）：百炼的搜索插件属独立计费，官方「节省计划与资源包」明确将其排除在抵扣范围外，而新人免费额度的「不支持抵扣」清单又未列它——两处口径不一致，风险不对称（一旦不被抵扣就是直接扣现金），所以默认不发 `enable_search`。近期热度由抖音采集的热度指数提供、交通由高德提供，本就不依赖搜索。
-
-### 彻底杜绝扣现金：开「免费额度用完即停」
-
-百炼控制台 →「免费额度」页 → 对目标模型开启该开关（或「批量设置 → 一键开启所有模型」）。额度耗尽时接口返回 `403 AllocationQuota.FreeTierOnly` 并停止服务，**不会转按量付费**。
-
-- 代价：不再产生按量账单，所以**代金券也就用不上了**。二者只能选一：要么纯免费额度、零现金风险；要么用券、但券尽后会扣余额（阿里云没有"代金券用完即停"，高额消费预警是次日短信、拦不住）；
-- 额度耗尽**不会自动切换模型**，执行 `python run_cli.py setup` 换成仍有额度的模型即可继续；
-- 本项目已识别该错误码：直接给出"换模型"的可操作提示，**不做无谓重试**（重试既救不回来也白等三轮）。
-
-### 用量自查
-
-每个任务结束会打印一行用量账本，可与控制台「免费额度」页的余量对照估算还能跑几次：
-
-```
-LLM 用量（本进程累计）：31 次调用、共 186420 token（输入 152300 + 输出 34120）｜qwen-plus 186420 token/31 次
-```
-
-其他外部服务的成本：
-
-| 服务 | 是否花钱 | 护栏 |
-|---|---|---|
-| 抖音采集 | 不产生费用 | 频控 + 单会话详情页导航硬上限（防风控，非防扣费） |
-| 高德地图 | 个人开发者 5000 次/日免费 | `AMAP_DAILY_CAP=300` 安全上限，达上限自动降级为 LLM 估算 |
-| 口播转写 ASR | 不产生费用 | 本地 faster-whisper 推理，音频不出本机 |
 
 ## 首次运行（抖音扫码，一次即可）
 
@@ -207,9 +169,7 @@ API 形态：`POST /api/trip {"city": "大同", "days": 3, "hotel": "大同古�
 │   └── trip_report.html # 行程可视化模板（Jinja2：时间线 + 避坑警示卡 + 热度进度条，离线降级）
 ├── product/
 │   └── PRD.md           # 产品需求文档（避坑型智能行程规划器）
-├── examples/
-│   └── 示例路书_上海3天.*  # 免安装预览：一份完整生成结果（Markdown + 可视化 HTML）
-├── assets/              # README 截图与动图（本机实机截取）
+├── assets/              # README 截图（网页控制台）
 ├── service/
 │   ├── research.py      # 攻略任务编排：采集 → 提取 → 缺口补全 → 验证 → 报告（支持取消/重试）
 │   ├── trip.py          # 行程任务编排：城市攻略层 → 视频草案审核 → 候选验证 → 逐点调研 → 档案/避坑/热度 → 排线
@@ -239,7 +199,7 @@ API 形态：`POST /api/trip {"city": "大同", "days": 3, "hotel": "大同古�
 | 搜到 0 条结果 | 未登录、关键词过冷或页面改版；按上节步骤查 `data/debug/` 快照 |
 | API Key 无效/欠费报错 | `运行.bat setup`（或 `python run_cli.py setup`）重新配置；欠费需到服务商控制台处理 |
 | 提交任务报"未配置 API Key" | 还没配 Key：双击 `运行.bat` 或启动服务时都会自动弹出配置向导；也可手动 `python run_cli.py setup` |
-| 报错含 `AllocationQuota.FreeTierOnly` | 该模型免费额度已用尽且控制台开了「免费额度用完即停」（这是防扣现金的保护，不是故障）；换成仍有额度的模型：`python run_cli.py setup` |
+| 报错含 `AllocationQuota.FreeTierOnly` | 该模型免费额度已用尽；换成仍有额度的模型：`python run_cli.py setup` |
 | 任务跑到一半想停 | 网页版点"取消任务"（当前步骤结束后生效，浏览器安全释放） |
 | 服务重启后看不到进行中的任务 | 终态任务已落库：网页历史报告卡片仍可浏览/下载；运行中的任务重启后视为中断，需重新发起 |
 | 报告缺"门票/交通"章节 | 系统会自动定向补采一轮；仍缺失说明抖音上确实没有相关素材 |

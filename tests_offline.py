@@ -1352,10 +1352,10 @@ class TestWebSearchFallback(unittest.TestCase):
 
 
 class TestCostGuard(unittest.TestCase):
-    """成本护栏：用户硬要求是"只花免费额度与代金券，绝不扣现金余额"。
+    """成本护栏：额度类错误不重试、提示可操作、token 用量可核对。
 
     对应三道防线：①联网搜索默认关闭（搜索插件属独立计费，抵扣口径不一致）；
-    ②免费额度耗尽的 403 不重试并给可操作提示；③token 用量可核对。"""
+    ②额度耗尽的 403 不重试并给可操作提示；③token 用量可核对。"""
 
     def _fake(self, completions):
         from types import SimpleNamespace

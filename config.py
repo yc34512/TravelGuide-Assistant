@@ -85,11 +85,9 @@ LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 VERIFY_ENABLE_THINKING = os.getenv("VERIFY_ENABLE_THINKING", "false").lower() == "true"
 
 # 候选圈定/交通估算是否启用 LLM 服务商的联网搜索能力。
-# 默认关闭（成本约束：只花免费额度与代金券，绝不扣现金余额）：
-# 百炼的联网搜索插件属独立计费，官方「节省计划与资源包」明确将其排除在抵扣范围外；
-# 而新人免费额度的"不支持抵扣"清单（Batch/调优/部署/自定义模型/PAI-DSW/OSS）并未列它，
-# 两处口径不一致。风险不对称：一旦被判为独立计费就是直接扣现金，故不开。
-# 本项目的"近期真实热度"已由抖音实地采集的热度指数提供、交通由高德提供，搜索收益有限。
+# 默认关闭：部分服务商的联网搜索插件属独立计费，不在资源包抵扣范围内，
+# 开启会产生额外费用；本项目的"近期真实热度"已由抖音实地采集提供、
+# 交通由高德提供，搜索收益有限。
 # 需要时可在 .env 设 LLM_WEB_SEARCH=true（服务商不支持联网参数时会自动降级为纯基线知识）。
 LLM_WEB_SEARCH = os.getenv("LLM_WEB_SEARCH", "false").lower() == "true"
 

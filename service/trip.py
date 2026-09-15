@@ -743,8 +743,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         except Exception as e:
             html_path = None
             log(f"HTML 渲染失败（不影响 Markdown 结果）：{e}")
-        # 成本可见：如实报本次 LLM 消耗，用户可对照百炼控制台「免费额度」页核余量
-        log(usage_note() + "（余量请到百炼控制台「免费额度」页核对，本项目不发联网搜索请求）")
+        # 成本可见：如实报本次 LLM 消耗
+        log(usage_note() + "（用量可在服务商控制台核对，本项目不发联网搜索请求）")
 
         job["result"] = {
             "report_path": str(report_path),

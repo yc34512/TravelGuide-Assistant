@@ -431,8 +431,8 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
         knowledge.update_report(record_id, str(report_path))
         log(f"报告已保存：{report_path.name}"
             + (f" ｜ 图文版 {html_path.name}" if html_path else ""))
-        # 成本可见：如实报本次 LLM 消耗（用户硬要求：只花免费额度与券，不扣现金）
-        log(usage_note() + "（余量请到百炼控制台「免费额度」页核对，本项目不发联网搜索请求）")
+        # 成本可见：如实报本次 LLM 消耗
+        log(usage_note() + "（用量可在服务商控制台核对，本项目不发联网搜索请求）")
 
         job["result"] = {
             "report_path": str(report_path),
