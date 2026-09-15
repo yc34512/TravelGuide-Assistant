@@ -4761,5 +4761,127 @@ class TestTripReportModalScroll(unittest.TestCase):
         self.assertEqual(stale, [], f"这些路书未重渲染，仍缺修复：{stale}")
 
 
+class TestStartupHelpers(unittest.TestCase):
+    """启动守卫（run_server）：端口占用检测与"已在运行"复用。纯离线，不依赖真实服务。"""
+
+    def test_port_in_use_true_when_listening(self):
+        import socket as _s
+
+        from run_server import _port_in_use
+        srv = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        try:
+            self.assertTrue(_port_in_use("127.0.0.1", port))
+        finally:
+            srv.close()
+
+    def test_port_in_use_false_when_free(self):
+        import socket as _s
+
+        from run_server import _port_in_use
+        s = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()                                   # 刚释放的端口应判定为空闲
+        self.assertFalse(_port_in_use("127.0.0.1", port))
+
+    def test_service_already_running_false_on_dead_port(self):
+        import socket as _s
+
+        from run_server import _service_already_running
+        s = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        self.assertFalse(_service_already_running(f"http://127.0.0.1:{port}", timeout=0.6))
+
+    def test_service_already_running_requires_ok_status(self):
+        """同端口上的其他程序若返回非本服务格式的响应，不得误判为"已在运行"。"""
+        import http.server
+        import threading as _th
+
+        from run_server import _service_already_running
+
+        class _Stub(http.server.BaseHTTPRequestHandler):
+            body = b'{"status": "ok"}'
+
+            def do_GET(self):                       # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(self.body)
+
+            def log_message(self, *args):           # 静音访问日志
+                pass
+
+        httpd = http.server.HTTPServer(("127.0.0.1", 0), _Stub)
+        port = httpd.server_address[1]
+        _th.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            url = f"http://127.0.0.1:{port}"
+            self.assertTrue(_service_already_running(url, timeout=2.0))
+            _Stub.body = b'{"hello": "world"}'      # 其他程序的响应：不应被判为本服务
+            self.assertFalse(_service_already_running(url, timeout=2.0))
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_main_reuses_running_service(self):
+        """服务已在运行：不重复启动，直接打开浏览器复用。"""
+        import contextlib
+        import io
+        from unittest import mock
+
+        import run_server
+        buf, wb = io.StringIO(), mock.MagicMock()
+        with mock.patch.object(run_server, "_service_already_running", return_value=True), \
+             mock.patch.object(run_server, "webbrowser", wb), \
+             contextlib.redirect_stdout(buf):
+            code = run_server.main()
+        self.assertEqual(code, 0)
+        self.assertIn("已在运行", buf.getvalue())
+        wb.open.assert_called_once()
+
+    def test_main_reports_occupied_port(self):
+        """端口被其他程序占用：不启动，给出可操作提示并返回 1。"""
+        import contextlib
+        import io
+        from unittest import mock
+
+        import run_server
+        buf, wb = io.StringIO(), mock.MagicMock()
+        with mock.patch.object(run_server, "_service_already_running", return_value=False), \
+             mock.patch.object(run_server, "_port_in_use", return_value=True), \
+             mock.patch.object(run_server, "webbrowser", wb), \
+             contextlib.redirect_stdout(buf):
+            code = run_server.main()
+        self.assertEqual(code, 1)
+        self.assertIn("已被其他程序占用", buf.getvalue())
+        self.assertIn("SERVER_PORT", buf.getvalue())     # 提示里给出改端口的出路
+        wb.open.assert_not_called()
+
+    def test_main_friendly_on_uvicorn_startup_failure(self):
+        """uvicorn 启动失败（非零 SystemExit）→ 友好提示 + 返回 1；正常退出码 0 不误报。"""
+        import contextlib
+        import io
+        from unittest import mock
+
+        import run_server
+        for exit_code, expect in ((3, 1), (0, 0)):
+            buf = io.StringIO()
+            with mock.patch.object(run_server, "_service_already_running", return_value=False), \
+                 mock.patch.object(run_server, "_port_in_use", return_value=False), \
+                 mock.patch.object(run_server, "_ensure_key", return_value=None), \
+                 mock.patch.object(run_server, "webbrowser", mock.MagicMock()), \
+                 mock.patch.object(run_server.uvicorn, "run", side_effect=SystemExit(exit_code)), \
+                 contextlib.redirect_stdout(buf):
+                code = run_server.main()
+            self.assertEqual(code, expect)
+            if expect == 1:
+                self.assertIn("启动失败", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
