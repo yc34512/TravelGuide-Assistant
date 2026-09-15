@@ -395,6 +395,9 @@ class DouyinCrawler:
 
         元数据优先取页面自身发出的详情接口 JSON，DOM 只作降级：多标签并发时
         后台页渲染会被浏览器节流，等 DOM 常常取不到文案（实测约 1/3 视频文案为空）。"""
+        if base.session_stopped():
+            # 本会话已触发验证码风控：不再导航（避免加重风控），调用方按"未采到"处理
+            raise RuntimeError("本会话已触发验证码风控：停止现采（不尝试绕过）")
         self._apply_block(keep_video=with_asr)
         self.limiter.wait()
         m = VIDEO_ID_RE.search(url)
@@ -414,6 +417,12 @@ class DouyinCrawler:
         except Exception:
             pass
         self.page.get(url)
+
+        # 详情页也可能是验证码中间页（会话级风控）：命中即标记本会话停止，
+        # 后续每条视频、每个点位的采集都会立即熔断，不再逐条去撞
+        if base.captcha_detected(self.page):
+            base.stop_session()
+            raise RuntimeError("详情页出现验证码风控：本会话停止采集（不尝试绕过）")
 
         node = detail_node(self._drain_detail())
         self._author_uid = author_uid_of(node) if node else None

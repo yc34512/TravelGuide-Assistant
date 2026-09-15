@@ -4883,5 +4883,60 @@ class TestStartupHelpers(unittest.TestCase):
                 self.assertIn("启动失败", buf.getvalue())
 
 
+class TestRiskControlCircuitBreaker(unittest.TestCase):
+    """验证码风控的会话熔断：搜索之外，详情采集也必须立即停手（不再逐条撞验证码）。"""
+
+    def tearDown(self):
+        from crawler import base
+        base.reset_session()
+
+    def test_captcha_detected_variants(self):
+        from crawler import base
+
+        class _P:
+            def __init__(self, title="", html=""):
+                self.title, self.html = title, html
+
+        self.assertFalse(base.captcha_detected(_P(title="抖音", html="<html>ok</html>")))
+        self.assertTrue(base.captcha_detected(_P(title="验证码中间页")))
+        self.assertTrue(base.captcha_detected(_P(html='<div class="TTGCaptcha"></div>')))
+        self.assertFalse(base.captcha_detected(object()))        # 取不到属性也不炸
+
+    def test_stop_and_reset_session_flag(self):
+        from crawler import base
+        self.assertFalse(base.session_stopped())
+        base.stop_session()
+        self.assertTrue(base.session_stopped())
+        base.reset_session()
+        self.assertFalse(base.session_stopped())
+
+    def test_fetch_videos_short_circuits_after_stop(self):
+        """风控已触发时：一条都不采、不新开 Tab（此处没有浏览器，真去开 Tab 必炸）。"""
+        from unittest import mock
+
+        from crawler import base, tabs
+        logs = []
+        base.stop_session()
+        with mock.patch.object(base, "require_ugc_source", lambda: None):
+            res = tabs.fetch_videos(
+                object(),
+                ["https://www.douyin.com/video/1", "https://www.douyin.com/video/2"],
+                log=logs.append,
+            )
+        self.assertEqual(len(res), 2)
+        self.assertTrue(all(item is None and err is not None for _, item, err in res))
+        self.assertTrue(any("风控" in m for m in logs))
+
+    def test_fetch_video_refuses_after_stop(self):
+        """风控已触发时 fetch_video 立即 raise（不触碰页面），不会再去导航。"""
+        from crawler import base
+        from crawler.douyin import DouyinCrawler
+
+        base.stop_session()
+        crawler = DouyinCrawler(object())
+        with self.assertRaises(RuntimeError):
+            crawler.fetch_video("https://www.douyin.com/video/123")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

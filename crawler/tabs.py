@@ -59,6 +59,14 @@ def fetch_videos(page, urls, *, comments: int = MAX_COMMENTS_PER_VIDEO, asr: boo
     log/cancelled/on_error 由调用方注入（进度日志、任务取消、失败存快照）。
     """
     base.require_ugc_source()   # 开源合规闸门：UGC 源默认关闭，任何多 Tab 采集都先过闸
+
+    if base.session_stopped():
+        # 本会话已触发验证码风控：一条也不采（不新开 Tab、不发请求），按"未采到"返回
+        if log:
+            log("本会话已触发验证码风控：跳过详情采集（不再发新请求，不尝试绕过）")
+        err = RuntimeError("验证码风控：本会话停止现采")
+        return [(i, None, err) for i in range(len(urls))]
+
     from crawler.douyin import DouyinCrawler
 
     total = len(urls)
@@ -83,6 +91,11 @@ def fetch_videos(page, urls, *, comments: int = MAX_COMMENTS_PER_VIDEO, asr: boo
             last_err = None
             for attempt in range(retries + 1):
                 if cancelled and cancelled():
+                    return
+                if base.session_stopped():
+                    # 风控已触发：本条不再重试（重试只会继续撞验证码）
+                    out_errs[i] = RuntimeError("验证码风控：本会话停止现采")
+                    _log(f"[{i + 1}/{total}] 跳过：本会话已触发验证码风控")
                     return
                 try:
                     kw = dict(per_item_kwargs(i, url)) if per_item_kwargs else {}

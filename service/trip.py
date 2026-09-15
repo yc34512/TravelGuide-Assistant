@@ -53,6 +53,7 @@ from pipeline.planner import (
     transport_hints,
 )
 from pipeline.trip_render import render_html as render_tp_html, render_markdown as render_tp_md
+from crawler import base as crawler_base
 from crawler.base import SourceDisabled, douyin_enabled
 from service.research import (
     JOBS,
@@ -455,6 +456,14 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                         knowledge.record_crawl(
                             name, raw_path, len(items), sum(len(x.comments) for x in items)
                         )
+                    elif crawler_base.session_stopped():
+                        # 验证码风控已触发：剩余点位再采也只是白撞风控，立即停手
+                        rest = len(names) - i
+                        log("⚠️ 检测到验证码风控：本会话停止现采（不尝试绕过）。"
+                            + (f"剩余 {rest} 个点位未调研。" if rest else "")
+                            + "等待 20~30 分钟后重新生成即可补齐："
+                              "已调研的点位会命中知识库缓存（7 天），只补缺口。")
+                        break
                 if not items:
                     log(f"[{label}{i}/{len(names)}] {name}：未采集到内容，跳过")
                     continue
@@ -482,9 +491,11 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
 
         spot_points, spot_sources, spot_items = _research(spots, pre or {}, "景点 ")
         if len(spot_points) < MIN_USABLE_SPOTS:
+            hint = ("（本次因验证码风控中断：等待 20~30 分钟后重新生成即可补齐）"
+                    if crawler_base.session_stopped()
+                    else "（可稍后重试或在请求中直接指定景点清单）")
             raise RuntimeError(
-                f"可用调研结果的景点不足 {MIN_USABLE_SPOTS} 个，无法排行程"
-                "（可稍后重试或在请求中直接指定景点清单）"
+                f"可用调研结果的景点不足 {MIN_USABLE_SPOTS} 个，无法排行程{hint}"
             )
         food_points, food_sources, food_items = _research(food_names, food_pre, "餐厅 ")
         if food_points:
