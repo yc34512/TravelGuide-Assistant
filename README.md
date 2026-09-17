@@ -22,11 +22,13 @@
 |---|---|
 | ![控制台首页](assets/console-home.jpg) | ![行程规划](assets/console-trip.jpg) |
 
-HTML 可视化路书（示例：上海 3 天）——逐日时间线、行程全景图、避坑警示卡，每条要点附来源链接（下方动图为**全页滚动**，约 19 秒）：
+HTML 可视化路书（示例：上海 3 天，即 `examples/` 下那份）——逐日时间线、行程全景图、避坑警示卡，每条要点附来源链接（下方动图为**全页滚动**，约 19 秒）：
 
 ![路书全页滚动预览：概览 → 逐日行程 → 避坑专题 → 详情库 → 出发前确认](assets/report-scroll.gif)
 
-![路书顶部：输入回显、质量分卡与速览](assets/report-top.jpg)
+![路书顶部：输入回显、行程概览与速览提示](assets/report-top.jpg)
+
+> 截图中回显的目的地、天数与偏好均为示例参数，不含任何真实个人信息；来源链接为公开的抖音视频地址。
 
 ## 合规声明（请务必阅读）
 
@@ -144,6 +146,8 @@ API 形态：`POST /api/trip {"city": "大同", "days": 3, "hotel": "大同古�
 
 ```
 ├── main.py              # CLI 入口：搜索 → 采集 → LLM → 报告
+├── llms.txt             # 给 LLM 读的文档索引（llmstxt.org 格式）
+├── CHANGELOG.md         # 版本变更记录
 ├── install.bat          # 一键安装：自动建 .venv 虚拟环境 + 装依赖 + 自检
 ├── run_server.py        # 服务入口：python run_server.py（或双击 运行服务.bat）
 ├── api_server.py        # FastAPI：网页 + 任务接口（含取消/历史/下载）
@@ -265,6 +269,12 @@ uvicorn（刻意不弹浏览器，输出写进 `data/debug/server_autostart.log`
 > 每 20 秒 GET /api/jobs/{job_id} 轮询，status 为 done 时取 result.markdown 作为报告；
 > 报告含置信度分级（多源一致/单源/存分歧）与来源链接，转述时不得丢弃来源；
 > error 含"登录态"提示用户扫码，含"选择器失效"提示维护 crawler/douyin.py 的 SEL_* 常量。
+
+**4. 让 LLM 直接读文档：[`llms.txt`](llms.txt)**
+
+仓库根目录的 `llms.txt`（[llmstxt.org](https://llmstxt.org/) 格式）把项目文档整理成
+一份**带注释的索引**：核心文档入口、运行时接口、以及智能体必须遵守的约定（来源链接不得省略、
+不做预算估算、未启用采集时两类任务的表现差异）。把它的 URL 丢给任何 LLM，比让它自己爬仓库准得多。
 
 ## 开发与自测
 

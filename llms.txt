@@ -1,0 +1,36 @@
+# TravelGuide Assistant
+
+> 基于抖音真实评论数据的避坑型智能行程规划器。输入城市与天数，产出带**来源溯源**的逐日路书（Markdown + HTML 可视化）。每条结论附评论原文引用、独立来源数与三级置信度；营销号文案不计入印证数，立场对立的说法强制并列呈现。不做预算估算。
+
+本项目是一个本地运行的服务（FastAPI + 浏览器自动化采集 + LLM 分析内核），全部接口为无状态 HTTP JSON，可直接接入任意支持工具调用的智能体（MCP / OpenAPI / 系统提示词三种方式）。
+
+## 核心文档
+
+- [README](https://github.com/YC34512/TravelGuide-Assistant/blob/main/README.md): 项目定位、三大卖点、合规声明、安装三步、常见问题。**想快速了解项目，读这一份就够。**
+- [示例路书（Markdown）](https://github.com/YC34512/TravelGuide-Assistant/blob/main/examples/示例路书_上海3天.md): 一份完整的真实生成产物，无需安装即可阅读。
+- [示例路书（可视化 HTML）](https://github.com/YC34512/TravelGuide-Assistant/blob/main/examples/示例路书_上海3天.html): 单文件离线可打开，含行程全景图、详情弹层与来源链接。这是产品的主要阅读形态。
+- [API 参考（智能体用）](https://github.com/YC34512/TravelGuide-Assistant/blob/main/.qoder/skills/travel-guide-research/reference.md): 完整接口字段与响应结构、轮询约定、典型耗时。以智能体视角编写，非人类教程。
+- [配置项说明](https://github.com/YC34512/TravelGuide-Assistant/blob/main/.env.example): 全部环境变量（LLM、抖音采集开关、高德、ASR）及其默认值与影响。
+- [LICENSE](https://github.com/YC34512/TravelGuide-Assistant/blob/main/LICENSE): MIT。
+
+## 服务启动后的运行时接口
+
+本地启动 `python run_server.py` 后（默认 `http://127.0.0.1:8000`）：
+
+- `/openapi.json`: OpenAPI 规范，可直接导入 Dify / Coze / GPTs Actions / n8n。
+- `/docs`: 交互式接口文档。
+- `/api/health`: 健康检查 + 知识库概览。
+- 典型调用链：`POST /api/research` → 每 20 秒轮询 `GET /api/jobs/{id}` → `result.markdown` 即报告。
+
+## 关键约定（供智能体遵循）
+
+- **采集源默认关闭**（`SOURCE_DOUYIN_ENABLED=false`，合规设计）。不启用时：行程规划降级走 LLM 基线并标注 `collect_mode: kernel-only`；**攻略报告会直接失败**并给出启用指引——它的价值就是真实评论，没有素材时编一份"基于常识的攻略"反而是欺骗。
+- **报告中的来源链接不得省略或替换**。溯源是本项目区别于"纯 LLM 生成攻略"的核心价值。
+- **不做预算估算**。报告只给行程规划与调研到的确定门票价（标注来源），不拼总额。
+- 依赖安装与 API Key 配置是两个前置步骤，接入方式（MCP / Skill / OpenAPI）不替代它们。
+
+## Optional
+
+- [MCP 服务器源码](https://github.com/YC34512/TravelGuide-Assistant/blob/main/mcp_server.py): 10 个工具，stdio 传输；任何工具调用会按需自动拉起本地服务。
+- [离线测试](https://github.com/YC34512/TravelGuide-Assistant/blob/main/tests_offline.py): 246 项，纯函数与夹具驱动，不联网、不调 LLM、不开浏览器。
+- [Qoder 代理技能](https://github.com/YC34512/TravelGuide-Assistant/tree/main/.qoder/skills/travel-guide-research): 教智能体通过 API 驱动本项目的完整工作流。
