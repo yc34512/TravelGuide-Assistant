@@ -78,6 +78,16 @@ QC_REPAIR_ROUNDS = 1     # 质量门禁不达标时的回炉轮次上限（F5.2�
 _UGC_WARNED = False
 
 
+def _earliest_data_date(dates: dict[str, str], fallback: str) -> str:
+    """事实核验截止日 = 所用到数据里**最早**的一次采集日。
+
+    最保守口径：报告只声称"截至这份最旧的数据"，不把缓存里的旧数据说成今天核验的。
+    无任何日期时回退到 fallback（通常为今天）。
+    """
+    vals = [d for d in dates.values() if d]
+    return min(vals) if vals else fallback
+
+
 def _persist_heat(city: str, heat_rows: list[dict], items_by_name: dict,
                   food_names: set[str]) -> None:
     """把行程顺带算出的热度写进 heat_snapshots（source='trip'）。
@@ -433,11 +443,14 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             points: dict[str, list[dict]] = {}
             sources: dict[str, list[str]] = {}
             items_by: dict[str, list] = {}
+            dates: dict[str, str] = {}      # 每个点位的实际数据日期（缓存=采集日 / 现采=今天）
+            _today = datetime.now().strftime("%Y-%m-%d")
             for n, (its, pts0) in pre_seeded.items():
                 if pts0:
                     points[n] = pts0
                     sources[n] = [it.url for it in its]
                     items_by[n] = its
+                    dates[n] = _today            # 验证阶段现采：即今天
             for i, name in enumerate(names, 1):
                 if _cancelled():
                     raise Cancelled()
@@ -448,6 +461,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 if record:
                     log(f"[{label}{i}/{len(names)}] {name}：知识库命中，免采集")
                     items = load_items_from_raw(record["raw_path"])
+                    dates[name] = str(record.get("crawled_at") or "")[:10] or _today
                 else:
                     log(f"[{label}{i}/{len(names)}] {name}：未命中，开始采集（fast 档）")
                     items = _try_crawl(name, job_id, log)
@@ -456,6 +470,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                         knowledge.record_crawl(
                             name, raw_path, len(items), sum(len(x.comments) for x in items)
                         )
+                        dates[name] = _today
                     elif crawler_base.session_stopped():
                         # 验证码风控已触发：剩余点位再采也只是白撞风控，立即停手
                         rest = len(names) - i
@@ -487,9 +502,9 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 sources[name] = [it.url for it in items]
                 items_by[name] = items
                 log(f"[{label}{i}/{len(names)}] {name}：提取 {len(pts)} 条要点")
-            return points, sources, items_by
+            return points, sources, items_by, dates
 
-        spot_points, spot_sources, spot_items = _research(spots, pre or {}, "景点 ")
+        spot_points, spot_sources, spot_items, spot_dates = _research(spots, pre or {}, "景点 ")
         if len(spot_points) < MIN_USABLE_SPOTS:
             hint = ("（本次因验证码风控中断：等待 20~30 分钟后重新生成即可补齐）"
                     if crawler_base.session_stopped()
@@ -497,7 +512,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             raise RuntimeError(
                 f"可用调研结果的景点不足 {MIN_USABLE_SPOTS} 个，无法排行程{hint}"
             )
-        food_points, food_sources, food_items = _research(food_names, food_pre, "餐厅 ")
+        food_points, food_sources, food_items, food_dates = _research(food_names, food_pre, "餐厅 ")
         if food_points:
             log(f"餐厅调研完成：{len(food_points)}/{len(food_names)} 家，供美食推荐榜（不排入时间线）")
         else:
@@ -730,7 +745,9 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                   "guide_videos": guide.get("videos") or 0,   # 攻略层实证视频数（0=未启用/已降级）
                   "draft_days": len(draft_plan.get("days") or []),  # 视频行程草案天数（0=无草案）
                   "generated_at": ts.isoformat(timespec="seconds"),
-                  "facts_cutoff": today, "synthetic": False},
+                  # 事实核验截止日：取所用数据里最早的一次采集日（纯现采=今天；命中缓存则如实回退）
+                  "facts_cutoff": _earliest_data_date({**spot_dates, **food_dates}, today),
+                  "synthetic": False},
             decisions=decisions, plan=plan,
             quality=report, legs=legs, snap=snap,
             food_min_samples=FOOD_RANK_MIN_SAMPLES,

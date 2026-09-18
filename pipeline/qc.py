@@ -13,6 +13,7 @@ R9（时效）依赖官方事实数据，无数据时如实标 skip，接数据�
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from pipeline.decision import (
@@ -216,16 +217,80 @@ def _r2_no_silent_drop(decisions: list[SpotDecision], top_n: int = TOP_N_HEAT) -
                  "高价值点均已入选或给出硬理由")
 
 
-# —— R3 时段/开闭园：晚上型必排晚上；有官方闭馆日 + 周几时校验闭馆日 ——
+# —— R3 时段/开闭园：晚上型必排晚上；官方开放时间与类目可行性；内容与时段自洽 ——
+#
+# 三层判据，区分"数据说了什么"与"实际能不能做到"：
+#   ① 硬事实：官方 open_hours 与所排时段冲突（闭园早于晚间却排晚上）→ fail，可回炉重排；
+#   ② 内容自洽：UGC 以夜场内容为主却排白天（如灯光秀主导的景点）→ warn，如实提示核实；
+#   ③ 类目兜底：寺庙/博物馆类排晚上且无官方时间可查 → warn，需核实（不武断判死）。
+# 刻意不改蒸馏出的 best_time_slot：冲突在质检层显式暴露、由用户判断——
+# 把"数据如此"改写成"数据正确"会破坏本项目的溯源原则。
+_OPEN_HOURS_RE = re.compile(r"(\d{1,2}):(\d{2})\s*[-~—至]\s*(\d{1,2}):(\d{2})")
+_NIGHT_WORDS = ("夜间", "夜景", "夜场", "夜游", "灯光秀", "演出", "夜灯")
+_DAYTIME_WORDS = ("白天", "日间", "日照", "徒步", "爬山", "开园", "上午", "早上")
+_NIGHT_CLOSED_HINTS = ("寺", "庙", "博物馆", "纪念馆", "美术馆", "故居", "陵")
+# 官方闭园早于该小时 → 排"晚上"不可行（硬事实判据）
+NIGHT_FEASIBLE_CLOSE_HOUR = 19.0
+# 内容自洽判据的取样：摘要 + 前两条高亮（"最火的内容"最能说明该点以什么玩法为主）
+_SLOT_TEXT_TOP = 2
+
+
+def _close_hour(hours: str) -> float | None:
+    """从官方开放时间里取闭园时刻（小时，浮点）；解析不出返回 None（不猜、不编）。"""
+    m = _OPEN_HOURS_RE.search(hours or "")
+    if not m:
+        return None
+    return int(m.group(3)) + int(m.group(4)) / 60
+
+
+def _text_hits(texts: list, words: tuple) -> int:
+    blob = " ".join(t for t in texts if t)
+    return sum(blob.count(w) for w in words)
+
+
+def _slot_text_of(profile: dict) -> list:
+    """时段自洽判定的取样文本：摘要 + 前两条高亮。"""
+    return [profile.get("summary") or "",
+            *((profile.get("highlights") or [])[:_SLOT_TEXT_TOP])]
+
+
 def _r3_time_slot(plan: dict, profiles: dict, decisions: list[SpotDecision],
                   day_weekdays: list[str] | None = None) -> Check:
-    problems = []
+    problems: list[str] = []       # fail 级：有出处、可回炉
+    advisories: list[str] = []     # warn 级：需用户核实（不给回炉指令）
+    by_name = {d.name: d for d in decisions}
+
     for s in _planned_slots(plan):
-        p = profiles.get(s.get("spot")) or {}
-        if p.get("best_time_slot") == "晚上" and s.get("slot") != "晚上":
-            problems.append(f"{s.get('spot')}（最佳晚上却排{s.get('slot')}）")
+        name, slot = s.get("spot"), s.get("slot")
+        p = profiles.get(name) or {}
+        dec = by_name.get(name)
+        hours = ((dec.official.open_hours if dec else "") or "").strip()
+
+        # ① 晚上型必排晚上（原有判据）
+        if p.get("best_time_slot") == "晚上" and slot != "晚上":
+            problems.append(f"{name}（最佳晚上却排{slot}）")
+
+        # ② 官方开放时间 vs 时段：闭园早于晚间却排晚上 → 硬冲突
+        close_h = _close_hour(hours)
+        if slot == "晚上" and close_h is not None and close_h < NIGHT_FEASIBLE_CLOSE_HOUR:
+            hh, mm = int(close_h), round((close_h % 1) * 60)
+            problems.append(f"{name}（官方营业至 {hh:02d}:{mm:02d}，排晚上不可行）")
+
+        # ③ 内容自洽：UGC 夜场内容主导却排在白天
+        if slot in ("上午", "下午"):
+            text = _slot_text_of(p)
+            night_hits = _text_hits(text, _NIGHT_WORDS)
+            day_hits = _text_hits(text, _DAYTIME_WORDS)
+            if night_hits >= 2 and night_hits > day_hits:
+                advisories.append(f"{name}（UGC 以夜场为主却排{slot}）")
+
+        # ④ 类目兜底：寺庙/博物馆等排晚上且无官方时间可查
+        if slot == "晚上" and close_h is None:
+            hit = next((k for k in _NIGHT_CLOSED_HINTS if k in name), "")
+            if hit:
+                advisories.append(f"{name}（{hit}类通常夜间不开放，需核实）")
+
     if day_weekdays:
-        by_name = {d.name: d for d in decisions}
         for day in (plan or {}).get("days", []):
             try:
                 idx = int(day.get("day", 0)) - 1
@@ -237,10 +302,16 @@ def _r3_time_slot(plan: dict, profiles: dict, decisions: list[SpotDecision],
                 close = (dec.official.close_day if dec else "") or ""
                 if wd and close and close in wd:
                     problems.append(f"{s.get('spot')}（{wd}闭馆）")
+
     if problems:
         return Check("R3", "时段/开闭园", FAIL, f"{len(problems)} 处：{'、'.join(problems[:4])}",
-                     "时段错配或排入闭馆日",
-                     f"把晚上型景点排到晚上时段、避开闭馆日：{'、'.join(problems[:4])}")
+                     "时段错配、官方开放时间冲突或排入闭馆日",
+                     f"把晚上型景点排到晚上、避开闭馆日与官方未开放的时段：{'、'.join(problems[:4])}")
+    if advisories:
+        return Check("R3", "时段/开闭园", WARN,
+                     f"{len(advisories)} 处需核实：{'、'.join(advisories[:4])}",
+                     "数据与所排时段存在张力（未改动蒸馏结果，如实提示）",
+                     "")
     return Check("R3", "时段/开闭园", PASS, "无时段冲突",
                  "晚上型已排晚上" + ("，闭馆日已校验" if day_weekdays else ""))
 

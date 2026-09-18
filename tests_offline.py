@@ -1922,13 +1922,14 @@ class TestQualityGate(unittest.TestCase):
 
     def _dec(self, name, *, state="", evidence="弱", heat=0.0, videos=0,
              sources=None, reason="", close_day="", official_price=None,
-             day=None, slot=""):
+             day=None, slot="", open_hours=""):
         from pipeline.decision import SpotDecision, VerifyInfo, HeatInfo, DecisionInfo, OfficialFact
         d = SpotDecision(name=name)
         verdict = "keep" if state == "入选" else ("drop" if state == "淘汰" else "")
         d.verify = VerifyInfo(evidence=evidence, verdict=verdict)
         d.heat = HeatInfo(score=heat, videos=videos)
-        d.official = OfficialFact(close_day=close_day, price=official_price)
+        d.official = OfficialFact(close_day=close_day, price=official_price,
+                                  open_hours=open_hours)
         d.sources = list(sources or [])
         d.decision = DecisionInfo(state=state, day=day, slot=slot, reason=reason)
         return d
@@ -1976,6 +1977,43 @@ class TestQualityGate(unittest.TestCase):
         plan_mu = {"days": [{"day": 1, "slots": [{"spot": "博物馆", "slot": "上午"}]}]}
         self.assertEqual(self._gate(plan=plan_mu, decisions=decs, day_weekdays=["周一", "周二"]).get("R3").status, "fail")
         self.assertEqual(self._gate(plan=plan_mu, decisions=decs, day_weekdays=["周二", "周三"]).get("R3").status, "pass")
+
+    def test_r3_official_hours_conflict_fails(self):
+        """官方营业时间与时段冲突（闭园 17:00 却排晚上）→ fail，并给回炉指令。"""
+        prof = {"博物馆X": {"best_time_slot": "全天"}}
+        plan = {"days": [{"day": 1, "slots": [{"spot": "博物馆X", "slot": "晚上"}]}]}
+        decs = [self._dec("博物馆X", state="入选", open_hours="09:00-17:00")]
+        r = self._gate(plan=plan, profiles=prof, decisions=decs).get("R3")
+        self.assertEqual(r.status, "fail")
+        self.assertIn("17:00", r.actual)
+        self.assertTrue(r.fix)
+
+    def test_r3_late_close_hours_not_flagged(self):
+        """营业到晚间的点排晚上不误报（09:30-20:00）。"""
+        prof = {"夜市X": {"best_time_slot": "全天"}}
+        plan = {"days": [{"day": 1, "slots": [{"spot": "夜市X", "slot": "晚上"}]}]}
+        decs = [self._dec("夜市X", state="入选", open_hours="09:30-20:00")]
+        r = self._gate(plan=plan, profiles=prof, decisions=decs).get("R3")
+        self.assertEqual(r.status, "pass")
+
+    def test_r3_night_content_in_daytime_warns_without_fix(self):
+        """UGC 夜场内容主导却排白天 → warn；不给回炉指令（数据层面的问题回炉改不掉）。"""
+        prof = {"悬空寺X": {"best_time_slot": "全天", "summary": "排队很久，看景半小时",
+                            "highlights": ["夜间灯光秀演出，光影打在真实岩石上",
+                                           "白天看寺庙建筑"]}}
+        plan = {"days": [{"day": 1, "slots": [{"spot": "悬空寺X", "slot": "上午"}]}]}
+        r = self._gate(plan=plan, profiles=prof).get("R3")
+        self.assertEqual(r.status, "warn")
+        self.assertIn("夜场为主", r.actual)
+        self.assertEqual(r.fix, "")
+
+    def test_r3_category_fallback_temple_at_night(self):
+        """寺庙类排晚上且无官方时间可查 → warn 需核实（不武断判 fail）。"""
+        prof = {"华严寺X": {"best_time_slot": "全天"}}
+        plan = {"days": [{"day": 1, "slots": [{"spot": "华严寺X", "slot": "晚上"}]}]}
+        r = self._gate(plan=plan, profiles=prof).get("R3")
+        self.assertEqual(r.status, "warn")
+        self.assertIn("夜间不开放", r.actual)
 
     def test_r4_time_feasible(self):
         prof = {"A": {"duration_hours": 5}, "B": {"duration_hours": 5}, "C": {"duration_hours": 3}}
@@ -4936,6 +4974,25 @@ class TestRiskControlCircuitBreaker(unittest.TestCase):
         crawler = DouyinCrawler(object())
         with self.assertRaises(RuntimeError):
             crawler.fetch_video("https://www.douyin.com/video/123")
+
+
+class TestFactsCutoff(unittest.TestCase):
+    """事实核验截止日：取最早采集日（最保守），不把缓存旧数据说成今天核验的。"""
+
+    def test_earliest_wins(self):
+        from service.trip import _earliest_data_date
+        self.assertEqual(
+            _earliest_data_date({"武侯祠": "2026-09-10", "锦里": "2026-09-18"}, "2026-09-18"),
+            "2026-09-10")
+
+    def test_empty_falls_back_to_today(self):
+        from service.trip import _earliest_data_date
+        self.assertEqual(_earliest_data_date({}, "2026-09-18"), "2026-09-18")
+        self.assertEqual(_earliest_data_date({"A": "", "B": None}, "2026-09-18"), "2026-09-18")
+
+    def test_blank_entries_ignored(self):
+        from service.trip import _earliest_data_date
+        self.assertEqual(_earliest_data_date({"A": "", "B": "2026-09-12"}, "x"), "2026-09-12")
 
 
 if __name__ == "__main__":

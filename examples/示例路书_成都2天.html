@@ -1,0 +1,1762 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>《成都》2 天行程规划</title>
+<script>
+/* 动效层启动标记与兜底：动效层若没能跑完，立即撤掉一切"初始隐藏"，内容优先直出 */
+(function () {
+  var d = document.documentElement;
+  d.classList.add('js');
+  setTimeout(function () {
+    if (!d.classList.contains('fx-ready')) d.classList.remove('fx');
+    if (document.body) document.body.classList.add('hero-ready');
+  }, 1800);
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap"></noscript>
+<style>
+/* ============================================================
+   行程路书 · 行旅志（新中式 × 旅行杂志）
+   与首页同款设计 token；离线可用：无 JS 框架，动效全原生
+   00 变量：配色 / 阴影 / 圆角 / 缓动
+   ============================================================ */
+:root{
+  --paper:#f7f3ec; --paper-2:#fdfbf6; --paper-3:#f0e9dd; --paper-4:#e6ddcc;
+  --ink:#1a3c34; --ink-2:#3a564d; --ink-3:#6d8279; --ink-4:#9caaa3;
+  --line:rgba(26,60,52,.13); --line-2:rgba(26,60,52,.07);
+  --cinnabar:#c0392b; --cinnabar-d:#9c2a1e; --cinnabar-s:rgba(192,57,43,.09);
+  --jade:#2f6f5e; --jade-s:rgba(47,111,94,.08);
+  --gold:#a9862f; --gold-s:rgba(169,134,47,.1);
+  --bronze:#9c6a44;
+  --up:#c0392b; --down:#1e8449;
+  --sh-1:0 1px 1px rgba(26,60,52,.03), 0 2px 6px rgba(26,60,52,.04);
+  --sh-2:0 1px 2px rgba(26,60,52,.04), 0 12px 28px -16px rgba(26,60,52,.24);
+  --sh-3:0 2px 4px rgba(26,60,52,.05), 0 30px 70px -32px rgba(26,60,52,.4);
+  --r-lg:16px; --r-md:10px; --r-sm:6px; --r-pill:999px;
+  --ease:cubic-bezier(.2,.9,.3,1.1);
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --serif:"Noto Serif SC","Source Han Serif SC","Songti SC",SimSun,"Times New Roman",serif;
+  --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  --w:1020px;
+}
+*,*::before,*::after{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; -webkit-text-size-adjust:100%; scrollbar-gutter:stable; }
+body{
+  margin:0; color:var(--ink); font-family:var(--sans); font-size:14.5px; line-height:1.78;
+  background:
+    radial-gradient(1100px 560px at 88% -12%, rgba(47,111,94,.07), transparent 60%),
+    radial-gradient(900px 480px at -8% 10%, rgba(192,57,43,.045), transparent 62%),
+    var(--paper);
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+::selection{ background:rgba(192,57,43,.16); }
+a{ color:var(--cinnabar-d); }
+:focus-visible{ outline:2px solid var(--cinnabar); outline-offset:2px; border-radius:4px; }
+.wrap{ position:relative; z-index:1; max-width:var(--w); margin:0 auto; padding:22px 22px 80px; }
+
+/* ============================================================
+   01 吸顶导航（纸面玻璃）：逻辑不动，只换皮
+   ============================================================ */
+.top-nav{
+  position:sticky; top:0; z-index:60;
+  background:rgba(253,251,246,.88); backdrop-filter:blur(12px) saturate(1.2);
+  border-bottom:1px solid var(--line);
+}
+.nav-inner{
+  max-width:var(--w); margin:0 auto; padding:9px 16px; display:flex; gap:6px;
+  overflow-x:auto; scrollbar-width:none;
+}
+.nav-inner::-webkit-scrollbar{ display:none; }
+.nav-chip{
+  flex:0 0 auto; padding:6px 14px; border-radius:var(--r-pill); border:1px solid transparent;
+  font-family:var(--serif); font-size:13px; letter-spacing:.06em; color:var(--ink-2);
+  text-decoration:none; white-space:nowrap; transition:color .28s ease, background .28s ease, border-color .28s ease;
+}
+.nav-chip:hover{ color:var(--ink); background:rgba(26,60,52,.05); border-color:var(--line); }
+.nav-chip.active{
+  color:#fdfaf3; border-color:transparent;
+  background:linear-gradient(135deg,#cf4634,var(--cinnabar-d));
+  box-shadow:0 8px 18px -10px rgba(192,57,43,.85);
+}
+.nav-chip.right{ margin-left:auto; color:var(--ink-4); }
+
+/* ============================================================
+   02 HERO：宣纸底 + 三层山水 + 宣纸颗粒 + 朱砂印章
+   ============================================================ */
+.hero{
+  position:relative; z-index:1; overflow:hidden; padding:38px 26px 42px;
+  background:linear-gradient(180deg,#fcfaf5 0%,#f8f4ea 46%,#f2ebdc 100%);
+  border-bottom:1px solid var(--line);
+}
+.hero-sun{
+  position:absolute; right:9%; top:44px; width:118px; height:118px; border-radius:50%;
+  background:radial-gradient(circle at 38% 34%, #d5543f, var(--cinnabar) 62%, var(--cinnabar-d));
+  opacity:.88; box-shadow:0 0 0 16px rgba(192,57,43,.05), 0 26px 60px -30px rgba(192,57,43,.65);
+}
+.hero-mt{ position:absolute; left:0; right:0; bottom:0; height:66%; overflow:hidden; }
+.mt{ position:absolute; left:-2%; bottom:-1%; width:104%; height:100%; }
+.mt-far{ color:var(--ink); opacity:.10; }
+.mt-mid{ color:var(--jade); opacity:.20; }
+.mt-near{ color:var(--ink); opacity:.28; }
+.hero-mist{ position:absolute; inset:0; }
+.hero-mist i{
+  position:absolute; display:block; border-radius:50%;
+  background:radial-gradient(closest-side, rgba(255,255,255,.85), rgba(255,255,255,0));
+}
+.hero-mist i:nth-child(1){ width:52%; height:32%; left:2%; top:42%; animation:drift-a 34s ease-in-out infinite; }
+.hero-mist i:nth-child(2){ width:44%; height:28%; right:4%; top:58%; animation:drift-b 44s ease-in-out infinite; }
+@keyframes drift-a{ 0%,100%{ transform:translate3d(0,0,0) } 50%{ transform:translate3d(6%,-3%,0) } }
+@keyframes drift-b{ 0%,100%{ transform:translate3d(0,0,0) } 50%{ transform:translate3d(-7%,2%,0) } }
+.hero-grain{
+  position:absolute; inset:0; z-index:1; pointer-events:none; opacity:.3;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  background-size:160px 160px;
+}
+.hero-inner{ position:relative; z-index:2; max-width:var(--w); margin:0 auto; padding-left:80px; }
+.hero-seal{
+  position:absolute; left:0; top:4px; width:58px; height:58px; border-radius:7px; color:#fff;
+  background:linear-gradient(150deg,#cf4634,var(--cinnabar-d));
+  font-family:var(--serif); font-size:30px; font-weight:700; line-height:1;
+  display:grid; place-items:center; transform:rotate(-3.5deg);
+  box-shadow:0 10px 22px -12px rgba(192,57,43,.9), inset 0 0 0 2px rgba(255,255,255,.26);
+}
+.hero-eyebrow{
+  display:inline-block; margin-bottom:12px; font-family:var(--serif); font-style:italic;
+  font-size:12px; letter-spacing:.2em; color:var(--cinnabar);
+}
+.hero h1{
+  margin:0; font-family:var(--serif); font-weight:900; color:var(--ink);
+  font-size:clamp(24px,3.4vw,38px); line-height:1.24; letter-spacing:.02em;
+}
+.hero h1 .ch{ display:inline-block; }
+.hero h1 .accent{ color:var(--cinnabar); }
+.hero .subtitle{
+  margin:12px 0 0; font-family:var(--serif); font-size:13px; letter-spacing:.12em; color:var(--ink-2);
+}
+.hero .subtitle::before{ content:""; display:block; width:52px; height:2px; background:var(--cinnabar); margin-bottom:12px; }
+.hero-en{ margin:8px 0 0; font-family:var(--serif); font-style:italic; font-size:12px; letter-spacing:.06em; color:var(--ink-4); }
+.hero-side{
+  position:absolute; right:24px; top:40px; z-index:2; writing-mode:vertical-rl;
+  font-family:var(--serif); font-size:12.5px; letter-spacing:.4em; color:var(--ink-3);
+}
+.hero-side::after{ content:""; display:block; width:1px; height:64px; margin:12px auto 0; background:linear-gradient(180deg,var(--cinnabar),transparent); }
+/* 帖签质感的数字卡 */
+.hero .stats{ position:relative; z-index:2; display:flex; flex-wrap:wrap; gap:12px; margin:22px 0 14px; }
+.stat{
+  position:relative; min-width:118px; padding:12px 18px 11px; border-radius:var(--r-md);
+  background:linear-gradient(170deg,var(--paper-2),#f8f4ea);
+  border:1px solid var(--line); box-shadow:var(--sh-1), inset 0 1px 0 rgba(255,255,255,.7);
+  transition:transform .5s var(--ease-out), box-shadow .5s var(--ease-out);
+}
+.stat::before{
+  content:""; position:absolute; left:0; top:12px; bottom:12px; width:3px; border-radius:0 3px 3px 0;
+  background:linear-gradient(180deg,var(--cinnabar),rgba(192,57,43,.25));
+}
+.stat::after{
+  content:""; position:absolute; right:9px; top:9px; width:7px; height:7px; border-radius:50%;
+  background:var(--paper-3); box-shadow:inset 0 1px 2px rgba(26,60,52,.18);
+}
+.stat:hover{ transform:translate3d(0,-3px,0); box-shadow:var(--sh-2); }
+.stat .num{ font-family:var(--serif); font-size:23px; font-weight:700; color:var(--ink); font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+.stat .lab{ font-size:11.5px; letter-spacing:.14em; color:var(--ink-3); margin-top:1px; }
+.hero .meta{ position:relative; z-index:2; display:flex; flex-wrap:wrap; gap:7px; }
+.hero .meta span{
+  font-size:12px; color:var(--ink-2); background:rgba(253,251,246,.7);
+  border:1px solid var(--line); border-radius:var(--r-pill); padding:3px 13px;
+}
+.echo-bar{
+  position:relative; z-index:2; margin-top:16px; padding:13px 17px; border-radius:var(--r-md);
+  font-size:13px; color:var(--ink-2); background:rgba(253,251,246,.82);
+  border:1px solid var(--line); border-left:3px solid var(--jade); box-shadow:var(--sh-1);
+}
+.echo-bar b{ color:var(--cinnabar-d); font-weight:700; }
+.echo-tip{ display:block; margin-top:5px; font-size:12px; color:var(--ink-3); }
+/* HERO 入场：标题逐字上浮 / 帖签与回显依次浮现（仅动效层启动时生效，JS 异常也直出终态） */
+.fx .hfx{ opacity:0; transform:translate3d(0,16px,0); }
+.fx .hfx-fade{ opacity:0; }
+.fx .hero h1 .ch{ opacity:0; transform:translate3d(0,.52em,0) rotate(2.5deg); }
+body.hero-ready .hfx,body.hero-ready .hfx-fade{
+  opacity:1; transform:none;
+  transition:opacity .9s var(--ease-out), transform 1s var(--ease-out);
+  transition-delay:var(--d,0ms);
+}
+body.hero-ready .hero h1 .ch{
+  opacity:1; transform:none;
+  transition:opacity .85s var(--ease-out), transform 1.05s var(--ease-out);
+  transition-delay:calc(var(--i) * 70ms + 120ms);
+}
+/* 弹层内一律直出：避免克降未揭示的节点时把内容一并藏起来 */
+.modal-body .reveal{ opacity:1 !important; transform:none !important; }
+/* ============================================================
+   03 板块与章节头（杂志目录感）
+   ============================================================ */
+section{
+  position:relative; background:var(--paper-2); border:1px solid var(--line);
+  border-radius:var(--r-lg); padding:24px 26px; margin-bottom:18px; box-shadow:var(--sh-1);
+  scroll-margin-top:78px;
+}
+.sec-head{ display:flex; align-items:flex-end; gap:13px; margin-bottom:16px; }
+.sec-no{
+  flex:0 0 auto; font-family:var(--serif); font-weight:900; font-size:34px; line-height:.82;
+  color:rgba(26,60,52,.13); -webkit-text-stroke:1px rgba(26,60,52,.22); transform:translateY(2px);
+}
+.sec-head h2{ margin:0; font-family:var(--serif); font-size:20px; font-weight:700; letter-spacing:.08em; color:var(--ink); }
+.sec-head .sec-note{ margin-left:auto; font-size:12px; color:var(--ink-4); }
+.note-bar{
+  font-size:13px; padding:10px 14px; margin-top:10px; border-radius:var(--r-sm);
+  background:var(--gold-s); border:1px solid rgba(169,134,47,.35); color:var(--ink-2);
+}
+.note-bar + .note-bar{ margin-top:8px; }
+/* 通用揭示（仅动效层启动时生效） */
+.fx .reveal{ opacity:0; transform:translate3d(0,18px,0); }
+.fx .reveal.in{ opacity:1; transform:none; transition:opacity .8s var(--ease-out), transform .9s var(--ease-out); transition-delay:var(--d,0ms); }
+
+/* ============================================================
+   04 概览 / 质量分卡
+   ============================================================ */
+.ov-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
+.ov-item{
+  padding:15px 10px; text-align:center; border-radius:var(--r-md);
+  background:linear-gradient(180deg,var(--paper-2),var(--paper-3));
+  border:1px solid var(--line); transition:transform .5s var(--ease-out), box-shadow .5s var(--ease-out);
+}
+.ov-item:hover{ transform:translate3d(0,-3px,0); box-shadow:var(--sh-1); }
+.ov-num{ font-family:var(--serif); font-size:21px; font-weight:700; color:var(--ink); font-variant-numeric:tabular-nums; }
+.ov-lab{ font-size:12px; color:var(--ink-3); margin-top:2px; }
+.qc-head{ display:flex; flex-wrap:wrap; gap:10px; align-items:baseline; margin-bottom:12px; }
+.qc-score{ font-size:13.5px; color:var(--ink-2); }
+.qc-score b{ font-family:var(--serif); font-size:26px; color:var(--cinnabar-d); font-variant-numeric:tabular-nums; }
+.qc-meta{
+  font-size:12px; color:var(--ink-2); background:var(--paper-3);
+  border:1px solid var(--line-2); border-radius:var(--r-pill); padding:2px 12px;
+}
+.qc-list{ list-style:none; display:flex; flex-direction:column; gap:6px; margin:0; padding:0; }
+.qc-list li{ font-size:13px; padding:7px 13px; border-radius:var(--r-sm); background:var(--paper-2); border:1px solid var(--line-2); }
+.qc-list li.qc-pass{ border-left:3px solid var(--jade); }
+.qc-list li.qc-warn{ border-left:3px solid var(--gold); background:var(--gold-s); }
+.qc-list li.qc-fail{ border-left:3px solid var(--cinnabar); background:var(--cinnabar-s); }
+.qc-list li.qc-skip{ border-left:3px solid var(--line); color:var(--ink-3); }
+.qc-actual,.qc-note{ color:var(--ink-3); margin-left:6px; }
+/* 工程规则编号（R1/R2…）对用户无意义，视觉上隐藏；保留在 DOM 中便于排查 */
+.qc-rid{ display:none; }
+/* 校验明细默认收起（.qc-fold 由 JS 挂载；无 JS 时全部可见） */
+.qc-fold .qc-list{ display:none; }
+.qc-unresolved{ margin-top:14px; padding:13px 16px; border-radius:var(--r-md); background:var(--gold-s); border:1px solid rgba(169,134,47,.35); }
+.qc-unresolved h3{ font-family:var(--serif); font-size:14.5px; color:#8a6a17; margin:0 0 6px; }
+.qc-unresolved .qc-tip{ font-size:12px; color:var(--ink-3); margin:0 0 6px; }
+.qc-unresolved ul{ margin:0 0 0 18px; font-size:13px; }
+
+/* ============================================================
+   05 表格（决策表 / 交通表）
+   ============================================================ */
+.tbl-scroll{ overflow-x:auto; border-radius:var(--r-md); border:1px solid var(--line-2); -webkit-overflow-scrolling:touch; }
+table{ width:100%; border-collapse:collapse; font-size:13px; background:var(--paper-2); }
+th,td{ padding:9px 11px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line-2); }
+th{ font-family:var(--serif); font-weight:700; color:var(--ink); background:var(--paper-3); white-space:nowrap; }
+tr:last-child td{ border-bottom:0; }
+table tr:hover td{ background:rgba(26,60,52,.03); }
+.decision-table tr.st-in td:first-child{ color:var(--jade); font-weight:700; }
+.decision-table tr.st-alt td:first-child{ color:var(--gold); font-weight:600; }
+.decision-table tr.st-out td:first-child{ color:var(--cinnabar); font-weight:600; }
+.decision-table tr.st-out{ opacity:.75; }
+.risk-high{ color:var(--cinnabar-d); font-weight:600; }
+/* —— 降噪折叠：非入选行默认收起（.dc-fold 由 JS 挂载；无 JS 时全部可见，保证信息不丢） —— */
+.dc-fold .decision-table tr.st-alt,
+.dc-fold .decision-table tr.st-out,
+.dc-fold .decision-table tr.st-none{ display:none; }
+.fold-toggle{
+  display:inline-flex; align-items:center; gap:6px; margin-top:10px;
+  font-family:var(--serif); font-size:12.5px; color:var(--ink-2); background:var(--paper-3);
+  border:1px solid var(--line-2); border-radius:var(--r-pill); padding:5px 15px;
+  cursor:pointer; transition:border-color .3s var(--ease-out), color .3s var(--ease-out);
+}
+.fold-toggle:hover{ border-color:var(--jade); color:var(--jade); }
+.fold-toggle[hidden]{ display:none; }
+
+/* ============================================================
+   06 逐日行程：时间线（竖轨生长 + 节点 stagger + 当前天光圈）
+   ============================================================ */
+.day-nav{
+  display:flex; flex-wrap:wrap; gap:6px; width:fit-content; margin-bottom:20px; padding:5px;
+  background:var(--paper-3); border:1px solid var(--line-2); border-radius:var(--r-pill);
+}
+.day-chip{
+  font-family:var(--serif); font-size:12.5px; letter-spacing:.04em; text-decoration:none;
+  color:var(--ink-2); border-radius:var(--r-pill); padding:5px 15px; transition:all .3s ease;
+}
+.day-chip:hover{ background:var(--paper-2); color:var(--ink); }
+.day-chip.active{
+  color:#fdfaf3; background:linear-gradient(135deg,#cf4634,var(--cinnabar-d));
+  box-shadow:0 8px 18px -10px rgba(192,57,43,.85);
+}
+.day-block{ scroll-margin-top:78px; }
+.day-block + .day-block{ margin-top:24px; padding-top:22px; border-top:1px dashed var(--line); }
+.day-title{ display:flex; align-items:center; gap:10px; margin:2px 0 16px; }
+.day-title .badge{
+  font-family:var(--serif); font-size:12.5px; font-weight:700; letter-spacing:.1em; color:#fdfaf3;
+  padding:3px 13px; border-radius:var(--r-pill); background:linear-gradient(135deg,#24493e,#15302a);
+  box-shadow:0 8px 18px -12px rgba(26,60,52,.9);
+}
+.day-title .cnt{ font-size:12px; color:var(--ink-3); }
+
+/* ============================================================
+   06b 行程全景图（平面示意 · 不表真实方位）
+   一屏看清"先去哪、再去哪、一天几个点"；点节点 → 弹开该点详情
+   ============================================================ */
+/* 视图切换：以 .js（动效层确认运行后才挂）为前提。
+   无 JS 时——切换器不出现，全景图（需点击交互才算完整）整块隐藏，
+   只呈现逐日列表：纯静态也能读到完整行程，不丢任何信息。
+   注意：开关规则必须写在各自规则块之后，靠"后出现的同优先级规则覆盖"生效。 */
+.view-switch{
+  display:none; gap:3px; padding:3px; margin-bottom:14px;
+  background:var(--paper-3); border:1px solid var(--line-2); border-radius:var(--r-pill);
+}
+.js .view-switch{ display:inline-flex; }
+.view-switch button{
+  padding:5px 16px; border:0; border-radius:var(--r-pill); cursor:pointer;
+  font-family:var(--serif); font-size:12.5px; letter-spacing:.06em; color:var(--ink-2);
+  background:transparent; transition:color .3s ease, background .3s ease, box-shadow .3s ease;
+}
+.view-switch button:hover{ color:var(--ink); }
+.view-switch button[aria-selected="true"]{
+  color:#fdfaf3; background:linear-gradient(135deg,#24493e,#15302a);
+  box-shadow:0 8px 18px -12px rgba(26,60,52,.9);
+}
+
+.trip-map{
+  display:none; position:relative; border:1px solid var(--line); border-radius:var(--r-md);
+  background:linear-gradient(160deg,var(--paper-2),#fffdf9);
+  aspect-ratio:1000 / 620; overflow:hidden;
+}
+.js .trip-map.on{ display:block; }
+.js .day-list.off{ display:none; }
+/* 纸面网格：暗示"平面图"但不冒充地图 */
+.trip-map::before{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background-image:
+    linear-gradient(rgba(26,60,52,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26,60,52,.045) 1px, transparent 1px);
+  background-size:44px 44px;
+}
+.tm-svg{ position:absolute; inset:0; width:100%; height:100%; }
+.tm-edge{ stroke:var(--jade); stroke-width:1.6; stroke-dasharray:5 5; opacity:.5; fill:none; }
+.tm-edge.same-day{ opacity:.75; stroke-dasharray:none; }
+.fx .tm-edge{ stroke-dasharray:4 900; animation:tm-draw 1.4s var(--ease-out) forwards; }
+@keyframes tm-draw{ to{ stroke-dasharray:4 0; } }
+.tm-band{
+  position:absolute; top:8px; transform:translateX(-50%);
+  font-family:var(--serif); font-size:11.5px; letter-spacing:.1em; color:var(--ink-4);
+  background:rgba(253,251,246,.9); border:1px solid var(--line-2);
+  border-radius:var(--r-pill); padding:2px 12px; white-space:nowrap;
+}
+.tm-node{
+  position:absolute; transform:translate(-50%,-50%); z-index:2;
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  text-decoration:none; color:var(--ink-2); cursor:pointer;
+}
+.tm-dot{
+  position:relative; display:flex; align-items:center; justify-content:center;
+  width:42px; height:42px; border-radius:50%;
+  font-family:var(--serif); font-size:16px; font-weight:700; color:#fdfaf3;
+  background:linear-gradient(135deg,#2f6f5e,#1a3c34);
+  box-shadow:0 10px 22px -12px rgba(26,60,52,.95), 0 0 0 5px var(--paper-2);
+  transition:transform .5s var(--ease), box-shadow .5s var(--ease);
+}
+.tm-node:hover .tm-dot{ transform:translateY(-3px) scale(1.08); box-shadow:0 16px 30px -14px rgba(26,60,52,1), 0 0 0 5px var(--paper-2); }
+.tm-node:focus-visible{ outline:none; }
+.tm-node:focus-visible .tm-dot{ outline:2px solid var(--cinnabar); outline-offset:3px; }
+.tm-slot{
+  position:absolute; top:-6px; right:-6px; font-size:10px; line-height:1;
+  padding:3px 6px; border-radius:var(--r-pill); color:#fdfaf3;
+  background:var(--gold); box-shadow:0 4px 10px -6px rgba(169,134,47,.9);
+}
+.tm-label{
+  max-width:120px; text-align:center; font-family:var(--serif); font-size:12.5px; font-weight:700;
+  line-height:1.35; color:var(--ink);
+  background:rgba(253,251,246,.94); border:1px solid var(--line-2);
+  border-radius:var(--r-sm); padding:2px 8px;
+}
+.tm-meta{ font-size:10.5px; color:var(--ink-4); letter-spacing:.02em; }
+/* 无详情的点（未收录档案）用虚线表示：诚实标注"图上可见、弹不出详情" */
+.tm-node.no-detail .tm-dot{
+  background:var(--paper-3); color:var(--ink-3);
+  border:2px dashed var(--line); box-shadow:none;
+}
+.tm-node.no-detail{ cursor:default; }
+.fx .tm-node{ opacity:0; transform:translate(-50%,-50%) scale(.86); }
+.fx .trip-map.on .tm-node{
+  opacity:1; transform:translate(-50%,-50%) scale(1);
+  transition:opacity .6s var(--ease-out), transform .7s var(--ease-out);
+  transition-delay:calc(var(--i,0) * 90ms);
+}
+.map-note{ margin-top:10px; font-size:12px; color:var(--ink-3); line-height:1.7; }
+
+.timeline{ position:relative; padding-left:34px; }
+.timeline::before{
+  content:""; position:absolute; left:10px; top:14px; bottom:14px; width:2px; border-radius:2px;
+  background:linear-gradient(180deg,var(--jade),rgba(47,111,94,.25));
+  transform-origin:top center;
+}
+.fx .timeline::before{ transform:scaleY(0); transition:transform 1.1s var(--ease-out); }
+.fx .day-block.day-in .timeline::before{ transform:scaleY(1); }
+.tl-item{ position:relative; margin-bottom:15px; }
+.tl-item:last-child{ margin-bottom:0; }
+.tl-item::before{
+  content:""; position:absolute; left:-29px; top:19px; width:12px; height:12px; border-radius:50%;
+  background:var(--paper-2); border:3px solid var(--jade); box-shadow:0 0 0 4px var(--jade-s);
+}
+.tl-item.pitfall::before{ border-color:var(--cinnabar); box-shadow:0 0 0 4px var(--cinnabar-s); }
+.fx .day-block .tl-item{ opacity:0; transform:translate3d(0,16px,0); }
+.fx .day-block.day-in .tl-item{
+  opacity:1; transform:none;
+  transition:opacity .75s var(--ease-out), transform .85s var(--ease-out);
+  transition-delay:calc(var(--i,0) * 70ms);
+}
+/* 当前天第一个节点：朱砂光圈脉冲 */
+.day-block.day-active .tl-item:first-child::before{ animation:halo 2.4s ease-out infinite; }
+@keyframes halo{
+  0%{ box-shadow:0 0 0 0 rgba(192,57,43,.42); }
+  70%{ box-shadow:0 0 0 12px rgba(192,57,43,0); }
+  100%{ box-shadow:0 0 0 0 rgba(192,57,43,0); }
+}
+.slot{
+  position:relative; padding:15px 18px; border-radius:var(--r-md);
+  background:var(--paper-2); border:1px solid var(--line); border-left:4px solid rgba(47,111,94,.35);
+  transition:transform .5s var(--ease-out), box-shadow .5s var(--ease-out), border-color .35s ease;
+}
+.slot:hover{ transform:translate3d(0,-3px,0); box-shadow:var(--sh-2); border-left-color:var(--jade); }
+.slot.pitfall{ border-left-color:rgba(192,57,43,.5); background:linear-gradient(160deg,#fdf6f4,var(--paper-2)); }
+.slot.pitfall:hover{ border-left-color:var(--cinnabar); }
+.slot-head{ display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-bottom:7px; }
+.slot-head .time{
+  font-family:var(--serif); font-size:12px; font-weight:700; letter-spacing:.06em; color:#fff;
+  padding:2px 12px; border-radius:var(--r-pill); background:linear-gradient(135deg,#2f6f5e,#1a3c34);
+}
+.slot-head .time.sl-morning{ background:linear-gradient(135deg,#e0b25a,#bd8a22); }   /* 上午 · 晨光金 */
+.slot-head .time.sl-afternoon{ background:linear-gradient(135deg,#5aa8c9,#2f7ba0); } /* 下午 · 天青 */
+.slot-head .time.sl-evening{ background:linear-gradient(135deg,#8a77c0,#64509f); }   /* 晚上 · 暮紫 */
+.slot-head .time.sl-allday{ background:linear-gradient(135deg,#2f6f5e,#1a3c34); }    /* 全天 · 黛青 */
+.slot.pitfall .slot-head .time{ background:linear-gradient(135deg,#cf4634,var(--cinnabar-d)); }
+.spot-link{
+  font-family:var(--serif); font-size:16.5px; font-weight:700; color:var(--ink); text-decoration:none;
+  border-bottom:2px solid transparent; transition:color .28s ease, border-color .28s ease;
+}
+.spot-link:hover{ color:var(--cinnabar-d); border-bottom-color:rgba(192,57,43,.45); }
+.jump-chip{
+  font-size:11.5px; text-decoration:none; color:var(--jade); background:var(--jade-s);
+  border:1px solid rgba(47,111,94,.28); border-radius:var(--r-pill); padding:2px 11px;
+  transition:color .28s ease, background .28s ease, transform .4s var(--ease-out);
+}
+.jump-chip:hover{ color:#fdfaf3; background:linear-gradient(135deg,#2f6f5e,#1a3c34); transform:translate3d(0,-1px,0); }
+.tag{
+  display:inline-block; margin-right:6px; padding:1px 10px; border-radius:var(--r-sm);
+  font-size:11.5px; color:var(--ink-2); background:var(--paper-3); border:1px solid var(--line-2);
+}
+.slot-head .cost{ font-size:13px; font-weight:700; color:#8a6a17; }
+.slot p{ margin:5px 0 0; font-size:13.5px; color:var(--ink-2); }
+.slot .quote{
+  margin-top:9px; padding:8px 13px; border-radius:var(--r-sm); font-size:12.5px; color:#8c2d21;
+  background:var(--cinnabar-s); border:1px dashed rgba(192,57,43,.35);
+}
+.quote::before{ content:"避坑引用："; font-weight:700; }
+.note-list{ list-style:none; margin:9px 0 0; padding:0; display:flex; flex-direction:column; gap:5px; }
+.note-list li{ font-size:12.5px; padding:6px 12px; border-radius:var(--r-sm); background:var(--paper-2); border:1px solid var(--line-2); }
+.note-list li.nt-pit{ color:#922b21; background:var(--cinnabar-s); border-color:rgba(192,57,43,.3); font-weight:600; }
+.note-list li.nt-cost{ color:#8a6a17; background:var(--gold-s); border-color:rgba(169,134,47,.3); }
+.note-list li.nt-time{ color:#2f6f8f; background:rgba(47,123,160,.08); border-color:rgba(47,123,160,.25); }
+/* ============================================================
+   07 避坑专题：左侧朱砂条划入
+   ============================================================ */
+.pit-card{
+  position:relative; overflow:hidden; margin-bottom:12px; padding:15px 18px 14px 50px;
+  font-size:13.5px; border-radius:var(--r-md); border:1px solid rgba(192,57,43,.3);
+  background:linear-gradient(150deg,#fdf6f4,var(--paper-2));
+  box-shadow:0 10px 26px -22px rgba(192,57,43,.6);
+}
+.pit-card::before{
+  content:""; position:absolute; left:0; top:0; bottom:0; width:5px;
+  background:linear-gradient(180deg,var(--cinnabar),var(--cinnabar-d)); transform-origin:top center;
+}
+.fx .pit-card::before{ transform:scaleY(0); transition:transform .8s var(--ease-out); }
+.fx .pit-card.in::before{ transform:scaleY(1); }
+.pit-card::after{ content:"⚠️"; position:absolute; left:16px; top:14px; font-size:17px; }
+.pit-card .claim{ font-family:var(--serif); font-weight:700; color:#922b21; }
+.pit-card .conf{
+  display:inline-block; margin-left:8px; padding:0 10px; border-radius:var(--r-pill); font-size:11px;
+  color:var(--ink-2); background:var(--paper-3); border:1px solid var(--line-2);
+}
+.pit-card .conf.c-high{ color:var(--jade); background:var(--jade-s); border-color:rgba(47,111,94,.3); }
+.pit-card .conf.c-mid{ color:#8a6a17; background:var(--gold-s); border-color:rgba(169,134,47,.3); }
+.pit-card .conf.c-low{ color:var(--ink-3); background:var(--paper-3); border-color:var(--line-2); }
+.pit-card blockquote{
+  margin:9px 0 0; padding:8px 13px; border-radius:var(--r-sm); font-size:12.5px;
+  color:#7b241c; background:var(--paper-2); border-left:3px solid rgba(192,57,43,.35);
+}
+.pit-card .src-btn{
+  display:inline-block; margin-top:10px; padding:3px 14px; border-radius:var(--r-pill); font-size:12px;
+  color:#fdfaf3; text-decoration:none; background:linear-gradient(135deg,#cf4634,var(--cinnabar-d));
+  transition:transform .45s var(--ease), box-shadow .45s var(--ease);
+}
+.pit-card .src-btn:hover{ transform:translate3d(0,-1px,0); box-shadow:0 10px 20px -12px rgba(192,57,43,.9); }
+
+/* ============================================================
+   08 热度榜：奖牌 / 热度条生长 / 趋势四态
+   ============================================================ */
+.heat-note{
+  margin-bottom:14px; padding:11px 15px; border-radius:var(--r-md); line-height:1.8;
+  font-size:12.5px; color:var(--ink-2); background:var(--jade-s); border:1px solid rgba(47,111,94,.22);
+}
+.heat-list{ display:flex; flex-direction:column; gap:14px; }
+.heat-row{ display:flex; align-items:center; gap:13px; }
+.heat-rank{
+  flex:0 0 30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-family:var(--serif); font-size:13px; font-weight:700; color:var(--ink-2);
+  background:var(--paper-3); border:1px solid var(--line-2);
+}
+.heat-row:nth-child(1) .heat-rank{ background:linear-gradient(140deg,#d8452f,#a72a1c); color:#fff; border-color:transparent; box-shadow:0 6px 14px -8px rgba(168,42,28,.9); }
+.heat-row:nth-child(2) .heat-rank{ background:linear-gradient(140deg,#c9a227,#8f6c17); color:#fff; border-color:transparent; box-shadow:0 6px 14px -8px rgba(143,108,23,.9); }
+.heat-row:nth-child(3) .heat-rank{ background:linear-gradient(140deg,#b87a4e,#855634); color:#fff; border-color:transparent; box-shadow:0 6px 14px -8px rgba(133,86,52,.9); }
+.heat-main{ flex:1; min-width:0; }
+.heat-name{ font-family:var(--serif); font-size:15px; font-weight:700; margin-bottom:6px; color:var(--ink); }
+.heat-drill{
+  margin-left:6px; padding:1px 10px; border-radius:var(--r-pill); text-decoration:none; font-size:11.5px;
+  color:var(--jade); background:var(--jade-s); border:1px solid rgba(47,111,94,.28);
+  transition:color .28s ease, background .28s ease;
+}
+.heat-drill:hover{ color:#fdfaf3; background:linear-gradient(135deg,#2f6f5e,#1a3c34); }
+.heat-bar{ height:9px; border-radius:var(--r-pill); background:var(--paper-3); overflow:hidden; box-shadow:inset 0 1px 2px rgba(26,60,52,.08); }
+.heat-fill{
+  height:100%; border-radius:var(--r-pill); transform-origin:left center;
+  background:linear-gradient(90deg,#6fae95,var(--jade));
+}
+.heat-row:nth-child(1) .heat-fill{ background:linear-gradient(90deg,#dd6f52,var(--cinnabar)); }
+.heat-row:nth-child(2) .heat-fill{ background:linear-gradient(90deg,#d3b45f,var(--gold)); }
+.heat-row:nth-child(3) .heat-fill{ background:linear-gradient(90deg,#c89070,var(--bronze)); }
+.fx .heat-fill{ transform:scaleX(var(--p,1)); transition:transform 1s var(--ease-out); }
+.fx .heat-bar.heat-zero .heat-fill{ transform:scaleX(0); }
+.heat-meta{ flex:0 0 auto; font-size:12px; color:var(--ink-3); text-align:right; white-space:nowrap; line-height:1.75; }
+.mkt-warn{ color:var(--cinnabar); font-weight:700; }
+.senti-up{ color:var(--down); }
+.senti-down{ color:var(--up); font-weight:600; }
+.trend-tag{ margin-left:6px; padding:1px 10px; border-radius:var(--r-pill); font-size:11px; white-space:nowrap; }
+.t-hot{ background:var(--cinnabar-s); color:var(--cinnabar); border:1px solid rgba(192,57,43,.3); }
+.t-ever{ background:var(--gold-s); color:var(--gold); border:1px solid rgba(169,134,47,.3); }
+.t-cool{ background:var(--jade-s); color:var(--jade); border:1px solid rgba(47,111,94,.28); }   /* 降温 = 青绿（红涨绿跌） */
+.t-flat{ background:var(--paper-3); color:var(--ink-3); border:1px solid var(--line-2); }
+
+/* ============================================================
+   09 详情库 / 美食榜 / 页脚
+   ============================================================ */
+.card{
+  position:relative; margin-bottom:12px; padding:17px 19px; border-radius:var(--r-md);
+  font-size:13.5px; background:var(--paper-2); border:1px solid var(--line);
+  scroll-margin-top:78px; transition:box-shadow .5s var(--ease-out), border-color .3s ease;
+}
+.card:hover{ box-shadow:var(--sh-1); border-color:rgba(26,60,52,.2); }
+.card h3{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 9px;
+  font-family:var(--serif); font-size:16px; font-weight:700; color:var(--ink);
+}
+.card p{ margin:6px 0 0; color:var(--ink-2); }
+.back-link{
+  font-family:var(--sans); font-size:11.5px; font-weight:400; text-decoration:none;
+  color:var(--ink-3); border:1px solid var(--line); border-radius:var(--r-pill); padding:1px 10px;
+  transition:color .28s ease, border-color .28s ease, background .28s ease;
+}
+.back-link:hover{ color:var(--cinnabar-d); border-color:rgba(192,57,43,.35); background:var(--cinnabar-s); }
+.card .src{ font-size:12px; color:var(--ink-3); }
+.card .src a{ margin-right:8px; color:var(--jade); text-decoration:none; border-bottom:1px dashed rgba(47,111,94,.4); }
+.card .src a:hover{ border-bottom-style:solid; }
+.digest-box{
+  margin-top:11px; padding:11px 15px; border-radius:var(--r-sm); font-size:12.5px;
+  background:var(--paper-3); border:1px solid var(--line-2);
+}
+.digest-box blockquote{
+  margin:6px 0 0; padding:6px 12px; border-radius:var(--r-sm); font-size:12px; color:var(--ink-3);
+  background:var(--paper-2); border-left:3px solid rgba(47,111,94,.35);
+}
+footer{ position:relative; z-index:1; max-width:var(--w); margin:0 auto; padding:20px 22px 46px;
+        font-size:12px; color:var(--ink-4); text-align:center; line-height:1.9; }
+
+/* ============================================================
+   10 弹层（翻牌进入）/ 回顶
+   ============================================================ */
+.modal-mask{
+  position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center;
+  padding:22px; background:rgba(9,26,20,.55); backdrop-filter:blur(7px); perspective:1400px;
+  opacity:0; visibility:hidden; pointer-events:none;
+  transition:opacity .24s ease, visibility .24s ease;
+}
+.modal-mask.open{ opacity:1; visibility:visible; pointer-events:auto; }
+.modal{
+  width:min(780px,100%); max-height:84vh; display:flex; flex-direction:column; overflow:hidden;
+  background:var(--paper-2); border:1px solid var(--line); border-radius:var(--r-lg);
+  box-shadow:var(--sh-3); transform-origin:top center;
+  transform:translate3d(0,18px,0) rotateX(-8deg) scale(.985);
+  transition:transform .42s var(--ease-out);
+}
+.modal-mask.open .modal{ transform:none; }
+.modal-head{
+  flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:15px 20px;
+  border-bottom:1px solid var(--line); background:linear-gradient(180deg,#fcfaf5,var(--paper-2));
+}
+.modal-head .m-title{ font-family:var(--serif); font-size:16.5px; font-weight:700; letter-spacing:.05em; color:var(--ink); }
+.modal-head .m-title::before{ content:"「"; color:var(--cinnabar); }
+.modal-head .m-title::after{ content:"」"; color:var(--cinnabar); }
+.modal-head .m-tip{ margin-left:2px; font-family:var(--serif); font-size:11.5px; letter-spacing:.12em; color:var(--ink-4); }
+.modal-close{
+  margin-left:auto; display:flex; align-items:center; justify-content:center; width:34px; height:34px;
+  padding:0; border-radius:50%; font-size:15px; line-height:1; cursor:pointer;
+  color:var(--ink-2); background:transparent; border:1px solid var(--line);
+  transition:color .3s ease, border-color .3s ease, background .3s ease, transform .5s var(--ease);
+}
+.modal-close:hover{ color:var(--cinnabar); border-color:rgba(192,57,43,.4); background:var(--cinnabar-s); transform:rotate(90deg); }
+.modal-body{ flex:1 1 auto; overflow-y:auto; padding:18px 22px 22px; }
+.modal-body .card{ border:0; box-shadow:none; padding:0; margin:0; background:transparent; }
+.modal-body .back-link{ display:none; }
+.modal-foot{
+  flex:0 0 auto; display:flex; justify-content:flex-end; padding:13px 20px 16px;
+  border-top:1px solid var(--line); background:linear-gradient(0deg,#fcfaf5,var(--paper-2));
+}
+.modal-foot .btn-close{
+  padding:9px 24px; border:0; border-radius:var(--r-pill); cursor:pointer;
+  font-family:var(--serif); font-size:13.5px; font-weight:700; letter-spacing:.1em; color:#fdfaf3;
+  background:linear-gradient(135deg,#24493e,#15302a); box-shadow:0 12px 26px -16px rgba(26,60,52,.95);
+  transition:transform .45s var(--ease), box-shadow .45s var(--ease);
+}
+.modal-foot .btn-close:hover{ transform:translate3d(0,-1px,0); }
+body.modal-open{ overflow:hidden; }
+.to-top{
+  position:fixed; right:24px; bottom:24px; z-index:70; display:flex; align-items:center; justify-content:center;
+  width:44px; height:44px; border-radius:50%; text-decoration:none; font-size:17px; line-height:1;
+  color:var(--jade); background:rgba(253,251,246,.92); border:1px solid var(--line);
+  backdrop-filter:blur(8px); box-shadow:var(--sh-2);
+  opacity:0; pointer-events:none;
+  transition:opacity .3s ease, transform .6s var(--ease), color .3s ease, border-color .3s ease;
+}
+.to-top.show{ opacity:1; pointer-events:auto; }
+.to-top:hover{ color:var(--cinnabar); border-color:rgba(192,57,43,.38); transform:rotate(360deg) scale(1.06); }
+
+/* ============================================================
+   10b 出发前确认清单（会随时间变化的信息 → 归拢成待办，而非罗列名单）
+   ============================================================ */
+.vc-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px;
+          align-items:start; }   /* 卡片按内容高度自适应，避免短内容栏被拉出大片空白 */
+.vc-card{ position:relative; border:1px solid var(--line); border-left:4px solid var(--gold);
+          border-radius:var(--r-md); background:linear-gradient(160deg,var(--paper-2),#fff);
+          padding:14px 16px 13px; }
+.vc-head{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.vc-head b{ font-family:var(--serif); font-size:14.5px; letter-spacing:.04em; color:var(--ink); }
+.vc-count{ margin-left:auto; font-family:var(--serif); font-size:11.5px; color:var(--ink-4);
+           border:1px solid var(--line-2); border-radius:var(--r-pill); padding:0 9px; }
+.vc-lead{ font-size:12.5px; color:var(--ink-3); line-height:1.7; margin:0 0 8px; }
+.vc-list{ list-style:none; display:flex; flex-direction:column; gap:5px; }
+.vc-list li{ position:relative; font-size:13px; line-height:1.65; color:var(--ink-2); padding-left:13px; }
+.vc-list li::before{ content:""; position:absolute; left:0; top:.62em; width:5px; height:5px;
+                     border-radius:50%; background:var(--gold); }
+.vc-list li b{ color:var(--ink); font-weight:700; }
+.vc-list li.vc-more{ color:var(--ink-4); }
+.vc-list li.vc-more::before{ background:var(--ink-4); }
+.vc-foot{ margin-top:12px; font-size:12.5px; color:var(--ink-3); background:var(--paper-3);
+          border-radius:var(--r-sm); padding:9px 13px; line-height:1.7; }
+
+/* ============================================================
+   11 响应式
+   ============================================================ */
+@media (max-width:1159px){
+  .hero-side{ display:none; }   /* 窄桌面下竖排标语会压到正文，收窄即隐 */
+}
+@media (max-width:900px){
+  .hero-inner{ padding-left:0; }
+  .hero-seal{ position:static; width:50px; height:50px; font-size:26px; margin-bottom:14px; }
+}
+@media (max-width:700px){
+  body{ font-size:14px; }
+  .hero{ padding:26px 16px 30px; }
+  .hero-sun{ width:80px; height:80px; right:6%; top:22px; }
+  .hero-mt{ height:56%; }
+  .hero .stats{ gap:9px; }
+  .stat{ min-width:calc(50% - 6px); }
+  .hero h1{ font-size:clamp(21px,6vw,26px); }
+  .wrap{ padding:16px 14px 72px; }
+  section{ padding:19px 16px; }
+  .sec-no{ font-size:28px; }
+  .sec-head{ flex-wrap:wrap; }
+  .sec-head .sec-note{ margin-left:0; width:100%; }
+  .timeline{ padding-left:28px; }
+  .tl-item::before{ left:-25px; }
+  .heat-row{ flex-wrap:wrap; }
+  .heat-meta{ text-align:left; white-space:normal; }
+  .modal-mask{ padding:0; align-items:flex-end; }
+  .modal{ width:100%; max-height:88vh; border-radius:var(--r-lg) var(--r-lg) 0 0; }
+  .to-top{ right:14px; bottom:14px; width:40px; height:40px; }
+}
+/* ============================================================
+   12 降级：减少动效时全部直出终态
+   ============================================================ */
+@media (prefers-reduced-motion: reduce){
+  html{ scroll-behavior:auto; }
+  *,*::before,*::after{
+    animation-duration:.001ms !important; animation-iteration-count:1 !important;
+    transition-duration:.001ms !important; transition-delay:0ms !important;
+  }
+  .reveal,.fx .reveal,.fx .day-block .tl-item,.fx .pit-card::before,.fx .timeline::before,.fx .heat-bar.heat-zero .heat-fill{
+    opacity:1 !important; transform:none !important;
+  }
+  .hero-mist i,.tl-item::before{ animation:none !important; }
+}
+/* ============================================================
+   13 打印 / 存 PDF：去掉交互层，保留时间线与热度条终态
+   ============================================================ */
+@page{ margin:12mm 12mm 14mm; }
+@media print{
+  .top-nav,.to-top,.modal-mask,.jump-chip,.hero-mt,.hero-sun,.hero-mist,.hero-grain,.hero-side,.hero-eyebrow,.hero-en{
+    display:none !important;
+  }
+  html,body{ background:#fff !important; color:#000; }
+  body{ font-size:11.5pt; }
+  .hero{ padding:0 0 12px; background:#fff !important; border-bottom:1px solid #ccc; }
+  .hero-inner{ padding-left:0; max-width:none; }
+  .hero-seal{
+    position:static; width:auto; height:auto; margin-bottom:6px; padding:0; background:none !important;
+    color:#000; box-shadow:none; transform:none; font-size:0;
+  }
+  .hero-seal::before{ content:attr(data-city); font-size:13pt; font-weight:700; letter-spacing:.08em; }
+  .hero h1{ font-size:19pt; }
+  .hero h1 .ch{ opacity:1 !important; transform:none !important; }
+  .stat{ break-inside:avoid; box-shadow:none; background:#fff; }
+  .stat::after{ display:none; }
+  .echo-bar{ background:#fff; box-shadow:none; }
+  .hero .meta span{ background:#fff; }
+  .wrap{ max-width:none; padding:0; }
+  section,.card,.pit-card,.slot,.day-block,.ov-item,.qc-list li{ break-inside:avoid; box-shadow:none; }
+  section{ padding:14px 0 10px; border:0; border-top:1px solid #ddd; border-radius:0; margin-bottom:12px; }
+  .sec-no{ -webkit-text-stroke:0; color:#999; }
+  .tbl-scroll{ overflow:visible; border-color:#ccc; }
+  table{ background:#fff; font-size:10pt; }
+  /* 打印 = 全量留档：折叠行强制可见，折叠按钮不出现 */
+  .decision-table tr.st-alt,.decision-table tr.st-out,.decision-table tr.st-none{ display:table-row !important; }
+  .qc-list{ display:flex !important; }
+  .fold-toggle{ display:none !important; }
+  .timeline::before,.fx .timeline::before{ display:block; transform:none !important; background:#bbb !important; opacity:1 !important; }
+  .tl-item{ opacity:1 !important; transform:none !important; }
+  .tl-item::before{ box-shadow:none !important; }
+  .day-block.day-active .tl-item:first-child::before{ animation:none !important; }
+  .heat-bar{ background:#eee; }
+  .heat-fill{ transform:none !important; }
+  .modal-mask{ display:none !important; }
+  .pit-card::before{ transform:none !important; }
+  a[href^="http"]::after{ content:"（" attr(href) "）"; font-size:8.5pt; color:#555; word-break:break-all; }
+  a[href^="#"]::after{ content:""; }
+}
+</style>
+</head>
+<body id="top">
+
+
+
+
+
+
+<nav class="top-nav" id="topNav">
+  <div class="nav-inner">
+    <a class="nav-chip" href="#sec-overview">概览</a>
+    <a class="nav-chip" href="#sec-days">逐日行程</a>
+    <a class="nav-chip" href="#sec-pitfall">避坑专题</a>
+    
+    
+    <a class="nav-chip" href="#sec-detail">详情库</a>
+    <a class="nav-chip" href="#sec-legs">分段交通</a>
+    <a class="nav-chip" href="#sec-verify">出发前确认</a>
+    
+    <a class="nav-chip right" href="#top">↑ 顶部</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-sun" aria-hidden="true"></div>
+  <div class="hero-mt" aria-hidden="true">
+    <svg class="mt mt-far" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true"><path fill="currentColor" d="M0,238 C138,208 232,138 358,152 C486,166 552,108 678,122 C810,137 872,198 1000,176 C1120,156 1200,112 1302,138 C1362,153 1404,170 1440,176 L1440,320 L0,320 Z"/></svg>
+    <svg class="mt mt-mid" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true"><path fill="currentColor" d="M0,272 C120,258 210,212 330,222 C452,232 520,280 640,270 C760,260 828,204 950,212 C1064,220 1148,258 1250,244 C1322,235 1392,244 1440,252 L1440,320 L0,320 Z"/></svg>
+    <svg class="mt mt-near" viewBox="0 0 1440 320" preserveAspectRatio="none" aria-hidden="true"><path fill="currentColor" d="M0,302 C160,292 288,264 420,280 C556,297 660,280 800,288 C940,296 1060,278 1200,288 C1302,295 1382,296 1440,300 L1440,320 L0,320 Z"/></svg>
+    <div class="hero-mist" aria-hidden="true"><i></i><i></i></div>
+  </div>
+  <div class="hero-grain" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <span class="hero-seal hfx-fade" style="--d:60ms" aria-hidden="true">旅</span>
+    <span class="hero-eyebrow hfx" style="--d:80ms" aria-hidden="true">TRAVEL ITINERARY · DOUYIN UGC × AI</span>
+    <h1>《成都》<span class="accent">2 天</span>行程规划</h1>
+    <div class="subtitle hfx" style="--d:680ms">抖音真实评论 + 高赞攻略编排 · 每个结论都能溯源</div>
+    <p class="hero-en hfx" style="--d:760ms" aria-hidden="true">The Itinerant Journal</p>
+    <div class="stats hfx" style="--d:840ms">
+      <div class="stat"><div class="num">2 天</div><div class="lab">行程天数</div></div>
+      <div class="stat"><div class="num">5</div><div class="lab">调研景点</div></div>
+      <div class="stat"><div class="num">5</div><div class="lab">行程点</div></div>
+      <div class="stat"><div class="num">9</div><div class="lab">避坑提示</div></div>
+    </div>
+    <div class="meta hfx" style="--d:920ms">
+      <span>生成于 2026-09-18 10:38</span>
+      <span>住宿：春熙路 / 太古里一带</span>
+      <span>5 个景点实地调研</span>
+      <span>路线依据：高德实测</span>
+    </div>
+    <div class="echo-bar hfx" style="--d:1000ms">📋 你的需求：目的地 <b>成都</b> · 天数 <b>2 天</b>
+       · 住宿 <b>春熙路 / 太古里一带</b>
+       · 消费偏好 <b>均衡</b>
+      
+       · 指定景点 <b>武侯祠、锦里、宽窄巷子、春熙路步行街、文殊院茶馆</b>
+      <span class="echo-tip">点击行程里的景点名，会弹出它的介绍与避雷；看完点「关闭」回到原位置。</span>
+    </div>
+  </div>
+  <div class="hero-side hfx" style="--d:1120ms" aria-hidden="true">纸上行旅 · 落笔成路</div>
+</header>
+
+<div class="wrap">
+  <section id="sec-overview">
+    <div class="sec-head"><span class="sec-no">01</span><h2>行程概览</h2></div>
+    <div class="ov-grid">
+      <div class="ov-item reveal"><div class="ov-num">2 天</div><div class="ov-lab">总天数</div></div>
+      <div class="ov-item reveal"><div class="ov-num">5 个</div><div class="ov-lab">景点</div></div>
+      
+      <div class="ov-item reveal"><div class="ov-num">10 条</div><div class="ov-lab">亮点</div></div>
+      <div class="ov-item reveal"><div class="ov-num">9 条</div><div class="ov-lab">避坑提示</div></div>
+    </div>
+    <div class="note-bar">📚 城市攻略层 5 条高赞综合攻略视频；实证候选 18 个（莲芳蹄花店、夫妻麻辣烫、大邑张肥肠、道佐荣芳羊肉、雍渡夜市烤面筋、仁寿味道面馆…）；编排建议 6 条；推荐住宿片区 春熙路</div>
+    <div class="note-bar">规划说明：无未排入的备选景点，所有给定景点均已合理编入2天行程中。</div>
+    
+    
+  </section>
+
+  
+  
+
+  
+  <section id="sec-days">
+    <div class="sec-head"><span class="sec-no">02</span><h2>逐日行程</h2>
+      <span class="sec-note">点击景点名弹窗看介绍与避雷</span></div>
+
+    
+    <div class="view-switch" role="tablist" aria-label="行程视图切换">
+      <button type="button" role="tab" id="tabMap" aria-controls="tripMap" aria-selected="true">全景图</button>
+      <button type="button" role="tab" id="tabList" aria-controls="dayList" aria-selected="false">逐日列表</button>
+    </div>
+
+    
+    <div class="trip-map on" id="tripMap" role="tabpanel" aria-labelledby="tabMap">
+    
+    <svg class="tm-svg" aria-hidden="true" viewBox="0 0 1000.0 620.0" preserveAspectRatio="none">
+      
+      <line class="tm-edge same-day"
+            x1="165.8" y1="190.0" x2="325.4" y2="312.0"
+            vector-effect="non-scaling-stroke" />
+      
+      <line class="tm-edge same-day"
+            x1="325.4" y1="312.0" x2="485.0" y2="440.0"
+            vector-effect="non-scaling-stroke" />
+      
+      <line class="tm-edge "
+            x1="485.0" y1="440.0" x2="674.6" y2="312.0"
+            vector-effect="non-scaling-stroke" />
+      
+      <line class="tm-edge same-day"
+            x1="674.6" y1="312.0" x2="834.2" y2="190.0"
+            vector-effect="non-scaling-stroke" />
+      
+    </svg>
+    
+    <div class="tm-band" style="left: 32.54%;">第 1 天 · 3 个点</div>
+    
+    <div class="tm-band" style="left: 75.44%;">第 2 天 · 2 个点</div>
+    
+    
+    
+    <a class="tm-node" style="left: 16.58%; top: 30.65%; --i: 0;"
+       href="#detail-武侯祠" data-modal="1" title="点开看 武侯祠 的介绍与避雷">
+    
+      <span class="tm-dot">1<span class="tm-slot">上午</span></span>
+      <span class="tm-label">武侯祠</span>
+      <span class="tm-meta">约3小时</span>
+    </a>
+    
+    
+    <a class="tm-node" style="left: 32.54%; top: 50.32%; --i: 1;"
+       href="#detail-宽窄巷子" data-modal="1" title="点开看 宽窄巷子 的介绍与避雷">
+    
+      <span class="tm-dot">2<span class="tm-slot">下午</span></span>
+      <span class="tm-label">宽窄巷子</span>
+      <span class="tm-meta">约3小时</span>
+    </a>
+    
+    
+    <a class="tm-node" style="left: 48.5%; top: 70.97%; --i: 2;"
+       href="#detail-锦里" data-modal="1" title="点开看 锦里 的介绍与避雷">
+    
+      <span class="tm-dot">3<span class="tm-slot">晚上</span></span>
+      <span class="tm-label">锦里</span>
+      <span class="tm-meta">约2小时</span>
+    </a>
+    
+    
+    <a class="tm-node" style="left: 67.46%; top: 50.32%; --i: 3;"
+       href="#detail-文殊院茶馆" data-modal="1" title="点开看 文殊院茶馆 的介绍与避雷">
+    
+      <span class="tm-dot">4<span class="tm-slot">上午</span></span>
+      <span class="tm-label">文殊院茶馆</span>
+      <span class="tm-meta">约3小时</span>
+    </a>
+    
+    
+    <a class="tm-node" style="left: 83.42%; top: 30.65%; --i: 4;"
+       href="#detail-春熙路步行街" data-modal="1" title="点开看 春熙路步行街 的介绍与避雷">
+    
+      <span class="tm-dot">5<span class="tm-slot">下午</span></span>
+      <span class="tm-label">春熙路步行街</span>
+      <span class="tm-meta">约3小时</span>
+    </a>
+    
+    </div>
+    <p class="map-note">图为<b>行程顺序示意</b>（不表示真实方位与距离）：数字是先后次序，
+      🕐 标在角落显示时段；点带实心圆点的地点可弹开它的介绍与避雷。
+      点与点之间的具体交通方式见下方「分段交通」。</p>
+    
+
+    <div class="day-list off" id="dayList" role="tabpanel" aria-labelledby="tabList">
+    <div class="day-nav">
+      
+      <a class="day-chip" href="#day-1">第 1 天 · 3 个时段</a>
+      
+      <a class="day-chip" href="#day-2">第 2 天 · 2 个时段</a>
+      
+    </div>
+    
+    <div class="day-block" id="day-1">
+      <div class="day-title"><span class="badge">第 1 天</span>
+        <span class="cnt">3 个时段</span></div>
+      <div class="timeline">
+      
+      
+      <div class="tl-item pitfall">
+      <div class="slot pitfall">
+        <div class="slot-head">
+          <span class="time sl-morning">🌅 上午</span>
+          
+          <a class="spot-link" href="#detail-武侯祠" data-modal="1" title="点开看介绍与避雷">武侯祠</a>
+          <a class="jump-chip" href="#detail-武侯祠" data-modal="1">介绍 · 避雷</a>
+          
+          <span class="tag">约3小时</span>
+          
+          
+        </div>
+        <p>🚗 从酒店打车约23分钟到达</p>
+        <p>✅ 武侯祠和汉昭烈庙（惠陵）在同一个地方，还有刘湘的墓地可以参观</p>
+        
+        <ul class="note-list">
+          
+          <li class="nt-pit">❌ <b>避坑</b>：大年三十祈福烧头香人极多，结束后难打车</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：需走到骡马市才能叫到车</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：附近有地铁站，站名就叫武侯祠</li>
+          
+          <li class="nt-cost">💰 <b>费用</b>：武侯祠需要收费</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：后面的刘湘墓区域不收费</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：位于武侯区，旁边是武侯祠大街</li>
+          
+        </ul>
+        
+        <div class="quote">“大年三十去武侯祠祈福烧头香的人非常多，结束后很难打到车，需要走到骡马市才能叫到车”</div>
+        
+      </div>
+      </div>
+      
+      
+      <div class="tl-item pitfall">
+      <div class="slot pitfall">
+        <div class="slot-head">
+          <span class="time sl-afternoon">☀️ 下午</span>
+          
+          <a class="spot-link" href="#detail-宽窄巷子" data-modal="1" title="点开看介绍与避雷">宽窄巷子</a>
+          <a class="jump-chip" href="#detail-宽窄巷子" data-modal="1">介绍 · 避雷</a>
+          
+          <span class="tag">约3小时</span>
+          
+          
+        </div>
+        <p>🚗 从武侯祠打车约24分钟到达</p>
+        <p>✅ 宽窄巷子会有很多特色小纪念品</p>
+        
+        <ul class="note-list">
+          
+          <li class="nt-pit">❌ <b>避坑</b>：正午别逛户外，太阳晒得扛不住</li>
+          
+          <li class="nt-pit">❌ <b>避坑</b>：旁边第一家肥肠粉味道一般口感不好</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：附近社区火锅是本地人常吃的老店有不辣选择</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：藏有一家位置隐蔽的市井老火锅游客找不到</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：附近小谭豆花和贺水饺是老成都味道</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：附近有一家越南菜馆味道品质一直在线</li>
+          
+          <li class="nt-time">🕐 <b>时间</b>：该越南菜馆周末排队时间比较久</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：真正老成都味道很多是甜辣风格</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：成都旅行适合懒人出行</li>
+          
+        </ul>
+        
+        <div class="quote">“正午别逛户外，太阳晒得扛不住”</div><div class="quote">“宽窄巷子旁边第一家肥肠粉味道一般，粉的口感不太好”</div>
+        
+      </div>
+      </div>
+      
+      
+      <div class="tl-item ">
+      <div class="slot ">
+        <div class="slot-head">
+          <span class="time sl-evening">🌙 晚上</span>
+          
+          <a class="spot-link" href="#detail-锦里" data-modal="1" title="点开看介绍与避雷">锦里</a>
+          <a class="jump-chip" href="#detail-锦里" data-modal="1">介绍 · 避雷</a>
+          
+          <span class="tag">约2小时</span>
+          
+          
+        </div>
+        <p>🚗 从宽窄巷子打车约21分钟到达</p>
+        <p>✅ 锦里夜景很美，适合晚上慢慢逛，随手能出大片</p>
+        
+        
+        
+      </div>
+      </div>
+      
+      </div>
+    </div>
+    
+    <div class="day-block" id="day-2">
+      <div class="day-title"><span class="badge">第 2 天</span>
+        <span class="cnt">2 个时段</span></div>
+      <div class="timeline">
+      
+      
+      <div class="tl-item pitfall">
+      <div class="slot pitfall">
+        <div class="slot-head">
+          <span class="time sl-morning">🌅 上午</span>
+          
+          <a class="spot-link" href="#detail-文殊院茶馆" data-modal="1" title="点开看介绍与避雷">文殊院茶馆</a>
+          <a class="jump-chip" href="#detail-文殊院茶馆" data-modal="1">介绍 · 避雷</a>
+          
+          <span class="tag">约3小时</span>
+          
+          
+        </div>
+        <p>🚗 从酒店打车约19分钟到达</p>
+        <p>✅ 可打卡红墙、喝盖碗茶、看川剧变脸及沉浸式表演</p>
+        
+        <ul class="note-list">
+          
+          <li class="nt-pit">❌ <b>避坑</b>：取票流程麻烦且缺乏明确标识指引不清</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：舞台面积偏小</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：演出看一次即可重复观看没意思</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：荷田水铺提供7款草本香气山野茶杯套联名</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：内容丰富可以在这里玩一天</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：喝盖碗茶看川剧是体验成都慢生活的方式</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：该演出适合带父母或老人观看</li>
+          
+          <li class="nt-time">🕐 <b>时间</b>：建议提前到场预留充足取票时间以免耽误入座</li>
+          
+        </ul>
+        
+        <div class="quote">“取票流程麻烦且缺乏明确标识，工作人员指引不清”</div><div class="quote">“舞台面积偏小”</div>
+        
+      </div>
+      </div>
+      
+      
+      <div class="tl-item pitfall">
+      <div class="slot pitfall">
+        <div class="slot-head">
+          <span class="time sl-afternoon">☀️ 下午</span>
+          
+          <a class="spot-link" href="#detail-春熙路步行街" data-modal="1" title="点开看介绍与避雷">春熙路步行街</a>
+          <a class="jump-chip" href="#detail-春熙路步行街" data-modal="1">介绍 · 避雷</a>
+          
+          <span class="tag">约3小时</span>
+          
+          
+        </div>
+        <p>🚗 从文殊院茶馆乘地铁1号线转2号线至春熙路，含步行约28分钟；或打车约18分钟</p>
+        <p>✅ City Walk可安排一个下午走完春熙路、太古里、IFS和大慈寺</p>
+        
+        <ul class="note-list">
+          
+          <li class="nt-pit">❌ <b>避坑</b>：不建议吃烤匠，本地人认为不值得特意去吃</li>
+          
+          <li class="nt-pit">❌ <b>避坑</b>：周边除太古里值得逛其他地方没必要去</li>
+          
+          <li class="nt-tip">💡 <b>提示</b>：晚上落地成都后可坐大巴前往春熙路</li>
+          
+        </ul>
+        
+        <div class="quote">“不建议在春熙路吃烤匠（烤鱼），本地人认为不值得外地游客特意去吃”</div><div class="quote">“春熙路周边除了太古里值得逛，其他地方没必要去”</div>
+        
+      </div>
+      </div>
+      
+      </div>
+    </div>
+    
+    </div>
+  </section>
+  
+  
+  <section id="sec-pitfall">
+    <div class="sec-head"><span class="sec-no">03</span><h2>避坑专题</h2>
+      <span class="sec-note">每条附评论原文 · 高置信度排前</span></div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">1. 该越南菜馆周末排队时间比较久</span><span class="conf c-low">低置信度</span>
+      <blockquote>“这家越南菜从大学吃到现在[舔屏]味道和品质一直在线！就是周末排队有点久[捂脸][捂脸]”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7634570653617655094" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">2. 春熙路周边除了太古里值得逛，其他地方没必要去</span><span class="conf c-low">低置信度</span>
+      <blockquote>“春熙路逛逛太古里就凑合了！周围不用去了”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7626682048819793195" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">3. 舞台面积偏小</span><span class="conf c-low">低置信度</span>
+      <blockquote>“感觉这个舞台有点小哈”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7633056961844676954" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">4. 演出看一次即可，重复观看会觉得没意思</span><span class="conf c-low">低置信度</span>
+      <blockquote>“这个看一次可以但再看第二次就感觉没啥意思了”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7633056961844676954" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">5. 大年三十去武侯祠祈福烧头香的人非常多，结束后很难打到车，需要走到骡马市才能叫到车</span><span class="conf c-low">低置信度</span>
+      <blockquote>“以前年轻的时候和朋友大年三十祈福烧头香，出来打不到车要走到骡马市才叫的到车[捂脸]可想而知武侯祠香火有多盛”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7675657089759621199" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">6. 正午别逛户外，太阳晒得扛不住</span><span class="conf c-low">低置信度</span>
+      <blockquote>“正午别逛户外，太阳晒得扛不住☀️”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7676310403480328859" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">7. 宽窄巷子旁边第一家肥肠粉味道一般，粉的口感不太好</span><span class="conf c-low">低置信度</span>
+      <blockquote>“我家就住宽窄巷子旁边，第一个肥肠粉感觉一般，粉不太好[戳手手]”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7634570653617655094" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">8. 不建议在春熙路吃烤匠（烤鱼），本地人认为不值得外地游客特意去吃</span><span class="conf c-low">低置信度</span>
+      <blockquote>“当推荐烤匠的时候，外地的朋友们可以选择不看了[黑脸]”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7626682048819793195" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+    <div class="pit-card reveal">
+      <span class="claim">9. 取票流程麻烦且缺乏明确标识，工作人员指引不清，建议提前到场预留充足取票时间以免耽误入座</span><span class="conf c-low">低置信度</span>
+      <blockquote>“取票好麻烦，工作人员指这指那儿，就是没有明确表识哪里可以取票[尬笑]，东问西问，跑几圈才取到票！”</blockquote>
+      <a class="src-btn" href="https://www.douyin.com/video/7633056961844676954" target="_blank" rel="noopener">📺 查看来源视频</a>
+    </div>
+    
+  </section>
+  
+
+  
+  <section id="sec-detail">
+    <div class="sec-head"><span class="sec-no">04</span><h2>详情库</h2>
+      <span class="sec-note">介绍 · 避雷 · 贴士 · 来源（行程里点景点名也可弹窗查看）</span></div>
+    
+    
+    
+    <div class="card detail-card" id="detail-锦里">
+      <h3>锦里
+        <a class="back-link" href="#day-1">↩ 返回第 1 天行程</a>
+        
+      </h3>
+      <p>
+        <span class="tag">建议时长 见要点</span>
+        <span class="tag">最佳时段 晚上</span>
+        
+      </p>
+      <p>✨ 亮点：锦里夜景很美，适合晚上慢慢逛，随手能出大片</p>
+      
+      
+      <p>📷 打卡：武侯祠的红墙打卡出片率高；锦里夜景随手能出大片</p>
+      
+      
+      
+      <div class="digest-box">
+        <p><b>📝 真实评价摘要</b>：夜景迷人适合慢逛，出片率高</p>
+        <p>👍 锦里夜景美适合晚上慢慢逛，随手出大片；武侯祠红墙打卡出片率高。</p>
+        
+        <blockquote>“锦里夜色迷人，适合慢慢逛”</blockquote><blockquote>“红墙打卡出片率高[比心]”</blockquote>
+      </div>
+      
+      
+      
+      <p class="src">信息溯源：<a href="https://www.douyin.com/video/7676019887823427451" target="_blank" rel="noopener">来源1 ↗</a><a href="https://www.douyin.com/video/7670385446630722825" target="_blank" rel="noopener">来源2 ↗</a><a href="https://www.douyin.com/video/7670380985691940095" target="_blank" rel="noopener">来源3 ↗</a><a href="https://www.douyin.com/video/7670388031211507685" target="_blank" rel="noopener">来源4 ↗</a><a href="https://www.douyin.com/video/7661521717290366394" target="_blank" rel="noopener">来源5 ↗</a></p>
+      
+    </div>
+    
+    
+    
+    <div class="card detail-card" id="detail-武侯祠">
+      <h3>武侯祠
+        <a class="back-link" href="#day-1">↩ 返回第 1 天行程</a>
+        
+      </h3>
+      <p>
+        <span class="tag">建议时长 见要点</span>
+        <span class="tag">最佳时段 全天</span>
+        
+      </p>
+      <p>✨ 亮点：武侯祠和汉昭烈庙（惠陵）在同一个地方，武侯祠位于汉昭烈庙里面；武侯祠内除了刘备和诸葛亮相关景点，还有刘湘的墓地可以参观</p>
+      <p class="risk-high">❌ 别踩坑：大年三十去武侯祠祈福烧头香的人非常多，结束后很难打到车，需要走到骡马市才能叫到车</p>
+      
+      <p>📷 打卡：武侯祠大门门额</p>
+      <p>💡 贴士：武侯祠附近有地铁站，站名就叫武侯祠；武侯祠需要收费，但后面的刘湘墓区域不收费；武侯祠位于成都市武侯区，旁边是武侯祠大街</p>
+      
+      
+      <div class="digest-box">
+        <p><b>📝 真实评价摘要</b>：信息多为中性科普，仅大年三十祈福打车难需避雷</p>
+        
+        <p class="risk-high">👎 大年三十祈福烧头香人极多，结束后很难打到车，需走到骡马市才能叫到车。</p>
+        <blockquote>“武侯祠要收费[抠鼻]，我一般去了都走后面，去看看刘湘，刘湘不收我费”</blockquote><blockquote>“以前年轻的时候和朋友大年三十祈福烧头香，出来打不到车要走到骡马市才叫的到车[捂脸]可想而知武侯祠香火有多盛”</blockquote>
+      </div>
+      
+      
+      
+      <p class="src">信息溯源：<a href="https://www.douyin.com/video/7667509421462932745" target="_blank" rel="noopener">来源1 ↗</a><a href="https://www.douyin.com/video/7636872072064470298" target="_blank" rel="noopener">来源2 ↗</a><a href="https://www.douyin.com/video/7637898089663040783" target="_blank" rel="noopener">来源3 ↗</a><a href="https://www.douyin.com/video/7633766904699604287" target="_blank" rel="noopener">来源4 ↗</a><a href="https://www.douyin.com/video/7675657089759621199" target="_blank" rel="noopener">来源5 ↗</a></p>
+      
+    </div>
+    
+    
+    
+    <div class="card detail-card" id="detail-春熙路步行街">
+      <h3>春熙路步行街
+        <a class="back-link" href="#day-2">↩ 返回第 2 天行程</a>
+        
+      </h3>
+      <p>
+        <span class="tag">建议时长 见要点</span>
+        <span class="tag">最佳时段 下午</span>
+        
+      </p>
+      <p>✨ 亮点：春熙路City Walk可安排一个下午走完春熙路、太古里、IFS和大慈寺</p>
+      <p class="risk-high">❌ 别踩坑：不建议在春熙路吃烤匠（烤鱼），本地人认为不值得外地游客特意去吃；春熙路周边除了太古里值得逛，其他地方没必要去</p>
+      
+      
+      <p>💡 贴士：晚上落地成都后，可以坐大巴前往春熙路</p>
+      
+      
+      <div class="digest-box">
+        <p><b>📝 真实评价摘要</b>：适合City Walk串联周边，但餐饮及周边需避雷</p>
+        <p>👍 可安排一个下午走完春熙路、太古里、IFS和大慈寺。</p>
+        <p class="risk-high">👎 本地人不推荐特意去吃烤匠；除太古里外周边没必要去。</p>
+        <blockquote>“春熙路，太古里，ifs，大慈寺。争取一个下午走完”</blockquote><blockquote>“当推荐烤匠的时候，外地的朋友们可以选择不看了[黑脸]”</blockquote>
+      </div>
+      
+      
+      
+      <p class="src">信息溯源：<a href="https://www.douyin.com/video/7636872072064470298" target="_blank" rel="noopener">来源1 ↗</a><a href="https://www.douyin.com/video/7629011621527981338" target="_blank" rel="noopener">来源2 ↗</a><a href="https://www.douyin.com/video/7683606013023776616" target="_blank" rel="noopener">来源3 ↗</a><a href="https://www.douyin.com/video/7626682048819793195" target="_blank" rel="noopener">来源4 ↗</a><a href="https://www.douyin.com/video/7661597811422770531" target="_blank" rel="noopener">来源5 ↗</a></p>
+      
+    </div>
+    
+    
+    
+    <div class="card detail-card" id="detail-宽窄巷子">
+      <h3>宽窄巷子
+        <a class="back-link" href="#day-1">↩ 返回第 1 天行程</a>
+        
+      </h3>
+      <p>
+        <span class="tag">建议时长 见要点</span>
+        <span class="tag">最佳时段 全天</span>
+        
+      </p>
+      <p>✨ 亮点：宽窄巷子会有很多特色小纪念品</p>
+      <p class="risk-high">❌ 别踩坑：正午别逛户外，太阳晒得扛不住；宽窄巷子旁边第一家肥肠粉味道一般，粉的口感不太好</p>
+      <p>🍜 美食：宽窄巷子附近老居民楼下的社区火锅是本地人常吃的老店，有不辣的选择，老人小孩都可以吃；宽窄巷子藏有一家市井老火锅，提供铁板火腿肠、鱿鱼须、扯皮虾滑及各种鲜货，位置隐蔽游客一般找不到；宽窄巷子附近的小谭豆花和贺水饺是真正的老成都味道，本地人认可；宽窄巷子附近有一家越南菜馆，味道和品质一直在线；真正老成都味道没有重油重辣味精起坨坨，很多是甜辣风格</p>
+      
+      <p>💡 贴士：该越南菜馆周末排队时间比较久；成都旅行适合懒人出行</p>
+      
+      
+      <div class="digest-box">
+        <p><b>📝 真实评价摘要</b>：周边美食地道丰富，正午暴晒且部分小吃踩雷</p>
+        <p>👍 附近藏有本地人私藏的社区老火锅，有不辣选项；小谭豆花、贺水饺是真正老成都味道。</p>
+        <p class="risk-high">👎 正午户外太阳晒得扛不住；旁边第一家肥肠粉口感一般；某越南菜馆周末排队久。</p>
+        <blockquote>“这家确实巴适土著才找得到”</blockquote><blockquote>“我家就住宽窄巷子旁边，第一个肥肠粉感觉一般，粉不太好[戳手手]”</blockquote>
+      </div>
+      
+      
+      
+      <p class="src">信息溯源：<a href="https://www.douyin.com/video/7658862628780982129" target="_blank" rel="noopener">来源1 ↗</a><a href="https://www.douyin.com/video/7676310403480328859" target="_blank" rel="noopener">来源2 ↗</a><a href="https://www.douyin.com/video/7660383522611738469" target="_blank" rel="noopener">来源3 ↗</a><a href="https://www.douyin.com/video/7670390830122068827" target="_blank" rel="noopener">来源4 ↗</a><a href="https://www.douyin.com/video/7634570653617655094" target="_blank" rel="noopener">来源5 ↗</a></p>
+      
+    </div>
+    
+    
+    
+    <div class="card detail-card" id="detail-文殊院茶馆">
+      <h3>文殊院茶馆
+        <a class="back-link" href="#day-2">↩ 返回第 2 天行程</a>
+        
+      </h3>
+      <p>
+        <span class="tag">建议时长 见要点</span>
+        <span class="tag">最佳时段 全天</span>
+        
+      </p>
+      <p>✨ 亮点：文殊院可以打卡红墙、喝盖碗茶、看川剧变脸；院子剧场提供沉浸式川剧表演，舞台效果不错，适合一家人观看；演出包含川剧变脸、喷火、双人茶艺及街舞等节目；观众可去后台参观并与演员合影；荷田水铺位于文殊院旁边，可在古建屋顶俯瞰文殊院</p>
+      <p class="risk-high">❌ 别踩坑：取票流程麻烦且缺乏明确标识，工作人员指引不清；舞台面积偏小；演出看一次即可，重复观看会觉得没意思</p>
+      <p>🍜 美食：荷田水铺提供7款具有草本香气的山野茶，杯套为联名款</p>
+      <p>📷 打卡：文殊院红墙；荷田水铺古建屋顶可俯瞰文殊院</p>
+      <p>💡 贴士：文殊院内容丰富，可以在这里玩一天；喝着盖碗茶看川剧是体验成都慢生活的方式；该演出适合带父母或老人观看；建议提前到场预留充足取票时间以免耽误入座</p>
+      
+      
+      <div class="digest-box">
+        <p><b>📝 真实评价摘要</b>：口碑偏正：盖碗茶配川剧体验佳，但取票麻烦舞台小</p>
+        <p>👍 可打卡红墙、喝盖碗茶看川剧变脸喷火等表演，票价性价比高，适合带老人全家观看，还能去后台与演员合影。</p>
+        <p class="risk-high">👎 取票流程麻烦且缺乏明确标识，工作人员指引不清；舞台面积偏小；演出看一次即可，重复观看会觉得没意思。</p>
+        <blockquote>“喝着盖碗茶看着川剧表演这就是成都人的慢生活”</blockquote><blockquote>“取票好麻烦，工作人员指这指那儿，就是没有明确表识哪里可以取票[尬笑]，东问西问，跑几圈才取到票！”</blockquote>
+      </div>
+      
+      
+      
+      <p class="src">信息溯源：<a href="https://www.douyin.com/video/7629011621527981338" target="_blank" rel="noopener">来源1 ↗</a><a href="https://www.douyin.com/video/7683606013023776616" target="_blank" rel="noopener">来源2 ↗</a><a href="https://www.douyin.com/video/7633056961844676954" target="_blank" rel="noopener">来源3 ↗</a><a href="https://www.douyin.com/video/7575021883391267483" target="_blank" rel="noopener">来源4 ↗</a><a href="https://www.douyin.com/video/7652702717530716645" target="_blank" rel="noopener">来源5 ↗</a></p>
+      
+    </div>
+    
+  </section>
+
+  
+
+  
+  <section id="sec-legs">
+    <div class="sec-head"><span class="sec-no">05</span><h2>分段交通</h2></div>
+    <div class="tbl-scroll">
+    <table>
+      <tr><th>日</th><th>路段</th><th>方式</th><th>时长</th><th>性质</th></tr>
+      
+      <tr>
+        <td>第1日</td>
+        <td>酒店 → 武侯祠</td>
+        <td>公交</td>
+        <td>约43分钟</td>
+        <td>实测</td>
+      </tr>
+      
+      <tr>
+        <td>第1日</td>
+        <td>武侯祠 → 宽窄巷子</td>
+        <td>公交</td>
+        <td>约40分钟</td>
+        <td>实测</td>
+      </tr>
+      
+      <tr>
+        <td>第1日</td>
+        <td>宽窄巷子 → 锦里</td>
+        <td>公交</td>
+        <td>约42分钟</td>
+        <td>实测</td>
+      </tr>
+      
+      <tr>
+        <td>第1日</td>
+        <td>锦里 → 酒店</td>
+        <td>公交</td>
+        <td>约41分钟</td>
+        <td>实测</td>
+      </tr>
+      
+      <tr>
+        <td>第2日</td>
+        <td>酒店 → 文殊院茶馆</td>
+        <td>公交</td>
+        <td>约28分钟</td>
+        <td>实测</td>
+      </tr>
+      
+      <tr>
+        <td>第2日</td>
+        <td>文殊院茶馆 → 春熙路步行街</td>
+        <td>公交</td>
+        <td>约28分钟</td>
+        <td>实测</td>
+      </tr>
+      
+      <tr>
+        <td>第2日</td>
+        <td>春熙路步行街 → 酒店</td>
+        <td>步行</td>
+        <td>约10分钟</td>
+        <td>实测</td>
+      </tr>
+      
+    </table>
+    </div>
+    <p style="color:#888;font-size:13px;margin-top:8px">交通时长为市内点对点估算，实际以地图 App 为准。</p>
+  </section>
+  
+
+  
+  <section id="sec-verify">
+    <div class="sec-head"><span class="sec-no">06</span><h2>出发前请自行确认</h2>
+      <span class="sec-note">会随时间变化的信息，出发前请再核对一次</span></div>
+    
+    <div class="heat-note">本报告信息截至 <b>2026-09-10</b>。以下事项来自网络公开信息，会随时间变化——
+      出发前请以官方渠道为准；这几项确认完，就可以放心出发了。</div>
+    
+    <div class="vc-grid">
+      
+      <div class="vc-card reveal">
+        <div class="vc-head"><span aria-hidden="true">🎫</span><b>票价</b>
+          <span class="vc-count">5</span></div>
+        <p class="vc-lead">报告里的票价来自网络信息，不是官方实时价；出发前请以官方渠道为准。</p>
+        <ul class="vc-list">
+          
+          <li><b>5 个点</b>：票价未知，需查官方渠道 —— 武侯祠、宽窄巷子、锦里、文殊院茶馆、春熙路步行街</li>
+          
+          
+        </ul>
+      </div>
+      
+      <div class="vc-card reveal">
+        <div class="vc-head"><span aria-hidden="true">🕐</span><b>开放时间与预约</b>
+          <span class="vc-count">5</span></div>
+        <p class="vc-lead">开放时间、闭馆日与是否需要预约，出发前请到官方渠道确认。</p>
+        <ul class="vc-list">
+          
+          <li><b>5 个点</b>：开放时间未取到，请确认当日是否开放（含例行闭馆日） —— 武侯祠、宽窄巷子、锦里、文殊院茶馆、春熙路步行街</li>
+          
+          
+        </ul>
+      </div>
+      
+      <div class="vc-card reveal">
+        <div class="vc-head"><span aria-hidden="true">📌</span><b>时效性提示</b>
+          <span class="vc-count">3</span></div>
+        <p class="vc-lead">以下条目可能随季节或档期变化，出发前请再确认一次。</p>
+        <ul class="vc-list">
+          
+          <li><b>宽窄巷子</b>：该越南菜馆周末排队时间比较久</li>
+          
+          <li><b>文殊院茶馆</b>：该演出适合带父母或老人观看</li>
+          
+          <li><b>文殊院茶馆</b>：演出看一次即可，重复观看会觉得没意思</li>
+          
+          
+        </ul>
+      </div>
+      
+    </div>
+    <p class="vc-foot">上述 5 个点均暂无官方来源印证——除票价与开放时间外，其它信息（如临时闭馆、活动档期）也建议出发前一并查证。</p>
+  </section>
+  
+</div>
+
+<footer>
+  本行程由 AI 基于抖音公开内容与地图数据生成，仅供参考；开放时间、票价、班次等时效信息出发前请务必通过官方渠道核实。<br>
+  评论内容为匿名摘录，不含任何用户身份信息。
+</footer>
+
+<!-- 弹层：点开详情、关闭即回，全程不需要滚动页面 -->
+<div class="modal-mask" id="modalMask">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <span class="m-title" id="modalTitle">详情</span>
+      <span class="m-tip">介绍 · 避雷 · 贴士 · 来源</span>
+      <button class="modal-close" id="modalClose" title="关闭（Esc）" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot"><button class="btn-close" id="modalFootClose">关闭，回到行程</button></div>
+  </div>
+</div>
+
+<a class="to-top" id="toTop" href="#top" title="回到顶部">↑</a>
+<script>
+(function () {
+  /* —— 吸顶导航高亮 + 回顶按钮 —— */
+  var chips = [].slice.call(document.querySelectorAll('.nav-chip[href^="#sec-"]'));
+  var secs = chips.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  var toTop = document.getElementById('toTop');
+  function onScroll() {
+    var y = window.scrollY + 96, cur = -1;
+    secs.forEach(function (s, i) { if (s && s.offsetTop <= y) cur = i; });
+    chips.forEach(function (a, i) { a.classList.toggle('active', i === cur); });
+    if (toTop) toTop.classList.toggle('show', window.scrollY > 700);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  /* —— 详情弹层：点开即看，关闭即回（页面滚动位置不变） —— */
+  var mask = document.getElementById('modalMask');
+  var body = document.getElementById('modalBody');
+  var title = document.getElementById('modalTitle');
+  var lastFocus = null;
+  var savedScrollY = 0;   // 打开弹层时的页面滚动位置，关闭时用它恢复
+
+  function openModal(id) {
+    var node = document.getElementById(id);
+    if (!node) return false;
+    lastFocus = document.activeElement;
+    // 记下打开前的滚动位置。锁滚动靠 body{overflow:hidden}，但 body 因
+    // overflow-x:hidden 本来就计算成 overflow-y:auto（本身是滚动容器），
+    // 锁定/解锁定之间**位置保不保在各引擎上不一致**（Safari 与 iOS 上实测会丢，
+    // 表现为关闭后回到页首、要重新往下滚）。所以不依赖引擎脾气，关闭时自己恢复。
+    savedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+    var clone = node.cloneNode(true);
+    clone.removeAttribute('id');
+    body.innerHTML = '';
+    body.appendChild(clone);
+    var nameEl = node.querySelector('h3');
+    title.textContent = nameEl ? nameEl.textContent.replace(/↩.*$/, '').trim() : '详情';
+    mask.classList.add('open');
+    document.body.classList.add('modal-open');
+    body.scrollTop = 0;
+    var btn = document.getElementById('modalClose');
+    // preventScroll 不能省：否则聚焦关闭按钮会把页面拽过去（恢复焦点那行已用同款写法）
+    if (btn) { try { btn.focus({ preventScroll: true }); } catch (e) { try { btn.focus(); } catch (e2) {} } }
+    return true;
+  }
+  function closeModal() {
+    if (!mask.classList.contains('open')) return;
+    mask.classList.remove('open');
+    document.body.classList.remove('modal-open');
+    setTimeout(function () { if (!mask.classList.contains('open')) body.innerHTML = ''; }, 200);
+    if (lastFocus && lastFocus.focus) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} }
+    // 放在最后：先让 focus 归位，再压回记录的滚动位置，避免被它带偏
+    window.scrollTo(0, savedScrollY);
+  }
+
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest ? e.target.closest('a[data-modal]') : null;
+    if (a) {
+      var id = (a.getAttribute('href') || '').slice(1);
+      if (openModal(id)) { e.preventDefault(); }
+      return;
+    }
+    if (e.target === mask) closeModal();   // 点背景关闭
+  });
+  document.getElementById('modalClose').addEventListener('click', closeModal);
+  document.getElementById('modalFootClose').addEventListener('click', closeModal);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  /* —— 报告降噪：决策表默认只看"入选"，校验明细默认收起 ——
+     折叠类只在这里（JS 确认运行后）挂载；无 JS 时全部内容天然可见。 */
+  function setupFold(secId, btnSel, foldClass, countSel, label) {
+    var sec = document.getElementById(secId);
+    var btn = document.querySelector(btnSel);
+    if (!sec || !btn) return;
+    var n = sec.querySelectorAll(countSel).length;
+    if (!n) return;
+    function paint() {
+      var folded = sec.classList.contains(foldClass);
+      btn.textContent = folded ? ('展开' + label + '（' + n + '）▾') : ('收起' + label + ' ▴');
+      btn.setAttribute('aria-expanded', folded ? 'false' : 'true');
+    }
+    btn.addEventListener('click', function () { sec.classList.toggle(foldClass); paint(); });
+    sec.classList.add(foldClass);
+    btn.hidden = false;
+    paint();
+  }
+  setupFold('sec-decision', '[data-dc-toggle]', 'dc-fold', 'tr.st-alt, tr.st-out, tr.st-none', '其余候选');
+  setupFold('sec-quality', '[data-qc-toggle]', 'qc-fold', '.qc-list li', '校验明细');
+
+  /* —— 行程视图切换：全景图 ⇄ 逐日列表 ——
+     无 JS 时切换器不显示、列表直接可见（.js 前缀控制），内容永不丢。 */
+  (function () {
+    var tabMap = document.getElementById('tabMap');
+    var tabList = document.getElementById('tabList');
+    var mapEl = document.getElementById('tripMap');
+    var listEl = document.getElementById('dayList');
+    if (!tabMap || !tabList || !listEl) return;
+    function paint(showMap) {
+      if (mapEl) mapEl.classList.toggle('on', showMap);
+      listEl.classList.toggle('off', showMap);
+      tabMap.setAttribute('aria-selected', showMap ? 'true' : 'false');
+      tabList.setAttribute('aria-selected', showMap ? 'false' : 'true');
+    }
+    tabMap.addEventListener('click', function () { paint(true); });
+    tabList.addEventListener('click', function () { paint(false); });
+    // 从详情弹层里的「↩ 返回第 N 天行程」跳回来时，自动切到列表视图（否则看不到目标）
+    document.addEventListener('click', function (e) {
+      var a = e.target.closest ? e.target.closest('a[href^="#day-"]') : null;
+      if (a) paint(false);
+    });
+    // 全景图节点点击已由上方 data-modal 委托处理（弹层），此处只补键盘可达性
+    paint(true);
+  })();
+})();
+</script>
+<script>
+/* ============================================================
+   动效层：原生 CSS/JS（离线可用），只做视觉增强，不改上方业务逻辑
+   内容优先：所有“初始隐藏”以 html.fx 为前提，另有 1.8s 兜底
+   ============================================================ */
+(function () {
+  'use strict';
+  var doc = document;
+  var root = doc.documentElement;
+  root.classList.add('fx');
+  var RM = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
+  function reduce() { return !!RM.matches; }
+  function $(s, r) { return (r || doc).querySelector(s); }
+  function $$(s, r) { return [].slice.call((r || doc).querySelectorAll(s)); }
+
+  /* —— 1. HERO：目的地标题逐字上浮 + 印章首字 + 数字 count-up —— */
+  var cityName = ((doc.title.match(/《([^》]+)》/) || [])[1] || '');
+  var h1 = $('.hero h1');
+  if (h1) {
+    var full = (h1.textContent || '').replace(/\s+/g, ' ').trim();
+    if (full) h1.setAttribute('aria-label', full);
+    var tn = h1.firstChild;
+    if (cityName && tn && tn.nodeType === 3 && tn.nodeValue.indexOf(cityName) >= 0) {
+      var frag = doc.createDocumentFragment();
+      tn.nodeValue.split('').forEach(function (ch, i) {
+        var sp = doc.createElement('span');
+        sp.className = 'ch';
+        sp.setAttribute('aria-hidden', 'true');
+        sp.style.setProperty('--i', i);
+        sp.textContent = ch;
+        frag.appendChild(sp);
+      });
+      h1.replaceChild(frag, tn);
+    }
+  }
+  var seal = $('.hero-seal');
+  if (seal && cityName) {
+    seal.textContent = cityName.charAt(0);
+    seal.setAttribute('data-city', cityName);   // 打印时以完整城市名呈现
+  }
+
+  function countUp(el, dur) {
+    var raw = el.getAttribute('data-raw') || (el.textContent || '').trim();
+    el.setAttribute('data-raw', raw);
+    var m = raw.match(/^(\d+(?:\.\d+)?)([\s\S]*)$/);
+    if (!m) return;
+    var target = parseFloat(m[1]), suffix = m[2] || '', t0 = 0;
+    var step = function (now) {
+      if (!t0) t0 = now;
+      var p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = (p < 1 ? Math.round(target * e) : target) + suffix;
+      if (p < 1) requestAnimationFrame(step);
+    };
+    el.textContent = '0' + suffix;
+    requestAnimationFrame(step);
+  }
+
+  /* —— 2. 进入视口揭示（通用，按同组序号错开） —— */
+  var io = ('IntersectionObserver' in window) ? new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 }) : null;
+
+  function revealAll() {
+    $$('.reveal').forEach(function (el) {
+      var sibs = el.parentNode ? $$('.reveal', el.parentNode) : [];
+      var idx = sibs.indexOf(el);
+      if (idx > 0 && !el.style.getPropertyValue('--d')) el.style.setProperty('--d', Math.min(idx, 6) * 70 + 'ms');
+      if (io && !reduce()) io.observe(el); else el.classList.add('in');
+    });
+  }
+
+  /* —— 3. 逐日时间线：竖轨生长 + 节点 stagger + 当前天光圈 —— */
+  var dayBlocks = $$('.day-block');
+  dayBlocks.forEach(function (db) {
+    $$('.tl-item', db).forEach(function (it, i) { it.style.setProperty('--i', i); });
+  });
+  if (io && !reduce()) {
+    var dio = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('day-in');
+        dio.unobserve(e.target);
+      });
+    }, { rootMargin: '0px 0px -10% 0px', threshold: 0.05 });
+    dayBlocks.forEach(function (db) { dio.observe(db); });
+  } else {
+    dayBlocks.forEach(function (db) { db.classList.add('day-in'); });
+  }
+  function setActiveDay(db) {
+    if (!db || !db.id) return;
+    dayBlocks.forEach(function (x) { x.classList.toggle('day-active', x === db); });
+    $$('.day-chip').forEach(function (c) {
+      c.classList.toggle('active', c.getAttribute('href') === '#' + db.id);
+    });
+  }
+  if (io && dayBlocks.length) {
+    var aio = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) setActiveDay(e.target); });
+    }, { rootMargin: '-22% 0px -62% 0px', threshold: 0 });
+    dayBlocks.forEach(function (db) { aio.observe(db); });
+    setActiveDay(dayBlocks[0]);
+  }
+
+  /* —— 4. 热度榜：热度条从 0 生长到模板内联宽度 —— */
+  $$('.heat-fill').forEach(function (f) {
+    var p = parseFloat(f.style.width || '') || 0;
+    f.style.setProperty('--p', (p / 100).toFixed(4));
+  });
+  var bars = $$('.heat-bar');
+  if (io && !reduce()) {
+    var hio = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.remove('heat-zero');
+        hio.unobserve(e.target);
+      });
+    }, { threshold: 0.15 });
+    bars.forEach(function (b) { hio.observe(b); });
+  } else {
+    bars.forEach(function (b) { b.classList.remove('heat-zero'); });
+  }
+
+  /* —— 5. 启动：先揭示，再放 hero 入场 —— */
+  revealAll();
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      doc.body.classList.add('hero-ready');
+      if (reduce()) return;
+      $$('.hero .stat .num').forEach(function (el, i) {
+        setTimeout(function () { countUp(el, 900); }, 240 + i * 90);
+      });
+    });
+  });
+  root.classList.add('fx-ready');
+})();
+</script>
+</body>
+</html>
