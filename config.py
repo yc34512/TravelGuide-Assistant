@@ -64,6 +64,11 @@ SEARCH_SORT_BY_LIKES = os.getenv("SEARCH_SORT_BY_LIKES", "true").lower() == "tru
 # 单个对象的详情页导航硬上限。抖音是会话级风控：连续 5~6 次视频页导航后弹 3D 验证码，
 # 之后整个会话返回 0 结果，所以"超额深采"不可行——质量筛选必须尽量前移到搜索页
 MAX_DETAIL_FETCH = int(os.getenv("MAX_DETAIL_FETCH", "10"))
+# 会话级详情页导航预算（默认 6，贴住"连续 5~6 次视频页导航"的红线）：
+# 一次任务会连续跑 攻略层/候选验证/逐点调研/餐厅调研，全在同一个登录会话内，
+# 因此预算必须按**会话**共享——用尽即主动停手（稍后重跑补齐，命中缓存），
+# 不去撞验证码（撞上会加重风控，账号惩罚会累积）。不建议调大。
+SESSION_DETAIL_BUDGET = int(os.getenv("SESSION_DETAIL_BUDGET", "6"))
 # 城市攻略层：搜"{城市}旅游攻略/N天N夜/避雷"取行程编排知识，按城市缓存
 CITY_GUIDE_VIDEOS = int(os.getenv("CITY_GUIDE_VIDEOS", "6"))     # 攻略层深采条数（成本闸）
 CITY_GUIDE_TTL_DAYS = int(os.getenv("CITY_GUIDE_TTL_DAYS", "14"))  # 攻略缓存保鲜期（比景点长：编排知识变化慢）

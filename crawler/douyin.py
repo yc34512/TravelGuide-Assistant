@@ -398,6 +398,11 @@ class DouyinCrawler:
         if base.session_stopped():
             # 本会话已触发验证码风控：不再导航（避免加重风控），调用方按"未采到"处理
             raise RuntimeError("本会话已触发验证码风控：停止现采（不尝试绕过）")
+        if base.nav_budget_exhausted():
+            # 会话级导航预算用尽：主动停手（撞验证码会加重风控、账号惩罚会累积）
+            raise RuntimeError(
+                f"本会话详情页导航已达安全预算（{base.nav_count()}/{base.nav_budget()} 次）："
+                "主动停手以避免触发风控；稍后重新生成即可补齐（已采点位命中缓存）")
         self._apply_block(keep_video=with_asr)
         self.limiter.wait()
         m = VIDEO_ID_RE.search(url)
@@ -417,6 +422,7 @@ class DouyinCrawler:
         except Exception:
             pass
         self.page.get(url)
+        base.bump_navigation()      # 记一次导航（会话级预算计数）
 
         # 详情页也可能是验证码中间页（会话级风控）：命中即标记本会话停止，
         # 后续每条视频、每个点位的采集都会立即熔断，不再逐条去撞

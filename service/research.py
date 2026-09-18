@@ -81,7 +81,8 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | Non
     不传则用默认三角度 [原词, 原词+攻略, 原词+避雷]。"""
     from crawler import base
     base.require_ugc_source(log=log)   # 开源合规闸门 + 免责告知；未启用抛 SourceDisabled
-    base.reset_session()               # 每次 _crawl 独立浏览器会话，清零风控停止标记
+    # 注意：不在这里 reset_session——本函数被同一任务逐点调用多次，
+    # 若每次清零预算/风控标记就等于变相重试（会话级预算必须由任务入口清零）。
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     def cancelled() -> bool:
@@ -312,6 +313,8 @@ def cancel_job(job_id: str) -> bool:
 def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, force: bool) -> None:
     job = JOBS[job_id]
     started = time.time()
+    from crawler import base
+    base.reset_session()      # 任务级会话起点：清空风控标记与导航预算（逐点采集不再各自清零）
 
     def log(msg: str) -> None:
         job["log"].append(f"{time.strftime('%H:%M:%S')}  {msg}")

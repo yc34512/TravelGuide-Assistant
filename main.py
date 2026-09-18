@@ -20,6 +20,7 @@ from config import (
     RAW_DIR,
     REPORT_DIR,
 )
+from crawler import base
 from crawler.browser import create_page, ensure_login
 from crawler.douyin import DouyinCrawler
 from crawler.tabs import fetch_videos
@@ -58,6 +59,7 @@ def main():
             args.no_llm = True
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base.reset_session()      # CLI 任务级会话起点：清空风控标记与导航预算
     page = create_page()
     crawler = DouyinCrawler(page, global_limiter())
     items = []

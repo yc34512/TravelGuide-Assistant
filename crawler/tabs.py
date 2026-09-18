@@ -67,6 +67,14 @@ def fetch_videos(page, urls, *, comments: int = MAX_COMMENTS_PER_VIDEO, asr: boo
         err = RuntimeError("验证码风控：本会话停止现采")
         return [(i, None, err) for i in range(len(urls))]
 
+    if base.nav_budget_exhausted():
+        # 会话级导航预算用尽：同样一条不采（预算的意义就是"在红线前收手"）
+        if log:
+            log(f"本会话详情页导航已达安全预算（{base.nav_count()}/{base.nav_budget()} 次）："
+                "跳过详情采集，稍后重新生成即可补齐（已采点位命中缓存）")
+        err = RuntimeError("会话导航预算已用尽：停止详情采集")
+        return [(i, None, err) for i in range(len(urls))]
+
     from crawler.douyin import DouyinCrawler
 
     total = len(urls)
@@ -97,6 +105,12 @@ def fetch_videos(page, urls, *, comments: int = MAX_COMMENTS_PER_VIDEO, asr: boo
                     out_errs[i] = RuntimeError("验证码风控：本会话停止现采")
                     _log(f"[{i + 1}/{total}] 跳过：本会话已触发验证码风控")
                     return
+                if base.nav_budget_exhausted():
+                    # 会话级预算用尽：不再导航（预算的意义就是"在红线前收手"）
+                    out_errs[i] = RuntimeError("会话导航预算已用尽：跳过本条详情采集")
+                    _log(f"[{i + 1}/{total}] 跳过：本会话导航预算已用尽"
+                         f"（{base.nav_count()}/{base.nav_budget()} 次）")
+                    return
                 try:
                     kw = dict(per_item_kwargs(i, url)) if per_item_kwargs else {}
                     kw.setdefault("max_comments", comments)
@@ -114,6 +128,8 @@ def fetch_videos(page, urls, *, comments: int = MAX_COMMENTS_PER_VIDEO, asr: boo
                     break
                 except Exception as e:
                     last_err = e
+                    if base.nav_budget_exhausted() or base.session_stopped():
+                        break          # 预算用尽/已风控：重试没有意义（重试只会延长会话）
                     if attempt < retries:
                         _log(f"[{i + 1}/{total}] 采集失败：{e}，稍后重试…")
                         time.sleep(_RETRY_GAP)
@@ -167,7 +183,7 @@ def fetch_videos_gated(page, candidates, target_n: int, *,
     # 如实说明原因，不报成"门槛过严"也不报成"候选池用尽"（两者都会带偏排查方向）
     if not cands:
         return {"items": [], "rejected": [], "reasons": {}, "fetched": 0,
-                "capped": False, "exhausted": False, "relaxed": [],
+                "capped": False, "exhausted": False, "budget_exhausted": False, "relaxed": [],
                 "level": level if level else QUALITY_LEVEL,
                 "note": "无候选可采：搜索阶段未返回结果（验证码风控/关键词过冷/选择器失效），"
                         "不是门槛过严，本次未消耗任何详情页导航额度"}
@@ -176,10 +192,14 @@ def fetch_videos_gated(page, candidates, target_n: int, *,
     reasons: dict = {}
     cursor = fetched = 0
     capped = exhausted = False
+    budget_hit = False        # 会话级导航预算用尽（与"单次调用上限/候选池用尽"区分开）
     lv = level if level else QUALITY_LEVEL
 
     while len(kept) < target_n:
         if cancelled and cancelled():
+            break
+        if base.nav_budget_exhausted():
+            budget_hit = True
             break
         room = max_fetch - fetched
         if room <= 0:
@@ -239,7 +259,9 @@ def fetch_videos_gated(page, candidates, target_n: int, *,
             + (f"；门槛档 {lv}" if lv else "")
             + (f"；保留视频点赞 {min(likes)}~{max(likes)}" if likes else "")
             + ("；已触详情页导航硬上限（防会话级风控，不再多采）" if capped else "")
-            + ("；候选池已用尽" if exhausted else ""))
+            + ("；候选池已用尽" if exhausted else "")
+            + (f"；本会话导航预算已用尽（{base.nav_count()}/{base.nav_budget()} 次），已主动停手"
+               "（稍后重跑补齐）" if budget_hit else ""))
     return {"items": kept, "rejected": rejected, "reasons": reasons, "fetched": fetched,
-            "capped": capped, "exhausted": exhausted, "relaxed": relaxed,
-            "level": lv, "note": note}
+            "capped": capped, "exhausted": exhausted, "budget_exhausted": budget_hit,
+            "relaxed": relaxed, "level": lv, "note": note}

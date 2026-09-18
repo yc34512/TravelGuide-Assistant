@@ -11,7 +11,11 @@
 """
 from __future__ import annotations
 
-from config import REQUEST_DELAY_MAX, REQUEST_DELAY_MIN, SOURCE_DOUYIN_ENABLED
+from config import (REQUEST_DELAY_MAX, REQUEST_DELAY_MIN, SESSION_DETAIL_BUDGET,
+                    SOURCE_DOUYIN_ENABLED)
+
+# 会话级详情页导航预算（测试/运行时可通过 base.NAV_DETAIL_BUDGET 覆盖）
+NAV_DETAIL_BUDGET = SESSION_DETAIL_BUDGET
 
 
 class SourceDisabled(RuntimeError):
@@ -26,6 +30,7 @@ UGC_ENABLE_NOTICE = (
 
 _noticed = False          # 免责告知每进程只打印一次
 _session_stopped = False  # 本会话是否已触发验证码风控（触发后停止一切现采）
+_nav_count = 0            # 本会话已发生的详情页导航次数（会话级风控预算，见 config.SESSION_DETAIL_BUDGET）
 
 
 def douyin_enabled() -> bool:
@@ -79,7 +84,37 @@ def session_stopped() -> bool:
     return _session_stopped
 
 
+def bump_navigation() -> int:
+    """记一次详情页导航（会话级预算的唯一计数口，在导航发生后调用）。"""
+    global _nav_count
+    _nav_count += 1
+    return _nav_count
+
+
+def nav_count() -> int:
+    return _nav_count
+
+
+def nav_budget() -> int:
+    return NAV_DETAIL_BUDGET
+
+
+def nav_budget_exhausted() -> bool:
+    """会话级导航预算是否用尽。
+
+    抖音按"同一会话连续 5~6 次视频页导航"判风控，而一次任务会连续跑
+    攻略层 / 候选验证 / 逐点调研 / 餐厅调研（同一个登录会话）——所以预算按会话共享：
+    用尽即主动停手，走"稍后重跑补齐（命中缓存）"路径，不去撞验证码（撞了会加重风控）。
+    """
+    return _nav_count >= NAV_DETAIL_BUDGET
+
+
 def reset_session() -> None:
-    """新浏览器会话开始时清零风控停止标记（每次 _crawl 持有独立会话）。"""
-    global _session_stopped
+    """新任务开始：清零风控停止标记与导航计数。
+
+    注意：由**任务入口**调用（research / trip / heatrefresh / CLI），不再由每次采集调用——
+    否则一次任务里的逐点采集会各自清零预算与风控标记，等于变相重试，必然撞上验证码。
+    """
+    global _session_stopped, _nav_count
     _session_stopped = False
+    _nav_count = 0

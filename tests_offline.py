@@ -4975,6 +4975,52 @@ class TestRiskControlCircuitBreaker(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             crawler.fetch_video("https://www.douyin.com/video/123")
 
+    def test_nav_budget_roundtrip(self):
+        """会话级导航预算：计数、用尽判定、reset 清零。"""
+        from crawler import base
+        base.reset_session()
+        self.assertEqual(base.nav_count(), 0)
+        self.assertFalse(base.nav_budget_exhausted())
+        for _ in range(base.nav_budget()):
+            base.bump_navigation()
+        self.assertTrue(base.nav_budget_exhausted())
+        base.reset_session()
+        self.assertEqual(base.nav_count(), 0)
+        self.assertFalse(base.nav_budget_exhausted())
+
+    def test_fetch_videos_short_circuits_when_budget_exhausted(self):
+        """预算用尽时批量采集一条都不采、不新开 Tab（此处没有浏览器，真开 Tab 必炸）。"""
+        from unittest import mock
+
+        from crawler import base, tabs
+        logs = []
+        base.reset_session()
+        with mock.patch.object(base, "NAV_DETAIL_BUDGET", 1), \
+             mock.patch.object(base, "require_ugc_source", lambda *a, **k: None):
+            base.bump_navigation()
+            res = tabs.fetch_videos(object(), ["https://www.douyin.com/video/1"], log=logs.append)
+        self.assertEqual(len(res), 1)
+        self.assertIsNone(res[0][1])
+        self.assertIn("预算", str(res[0][2]))
+        self.assertTrue(any("预算" in m for m in logs))
+        base.reset_session()
+
+    def test_fetch_video_refuses_when_budget_exhausted(self):
+        """预算用尽时 fetch_video 立即拒绝（不导航），提示里给出"稍后重跑补齐"的出路。"""
+        from unittest import mock
+
+        from crawler import base
+        from crawler.douyin import DouyinCrawler
+
+        base.reset_session()
+        with mock.patch.object(base, "NAV_DETAIL_BUDGET", 1):
+            base.bump_navigation()
+            with self.assertRaises(RuntimeError) as ctx:
+                DouyinCrawler(object()).fetch_video("https://www.douyin.com/video/123")
+        self.assertIn("预算", str(ctx.exception))
+        self.assertIn("补齐", str(ctx.exception))
+        base.reset_session()
+
 
 class TestFactsCutoff(unittest.TestCase):
     """事实核验截止日：取最早采集日（最保守），不把缓存旧数据说成今天核验的。"""

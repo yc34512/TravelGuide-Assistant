@@ -189,7 +189,8 @@ def _city_guide_layer(city: str, days: int, job_id: str | None, log) -> dict:
         log(f"城市攻略层采集失败（{e}），降级为纯 LLM 圈定")
         return empty_guide_knowledge()
     if not items:
-        log("城市攻略层未采到内容（可能触发风控、未登录或该城攻略视频稀少），降级为纯 LLM 圈定")
+        log("城市攻略层未采到内容（可能触发风控、会话导航预算已用尽、未登录或该城攻略视频稀少），"
+            "降级为纯 LLM 圈定")
         return empty_guide_knowledge()
     guide = extract_guide_knowledge(items, city=city, days=days)
     gc = guide.get("guide_candidates") or []
@@ -270,6 +271,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
               start_date: str | None = None) -> None:
     job = JOBS[job_id]
     started = time.time()
+    crawler_base.reset_session()   # 任务级会话起点：清空风控标记与导航预算（逐点采集不再各自清零）
 
     def log(msg: str) -> None:
         job["log"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
@@ -471,10 +473,13 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                             name, raw_path, len(items), sum(len(x.comments) for x in items)
                         )
                         dates[name] = _today
-                    elif crawler_base.session_stopped():
-                        # 验证码风控已触发：剩余点位再采也只是白撞风控，立即停手
+                    elif crawler_base.session_stopped() or crawler_base.nav_budget_exhausted():
+                        # 风控或会话预算用尽：剩余点位再采也只是白撞，立即停手
+                        reason = ("验证码风控" if crawler_base.session_stopped()
+                                  else f"会话导航预算用尽（{crawler_base.nav_count()}/"
+                                       f"{crawler_base.nav_budget()} 次）")
                         rest = len(names) - i
-                        log("⚠️ 检测到验证码风控：本会话停止现采（不尝试绕过）。"
+                        log(f"⚠️ 检测到{reason}：本会话停止现采（不尝试绕过）。"
                             + (f"剩余 {rest} 个点位未调研。" if rest else "")
                             + "等待 20~30 分钟后重新生成即可补齐："
                               "已调研的点位会命中知识库缓存（7 天），只补缺口。")
@@ -506,9 +511,13 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
 
         spot_points, spot_sources, spot_items, spot_dates = _research(spots, pre or {}, "景点 ")
         if len(spot_points) < MIN_USABLE_SPOTS:
-            hint = ("（本次因验证码风控中断：等待 20~30 分钟后重新生成即可补齐）"
-                    if crawler_base.session_stopped()
-                    else "（可稍后重试或在请求中直接指定景点清单）")
+            if crawler_base.session_stopped():
+                hint = "（本次因验证码风控中断：等待 20~30 分钟后重新生成即可补齐）"
+            elif crawler_base.nav_budget_exhausted():
+                hint = (f"（本会话导航预算已用尽（{crawler_base.nav_count()}/"
+                        f"{crawler_base.nav_budget()} 次）：等待 20~30 分钟后重新生成即可补齐）")
+            else:
+                hint = "（可稍后重试或在请求中直接指定景点清单）"
             raise RuntimeError(
                 f"可用调研结果的景点不足 {MIN_USABLE_SPOTS} 个，无法排行程{hint}"
             )
