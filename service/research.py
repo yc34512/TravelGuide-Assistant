@@ -164,6 +164,83 @@ def _crawl(keyword: str, limit: int, comments: int, asr: bool, job_id: str | Non
     return items
 
 
+def probe_result_counts(names: list[str], job_id: str | None, log) -> dict[str, int | None]:
+    """探测层（设计规格 §4.3）：**一次浏览器会话内批量完成**所有候选的搜索页查询（D16）。
+
+    为什么必须一次会话批量：现状 _crawl 的粒度是"一个候选 = 一次浏览器会话"
+    （create_page -> search -> fetch -> page.quit）；探测若照此实现，N 个候选等于
+    开 N 次浏览器，开销会超过它省下的东西。本函数开一次浏览器、按全局频控逐个
+    查询、收集条数、关浏览器，由调用方据条数决定深采顺序与淘汰。
+
+    条数不消耗 SESSION_DETAIL_BUDGET——该预算只计详情页导航，计数口是
+    base.bump_navigation()，全项目唯一调用点在 fetch_video 内，搜索页阶段不碰。
+
+    返回 {name: 条数或 None}；None = 未探测（风控熔断/未登录/单次失败）——
+    调用方按"没有证据不淘汰"处理（保守）。探测结果落库带短保鲜期（PROBE_TTL_DAYS）。
+    """
+    from crawler import base
+
+    base.require_ugc_source(log=log)   # 开源合规闸门：UGC 源默认关闭
+    out: dict[str, int | None] = {}
+    for n in names or []:
+        key = str(n or "").strip()
+        if key and key not in out:
+            out[key] = None
+    if not out:
+        return out
+
+    def cancelled() -> bool:
+        if job_id is None:
+            return False
+        with _LOCK:
+            return JOBS.get(job_id, {}).get("cancel_requested", False)
+
+    if cancelled():
+        raise Cancelled()
+
+    with _CRAWL_LOCK:
+        from crawler.browser import create_page, ensure_login
+        from crawler.douyin import DouyinCrawler
+        from core.rate_limiter import global_limiter
+
+        page = create_page()
+        crawler = DouyinCrawler(page, global_limiter())
+        try:
+            if not ensure_login(page):
+                log("探测层跳过：未检测到抖音登录态（不淘汰任何候选，直接进采集）")
+                return out
+            total = len(out)
+            for i, name in enumerate(list(out), 1):
+                if cancelled():
+                    raise Cancelled()
+                if base.session_stopped():
+                    # 风控熔断后不得继续探测（§4.3 边界）：剩余候选保持 None
+                    log(f"探测中止：本会话已触发风控，剩余 {total - i + 1} 个候选未探测"
+                        "（不继续发请求；按未探测处理，不淘汰）")
+                    break
+                try:
+                    cnt = crawler.probe_count(name)
+                except Exception:
+                    cnt = None
+                out[name] = cnt
+                if cnt is None:
+                    log(f"  探测[{i}/{total}] {name}：未取得条数（跳过，不淘汰）")
+                    if base.session_stopped():
+                        break
+                    continue
+                log(f"  探测[{i}/{total}] {name}：搜索页 {cnt} 条结果")
+                try:   # 落库带短保鲜期：条数是弱信号，过期重新探测
+                    knowledge.record_probe_result(name, cnt)
+                except Exception:
+                    pass
+        finally:
+            try:
+                page.quit()
+            except Exception:
+                pass
+    return out
+
+
 def save_raw(keyword: str, items: list[VideoItem]) -> str:
     """把采集结果（含缺口补采）存为原始 JSON，返回路径。"""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")

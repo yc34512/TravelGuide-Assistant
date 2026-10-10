@@ -258,6 +258,21 @@ async def plan_trip(city: str, days: int = 2, hotel: str = "",
 
 
 @mcp.tool()
+async def search_knowledge(query: str, city: str = "") -> dict:
+    """按语义检索本地点位知识库（历史行程档案的要点/真实评价/避坑/官方信息片段，
+    以及城市攻略层提炼的编排建议）。
+
+    用途：回答"我上次查这个城市时还看到过什么""关于 XX 有什么要点"这类问题；
+    也适合在规划前先看看知识库里已有什么。不发起任何采集、不消耗抖音频控。
+    city 可选：给城市名时同城片段优先。
+    """
+    try:
+        return await _get("/api/kb/search", params={"q": query, "city": city})
+    except Exception as e:
+        return _conn_err(e)
+
+
+@mcp.tool()
 async def get_city_heat(city: str) -> dict:
     """查询城市实时热度榜（本周最火/长盛不衰/正在降温）：景点榜 ranking 与美食榜
     food_ranking 并列返回。数据来自最近一轮刷榜；若返回空榜单，可先调 refresh_city_heat 采集刷新。

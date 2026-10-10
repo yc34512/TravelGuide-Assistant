@@ -155,6 +155,61 @@ def _conn() -> sqlite3.Connection:
         )
         """
     )
+    # —— 候选漏斗（设计规格 §5）：状态机 / 探测结果 / 语义命中日志 / 别名词典 ——
+    # 候选处理档案：点位 + 处理状态 + 状态产生时间 + 来源路径。
+    # 状态必须严格区分（D9）：skipped_budget / dropped_probe / crawled_empty
+    # 混成"处理过了"即缓存投毒——绝不能被当成有效缓存复用。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS candidate_records (
+            keyword TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            source TEXT DEFAULT '自动圈定',
+            detail TEXT DEFAULT '',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    # 探测结果：搜索页条数（弱信号，短保鲜）。独立于 KB_TTL_DAYS——
+    # 条数随平台内容波动，长期复用会失真，过期重新探测。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS probe_results (
+            keyword TEXT PRIMARY KEY,
+            result_count INTEGER NOT NULL,
+            probed_at TEXT NOT NULL
+        )
+        """
+    )
+    # 语义命中日志（§12.3 硬性要求 3）：每一次复用都要能回溯——
+    # 命中谁、走的哪条路、相似度多少、最终判成哪一档、是否被采用。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS semantic_hits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_name TEXT NOT NULL,
+            hit_name TEXT,
+            score REAL,
+            level TEXT,
+            via TEXT,
+            adopted INTEGER DEFAULT 0,
+            note TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    # 别名词典（§12.4）：判决结果的缓存——LLM 判"是"就写进来，下次直接命中不再调 LLM；
+    # 支持人工订正（发现判错时改这里，比调阈值可靠）。
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alias_map (
+            query_name TEXT PRIMARY KEY,
+            canonical TEXT NOT NULL,
+            source TEXT DEFAULT 'confirmed',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     return conn
 
 
@@ -251,6 +306,174 @@ def find_guide(city: str, ttl_days: int) -> dict | None:
     out = dict(row)
     out["guide"] = guide if isinstance(guide, dict) else {}
     return out
+
+
+# ---- 候选漏斗：状态机 / 探测结果 / 语义命中 / 别名词典（设计规格 §5 / §12）----
+
+# 候选处理状态（D9：必须严格区分，绝不能被记成"处理过了"——
+# 一旦把 skipped_budget / dropped_probe 混成有效处理，空数据会被当缓存命中复用，即缓存投毒）
+ST_REUSED = "reused"                  # 命中历史且新鲜，未发采集；保鲜期内可再次复用
+ST_CRAWLED_OK = "crawled_ok"          # 现场采集且有内容；走缓存（video_count>0）
+ST_CRAWLED_EMPTY = "crawled_empty"    # 现场采集但无内容；不得当成有效缓存，下次可重试
+ST_SKIPPED_BUDGET = "skipped_budget"  # 未采集（预算用尽/风控熔断）；下次必须采
+ST_DROPPED_PROBE = "dropped_probe"    # 探测初筛淘汰（未深采）；探测记录过期后重新探测
+
+# 状态中文标签（日志与报告用，绝不明说黑话）
+STATUS_LABELS = {
+    ST_REUSED: "复用缓存",
+    ST_CRAWLED_OK: "采集成功",
+    ST_CRAWLED_EMPTY: "采集无内容",
+    ST_SKIPPED_BUDGET: "未采（预算/风控）",
+    ST_DROPPED_PROBE: "探测淘汰",
+}
+
+# 来源路径（两条入口路径的区分，设计规格 §6）
+SRC_AUTO = "自动圈定"
+SRC_USER = "用户指定"
+
+
+def record_candidate_status(keyword: str, status: str, source: str = SRC_AUTO,
+                            detail: str = "") -> None:
+    """登记一个候选的处理状态（UPSERT，保留最近一次）。
+
+    状态语义见 ST_* 常量；detail 存人话补充（如"缓存命中自 故宫博物院"），
+    供回补排除清单与排查使用。写库失败不应中断主流程，由调用方兜底。"""
+    key = str(keyword or "").strip()
+    if not key or status not in STATUS_LABELS:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO candidate_records (keyword, status, source, detail, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(keyword) DO UPDATE SET status=excluded.status,"
+            " source=excluded.source, detail=excluded.detail, updated_at=excluded.updated_at",
+            (key, status, source, str(detail or ""), datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def load_candidate_statuses(keywords: list[str] | None = None) -> dict[str, dict]:
+    """读取候选处理档案：{keyword: {status, source, detail, updated_at}}。
+
+    keywords=None 读全部（排查用）；传名单则只读这些键。"""
+    with _conn() as conn:
+        if keywords is None:
+            rows = conn.execute("SELECT * FROM candidate_records").fetchall()
+        else:
+            keys = [str(k).strip() for k in keywords if str(k or "").strip()]
+            if not keys:
+                return {}
+            marks = ", ".join("?" for _ in keys)
+            rows = conn.execute(
+                f"SELECT * FROM candidate_records WHERE keyword IN ({marks})", tuple(keys)
+            ).fetchall()
+    return {r["keyword"]: {"status": r["status"], "source": r["source"],
+                           "detail": r["detail"] or "", "updated_at": r["updated_at"]}
+            for r in rows}
+
+
+def record_probe_result(keyword: str, count: int) -> None:
+    """登记探测结果（UPSERT）：搜索页结果条数 + 探测时间。"""
+    key = str(keyword or "").strip()
+    if not key:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO probe_results (keyword, result_count, probed_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(keyword) DO UPDATE SET result_count=excluded.result_count,"
+            " probed_at=excluded.probed_at",
+            (key, int(count or 0), datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def load_probe_results(keywords: list[str] | None = None, ttl_days: int = 3) -> dict[str, dict]:
+    """读取保鲜期内的探测结果：{keyword: {result_count, probed_at}}。
+
+    条数是弱信号（新视频发布/平台波动都会变），过期即失效重新探测——
+    保鲜期独立于 KB_TTL_DAYS（设计规格 §4.3 规则 4）。"""
+    since = (datetime.now() - timedelta(days=max(0, int(ttl_days)))).isoformat(timespec="seconds")
+    with _conn() as conn:
+        if keywords is None:
+            rows = conn.execute(
+                "SELECT * FROM probe_results WHERE probed_at >= ?", (since,)
+            ).fetchall()
+        else:
+            keys = [str(k).strip() for k in keywords if str(k or "").strip()]
+            if not keys:
+                return {}
+            marks = ", ".join("?" for _ in keys)
+            rows = conn.execute(
+                f"SELECT * FROM probe_results WHERE keyword IN ({marks}) AND probed_at >= ?",
+                (*keys, since),
+            ).fetchall()
+    return {r["keyword"]: {"result_count": r["result_count"], "probed_at": r["probed_at"]}
+            for r in rows}
+
+
+def record_semantic_hit(query_name: str, hit_name: str | None, score: float | None,
+                        level: str, via: str, adopted: bool, note: str = "") -> None:
+    """语义命中日志（§12.3 硬性要求 3）：可观测、可回溯。
+
+    每一次向量召回/判决都留痕——命中谁、走的哪条路、相似度多少、判成哪一档。"""
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO semantic_hits (query_name, hit_name, score, level, via,"
+            " adopted, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(query_name or "").strip(), str(hit_name or "") or None,
+             float(score) if score is not None else None, str(level or ""),
+             str(via or ""), 1 if adopted else 0, str(note or ""),
+             datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def list_semantic_hits(limit: int = 50) -> list[dict]:
+    """最近的语义命中日志（排查与测试用）。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM semantic_hits ORDER BY id DESC LIMIT ?", (max(1, int(limit)),)
+        ).fetchall()
+    return [{"id": r["id"], "query_name": r["query_name"], "hit_name": r["hit_name"],
+             "score": r["score"], "level": r["level"], "via": r["via"],
+             "adopted": bool(r["adopted"]), "note": r["note"], "created_at": r["created_at"]}
+            for r in rows]
+
+
+def upsert_alias(query_name: str, canonical: str, source: str = "confirmed") -> None:
+    """写别名词典（§12.4）：query_name（归一化后）-> canonical。
+
+    source: confirmed=LLM 判决确认 / manual=人工订正。"""
+    q = normalize_keyword(query_name)
+    c = str(canonical or "").strip()
+    if not q or not c:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO alias_map (query_name, canonical, source, created_at)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(query_name) DO UPDATE SET canonical=excluded.canonical,"
+            " source=excluded.source, created_at=excluded.created_at",
+            (q, c, str(source or "confirmed"), datetime.now().isoformat(timespec="seconds")),
+        )
+
+
+def lookup_alias(query_name: str) -> str | None:
+    """查询别名词典（按归一化键）。返回规范名；无则 None。"""
+    q = normalize_keyword(query_name)
+    if not q:
+        return None
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT canonical FROM alias_map WHERE query_name = ?", (q,)
+        ).fetchone()
+    return row["canonical"] if row else None
+
+
+def delete_alias(query_name: str) -> None:
+    """删除一条别名（人工订正入口：发现判错时改这里，比调阈值可靠）。"""
+    q = normalize_keyword(query_name)
+    if not q:
+        return
+    with _conn() as conn:
+        conn.execute("DELETE FROM alias_map WHERE query_name = ?", (q,))
 
 
 def stats() -> dict:

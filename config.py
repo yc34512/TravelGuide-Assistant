@@ -108,6 +108,26 @@ SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 ASR_ENABLED = os.getenv("ASR_ENABLED", "false").lower() == "true"
 ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "small")
 
+# —— 候选漏斗：复用升级 / 搜索页探测 / 预算感知采集 / 回补（设计规格 §4）——
+# ② 复用层语义兜底：embedding 走已有 LLM 服务商的 OpenAI 兼容 /embeddings 端点。
+#    端点不可用（无 Key / 无网络 / 模型不支持）时自动跳过向量路，
+#    关键词路 + 别名词典仍可用——退化为旧行为，零回归。
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-v3")
+# ③ 探测层：搜索页结果条数预筛（不消耗 SESSION_DETAIL_BUDGET——该预算只计详情页导航）
+PROBE_ENABLED = os.getenv("PROBE_ENABLED", "true").lower() == "true"
+PROBE_SCROLLS = int(os.getenv("PROBE_SCROLLS", "2"))           # 每候选滚动轮数（探测要便宜，少滚动）
+PROBE_MIN_RESULTS = int(os.getenv("PROBE_MIN_RESULTS", "1"))   # 低于该条数 → dropped_probe（先只淘汰"搜不到"）
+PROBE_TTL_DAYS = int(os.getenv("PROBE_TTL_DAYS", "3"))         # 条数是弱信号：短保鲜，过期重新探测
+# ④ 采集层达标条件（多条件，缺一不可，设计规格 D7）：
+#    总 keep 数 ≥ pipeline.candidates.KEEP_MIN(8) 且 景点类 ≥ 4（行程骨架）且 美食类 > 0（午晚餐刚需）
+COLLECT_KEEP_SPOTS_MIN = int(os.getenv("COLLECT_KEEP_SPOTS_MIN", "4"))
+# ⑤ 回补层：情况 B（回生成层补候选）的轮次上限——不得无界循环，到顶如实进 unresolved
+FILLBACK_ROUNDS_MAX = int(os.getenv("FILLBACK_ROUNDS_MAX", "1"))
+# §13 文本检索（RAG）：档案按要点/评论条目切块入库，追问时按问题检索 Top-K 片段。
+# 与 §12 的实体索引分开（"entity" / "corpus" 两个 collection，不得混在一个索引里）。
+RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "6"))
+
 # —— 高德地图（行程规划师用：POI 定位 + 通行时间，"顺路"排线的真保障）——
 # 个人开发者免费额度每日 5000 次；留空则行程规划降级为纯 LLM 按区域排线（可用但精度弱）
 AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")

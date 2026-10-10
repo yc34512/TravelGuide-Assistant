@@ -1228,7 +1228,7 @@ class TestCrawlSpeedUp(unittest.TestCase):
 
 class TestMcpAndOpenapi(unittest.TestCase):
     def test_mcp_tools_registered(self):
-        """MCP 服务器注册了全套 10 个工具；plan_trip 参数面与 /api/trip 对齐（防再次漂移）。"""
+        """MCP 服务器注册了全套 11 个工具（含知识库检索）；plan_trip 参数面与 /api/trip 对齐（防漂移）。"""
         import asyncio
 
         import mcp_server
@@ -1239,7 +1239,7 @@ class TestMcpAndOpenapi(unittest.TestCase):
             names,
             {"check_service", "start_research", "plan_trip", "get_job_status",
              "cancel_research", "list_reports", "get_report_content",
-             "get_city_heat", "refresh_city_heat", "open_ui"},
+             "get_city_heat", "refresh_city_heat", "open_ui", "search_knowledge"},
         )
         # 预算已退役不得回潮；start_date 与 api_server.TripIn 对齐（闭馆日校验）
         trip_tool = next(t for t in tools if t.name == "plan_trip")
@@ -5039,6 +5039,753 @@ class TestFactsCutoff(unittest.TestCase):
     def test_blank_entries_ignored(self):
         from service.trip import _earliest_data_date
         self.assertEqual(_earliest_data_date({"A": "", "B": "2026-09-12"}, "x"), "2026-09-12")
+
+
+class TestEntityMatch(unittest.TestCase):
+    """§12 实体匹配层：关键词路主力 + 别名词典 + 向量召回/批量判决 + 降级链。"""
+
+    def setUp(self):
+        import tempfile as _tf
+
+        from core import embeddings, entity_match, knowledge
+        self._orig_db = knowledge._DB_PATH
+        knowledge._DB_PATH = Path(_tf.mkdtemp()) / "em.db"
+        self._raw_dir = Path(_tf.mkdtemp())
+        embeddings.reset_embedder()
+        # 离线铁律：默认注入"降级 embedder"（等价于无 embedding/无网络），
+        # 需要的用例再用 _inject_vec 覆盖——绝不能走真实端点（本机可能真配着 key）。
+        embeddings.set_embedder(lambda texts: None)
+        entity_match.reset_index_state()
+
+    def tearDown(self):
+        from core import embeddings, entity_match, knowledge
+        knowledge._DB_PATH = self._orig_db
+        embeddings.reset_embedder()
+        entity_match.reset_index_state()
+
+    # —— 夹具 ——
+    _VEC = {
+        "故宫": [1.0, 0.0, 0.05],
+        "紫禁城": [0.98, 0.04, 0.05],
+        "宽窄巷子": [0.0, 1.0, 0.05],
+        "锦里": [0.04, 0.98, 0.05],
+    }
+
+    def _inject_vec(self):
+        from core import embeddings
+
+        def _fake(texts):
+            return [list(self._VEC.get(str(t).strip(), [0.0, 0.0, 1.0])) for t in texts]
+
+        embeddings.set_embedder(_fake)
+
+    def _record(self, name, video_count=5):
+        from core import knowledge
+        f = self._raw_dir / f"{name}.json"
+        f.write_text("[]", encoding="utf-8")
+        knowledge.record_crawl(name, str(f), video_count, 10)
+
+    def _expire(self, name):
+        from datetime import datetime, timedelta
+
+        from core import knowledge
+        old = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
+        with knowledge._conn() as conn:
+            conn.execute("UPDATE spot_cache SET crawled_at = ? WHERE keyword = ?", (old, name))
+
+    def test_keyword_exact_and_prefix_hit(self):
+        """关键词路是主力：精确命中与前缀回退都判"高"（沿用 find_fresh，零回归）。
+
+        前缀回退受既有 ≥3 字阈值保护：2 字查询（如"故宫"）不走前缀，
+        由 §12.7 的向量兜底路径接上——此处如实断言现状行为。"""
+        from core import entity_match, knowledge
+        self._record("故宫博物院")
+        r = entity_match.resolve_prior_record("故宫博物院", 7)
+        self.assertEqual(r["level"], "高")
+        self.assertEqual(r["via"], "exact")
+        # 前缀回退：4 字查询命中变体名（备案 §12.7 第二行）
+        self._record("四季民福烤鸭店")
+        r2 = entity_match.resolve_prior_record("四季民福", 7)
+        self.assertEqual(r2["level"], "高")
+        self.assertIsNotNone(r2["record"])
+        self.assertEqual(r2["record"]["keyword"], "四季民福烤鸭店")
+        # 对照：2 字查询不触发前缀回退（既有阈值保护，不误配）
+        self.assertIsNone(knowledge.find_fresh("故宫", 7))
+
+    def test_expired_hit_goes_to_collect_queue(self):
+        """命中但过期：判"高"但 record 为空（调用方据此进采集队列，§4.2 动作表）。"""
+        from core import entity_match
+        self._record("故宫")
+        self._expire("故宫")
+        r = entity_match.resolve_prior_record("故宫", 7)
+        self.assertEqual(r["level"], "高")
+        self.assertIsNone(r["record"])
+        self.assertTrue(r["expired"])
+
+    def test_alias_dict_hit_without_llm(self):
+        """别名词典命中：不再调 LLM（§12.4 判决结果的缓存）。"""
+        from unittest import mock
+
+        from core import entity_match, knowledge
+        self._record("故宫")
+        knowledge.upsert_alias("紫禁城", "故宫", "manual")
+        with mock.patch.object(entity_match, "chat_json",
+                               side_effect=AssertionError("词典命中不应调 LLM")):
+            r = entity_match.resolve_prior_record("紫禁城", 7)
+        self.assertEqual(r["level"], "高")
+        self.assertEqual(r["via"], "alias")
+        self.assertIsNotNone(r["record"])
+
+    def test_vector_recall_confirm_yes_writes_alias(self):
+        """紫禁城 -> 故宫（词典为空）：向量召回 -> LLM 判"是" -> 采用 + 写词典。"""
+        from unittest import mock
+
+        from core import entity_match, knowledge
+        self._inject_vec()
+        self._record("故宫")
+
+        def _yes(system, user, **kw):
+            results = []
+            for line in str(user).splitlines():
+                import re as _re
+                m = _re.search(r'q="(.+?)"，c="(.+?)"', line)
+                if m:
+                    results.append({"q": m.group(1), "c": m.group(2),
+                                    "same": "yes" if (m.group(1), m.group(2)) == ("紫禁城", "故宫")
+                                    else "no", "reason": "夹具"})
+            return {"results": results}
+
+        with mock.patch.object(entity_match, "chat_json", _yes):
+            r = entity_match.resolve_prior_record("紫禁城", 7)
+        self.assertEqual(r["level"], "高")
+        self.assertEqual(r["via"], "vector")
+        self.assertIsNotNone(r["record"])          # 采用历史记录
+        self.assertEqual(knowledge.lookup_alias("紫禁城"), "故宫")   # 写词典
+        hits = knowledge.list_semantic_hits()
+        self.assertTrue(any(h["query_name"] == "紫禁城" and h["adopted"] for h in hits))
+
+    def test_vector_recall_confirm_no_not_adopted(self):
+        """宽窄巷子 -> 锦里：向量召回但判"否" -> 不采用（误命中是事故，§12.1）。"""
+        from unittest import mock
+
+        from core import entity_match, knowledge
+        self._inject_vec()
+        self._record("锦里")
+
+        def _no(system, user, **kw):
+            import re as _re
+            results = []
+            for line in str(user).splitlines():
+                m = _re.search(r'q="(.+?)"，c="(.+?)"', line)
+                if m:
+                    results.append({"q": m.group(1), "c": m.group(2), "same": "no",
+                                    "reason": "相邻但不同"})
+            return {"results": results}
+
+        with mock.patch.object(entity_match, "chat_json", _no):
+            r = entity_match.resolve_prior_record("宽窄巷子", 7)
+        self.assertNotEqual(r["level"], "高")
+        self.assertIsNone(r["record"])
+        self.assertIsNone(knowledge.lookup_alias("宽窄巷子"))
+
+    def test_vector_unsure_is_suspect_level(self):
+        """判不准 -> 中档（疑似命中），不采用、可回溯（§4.2 中档绝不自动替换）。"""
+        from unittest import mock
+
+        from core import entity_match
+        self._inject_vec()
+        self._record("故宫")
+
+        with mock.patch.object(entity_match, "chat_json",
+                               return_value={"results": [{"q": "紫禁城", "c": "故宫",
+                                                          "same": "unsure", "reason": "拿不准"}]}):
+            r = entity_match.resolve_prior_record("紫禁城", 7)
+        self.assertEqual(r["level"], "中")
+        self.assertIsNone(r["record"])
+        self.assertIn("疑似", r["detail"])
+
+    def test_llm_failure_degrades_to_suspect(self):
+        """判决 LLM 不可用：不崩、判中档（不采用）——绝不能因增强层失败毁掉主流程。"""
+        from unittest import mock
+
+        from core import entity_match
+        self._inject_vec()
+        self._record("故宫")
+        with mock.patch.object(entity_match, "chat_json", side_effect=RuntimeError("LLM 挂了")):
+            r = entity_match.resolve_prior_record("紫禁城", 7)
+        self.assertEqual(r["level"], "中")
+        self.assertIsNone(r["record"])
+
+    def test_empty_library_no_hit(self):
+        """空库未命中（备案 §12.7 最后一行）。"""
+        from core import entity_match
+        self._inject_vec()
+        r = entity_match.resolve_prior_record("任意冷门点", 7)
+        self.assertEqual(r["level"], "低")
+        self.assertIsNone(r["record"])
+
+    def test_no_embedding_keyword_still_works(self):
+        """降级链第 2 档：无 embedding 时跳过向量路，关键词路 + 词典仍生效（零回归）。"""
+        from core import entity_match
+        self._record("故宫")
+        r = entity_match.resolve_prior_record("故宫", 7)      # 关键词路命中
+        self.assertEqual(r["level"], "高")
+        r2 = entity_match.resolve_prior_record("紫禁城", 7)    # 向量路被跳过（默认注入为降级）
+        self.assertEqual(r2["level"], "低")
+        self.assertIn("embedding", r2["detail"])
+
+    def test_register_and_backfill_write_rules(self):
+        """D4 写入时机：regisster 只由采集成功后调用；回填只吃 video_count>0 的记录。"""
+        from core import entity_match, knowledge, vector_store
+        self._inject_vec()
+        self._record("故宫", video_count=5)
+        self._record("空采点", video_count=0)
+        n = entity_match.ensure_entity_index(force=True)
+        self.assertGreaterEqual(n, 1)
+        keys = vector_store.keys(entity_match.ENTITY_COLLECTION)
+        self.assertIn(knowledge.normalize_keyword("故宫"), keys)
+        self.assertNotIn(knowledge.normalize_keyword("空采点"), keys)
+        # 显式登记（采集通过后的写入路径）
+        ok = entity_match.register_entity("新验证点")
+        self.assertTrue(ok)
+        self.assertIn(knowledge.normalize_keyword("新验证点"),
+                      vector_store.keys(entity_match.ENTITY_COLLECTION))
+
+
+class TestCandidateStatusMachine(unittest.TestCase):
+    """D9 状态机：五种状态严格区分（混淆即缓存投毒）；探测结果短保鲜。"""
+
+    def setUp(self):
+        import tempfile as _tf
+
+        from core import knowledge
+        self._orig_db = knowledge._DB_PATH
+        knowledge._DB_PATH = Path(_tf.mkdtemp()) / "st.db"
+
+    def tearDown(self):
+        from core import knowledge
+        knowledge._DB_PATH = self._orig_db
+
+    def test_status_roundtrip_and_upsert(self):
+        from core import knowledge
+        knowledge.record_candidate_status("甲", knowledge.ST_SKIPPED_BUDGET, detail="预算尽")
+        knowledge.record_candidate_status("乙", knowledge.ST_CRAWLED_OK, detail="5 条视频")
+        rec = knowledge.load_candidate_statuses(["甲", "乙"])
+        self.assertEqual(rec["甲"]["status"], knowledge.ST_SKIPPED_BUDGET)
+        self.assertEqual(rec["乙"]["status"], knowledge.ST_CRAWLED_OK)
+        # UPSERT：同一点位再登记以最新为准
+        knowledge.record_candidate_status("甲", knowledge.ST_CRAWLED_OK, detail="补采成功")
+        rec2 = knowledge.load_candidate_statuses(["甲"])
+        self.assertEqual(rec2["甲"]["status"], knowledge.ST_CRAWLED_OK)
+
+    def test_five_states_are_distinct(self):
+        from core import knowledge
+        for i, st in enumerate((knowledge.ST_REUSED, knowledge.ST_CRAWLED_OK,
+                                knowledge.ST_CRAWLED_EMPTY, knowledge.ST_SKIPPED_BUDGET,
+                                knowledge.ST_DROPPED_PROBE)):
+            knowledge.record_candidate_status(f"点{i}", st)
+        rec = knowledge.load_candidate_statuses()
+        self.assertEqual(len({v["status"] for v in rec.values()}), 5)
+
+    def test_probe_freshness_window(self):
+        """条数是弱信号：保鲜期内命中，过期即失效重新探测（§4.3 规则 4）。"""
+        from datetime import datetime, timedelta
+
+        from core import knowledge
+        knowledge.record_probe_result("甲", 12)
+        got = knowledge.load_probe_results(["甲"], ttl_days=3)
+        self.assertEqual(got["甲"]["result_count"], 12)
+        old = (datetime.now() - timedelta(days=4)).isoformat(timespec="seconds")
+        with knowledge._conn() as conn:
+            conn.execute("UPDATE probe_results SET probed_at = ? WHERE keyword = '甲'", (old,))
+        self.assertEqual(knowledge.load_probe_results(["甲"], ttl_days=3), {})
+
+
+class TestFunnelPure(unittest.TestCase):
+    """漏斗纯逻辑（§4.3~§4.5）：排序 / 淘汰 / 达标 / 回补名单。全离线、无 LLM。"""
+
+    def test_rank_draft_then_count_then_category(self):
+        from pipeline.funnel import rank_collect_queue
+        cands = [{"name": "甲", "category": "美食"}, {"name": "乙", "category": "景点"},
+                 {"name": "丙", "category": "景点"}, {"name": "丁", "category": "购物"}]
+        ranked = rank_collect_queue(cands, ["丁"], {"甲": 9, "乙": 2, "丙": 5})
+        self.assertEqual([c["name"] for c in ranked], ["丁", "甲", "丙", "乙"])
+
+    def test_rank_without_counts_falls_to_category(self):
+        from pipeline.funnel import rank_collect_queue
+        cands = [{"name": "甲", "category": "美食"}, {"name": "乙", "category": "景点"},
+                 {"name": "丁", "category": "购物"}]
+        ranked = rank_collect_queue(cands, [], None)
+        # 无条数证据时按类别权重：景点 > 美食 > 购物；未探测排在有结果之后
+        self.assertEqual([c["name"] for c in ranked], ["乙", "甲", "丁"])
+
+    def test_probe_drop_rules(self):
+        from pipeline.funnel import probe_drop
+        self.assertTrue(probe_drop("x", 0, min_results=1))            # 搜不到 -> 淘汰
+        self.assertFalse(probe_drop("x", 3, min_results=1))           # 有结果 -> 不淘汰
+        self.assertFalse(probe_drop("x", None))                        # 未探测 -> 不淘汰
+        self.assertFalse(probe_drop("x", 0, min_results=1, user_specified=True))  # D6 保底
+
+    def test_order_names_by_probe(self):
+        from pipeline.funnel import order_names_by_probe
+        out = order_names_by_probe(["a", "b", "c"], {"a": 3, "c": 9})
+        self.assertEqual(out, ["c", "a", "b"])
+
+    def test_cheap_keep_rule(self):
+        """D8 便宜规则：positive>0 且营销号占比 ≤ 0.5（与保守兜底同口径）。"""
+        from pipeline.funnel import cheap_keep
+        self.assertTrue(cheap_keep({"positive": 1, "videos": 2, "marketing_hits": 1}))
+        self.assertFalse(cheap_keep({"positive": 1, "videos": 2, "marketing_hits": 2}))
+        self.assertFalse(cheap_keep({"positive": 0, "videos": 3, "marketing_hits": 0}))
+        self.assertFalse(cheap_keep({}))
+
+    def test_evaluate_target_multi_condition(self):
+        """D7 多条件：总数 + 景点骨架 + 美食不空，缺一不可。"""
+        from pipeline.funnel import evaluate_target
+        t = evaluate_target({})
+        self.assertFalse(t["met"])
+        self.assertIn("总数", t["missing"])
+        self.assertIn("景点", t["missing"])
+        self.assertIn("美食", t["missing"])
+        self.assertTrue(evaluate_target({"景点": 4, "美食": 1, "体验": 3})["met"])
+        t2 = evaluate_target({"景点": 3, "美食": 5})     # 总数够但骨架不足
+        self.assertFalse(t2["met"])
+        self.assertIn("景点", t2["missing"])
+        t3 = evaluate_target({"景点": 4, "体验": 4})     # 总数够但美食为空
+        self.assertFalse(t3["met"])
+        self.assertIn("美食", t3["missing"])
+
+    def test_fillback_exclusions_and_resume(self):
+        """D11 排除清单 = 已处理过的（crawled_ok/crawled_empty/dropped_probe）；skipped 走续采。"""
+        from core import knowledge
+        from pipeline.funnel import (fillback_exclusions, is_all_processed,
+                                     pending_resume, status_summary)
+        rec = {
+            "甲": {"status": knowledge.ST_CRAWLED_OK},
+            "乙": {"status": knowledge.ST_CRAWLED_EMPTY},
+            "丙": {"status": knowledge.ST_DROPPED_PROBE},
+            "丁": {"status": knowledge.ST_SKIPPED_BUDGET},
+            "戊": {"status": knowledge.ST_REUSED},
+        }
+        self.assertEqual(sorted(fillback_exclusions(rec)), ["丙", "乙", "甲"])
+        self.assertEqual(pending_resume(rec), ["丁"])
+        # "全部处理完"= 名单内没有一个处于 skipped_budget/未登记
+        self.assertTrue(is_all_processed(rec, ["甲", "乙", "丙", "戊"]))
+        self.assertFalse(is_all_processed(rec, ["甲", "丁"]))    # skipped 不算处理完
+        self.assertFalse(is_all_processed(rec, ["甲", "未登记点"]))
+        s = status_summary(rec)
+        self.assertIn("采集成功 1", s)
+        self.assertIn("探测淘汰 1", s)
+
+
+class TestCandidateFunnelE2E(unittest.TestCase):
+    """四层漏斗端到端（离线）：达标即退 / 预算熔断 / 探测淘汰排序 / 回补两种情况。"""
+
+    def setUp(self):
+        import tempfile as _tf
+        from unittest import mock
+
+        from core import embeddings, entity_match, knowledge
+        from crawler import base as cbase
+        self._orig_db = knowledge._DB_PATH
+        knowledge._DB_PATH = Path(_tf.mkdtemp()) / "fn.db"
+        entity_match.reset_index_state()
+        embeddings.reset_embedder()
+        embeddings.set_embedder(lambda texts: None)   # 向量路不可用：不触发判决 LLM
+        cbase.reset_session()
+        self._mock = mock
+        self._patchers = []
+
+    def tearDown(self):
+        from core import embeddings, entity_match, knowledge
+        from crawler import base as cbase
+        for p in self._patchers:
+            p.stop()
+        knowledge._DB_PATH = self._orig_db
+        embeddings.reset_embedder()
+        entity_match.reset_index_state()
+        cbase.reset_session()
+
+    def _patch(self, target, new=None, **kw):
+        if new is not None and not kw:
+            p = self._mock.patch.object(target[0], target[1], new)
+        else:
+            p = self._mock.patch.object(target[0], target[1], **kw)
+        self._patchers.append(p)
+        return p.start()
+
+    def _run(self, cands, counts, crawl_ok, keeps, gen=None, verify_calls=None):
+        from service import trip as trip_mod
+        from service import research as res_mod
+        crawled = []
+
+        def fake_probe(names, job_id, log):
+            return dict(counts)
+
+        def fake_crawl(name, job_id, log, **_kw):
+            crawled.append(name)
+            if crawl_ok(name):
+                import types
+                return [types.SimpleNamespace(comments=[], url=f"https://v/{name}",
+                                              description=f"{name}描述")]
+            return []
+
+        def fake_extract(name, items, log):
+            if keeps(name):
+                return ([{"stance": "推荐", "quote": f"{name}很好"}],
+                        {"videos": 1, "marketing_hits": 0, "positive": 1, "negative": 0,
+                         "sample_quotes": [f"{name}很好"]})
+            return ([], {"videos": 0, "marketing_hits": 0, "positive": 0, "negative": 0,
+                         "sample_quotes": []})
+
+        def fake_verify(cands_list, vstats):
+            if verify_calls is not None:
+                verify_calls.append(len(cands_list))
+            return [{"name": c["name"],
+                     "verdict": "keep" if keeps(c["name"]) else "drop",
+                     "evidence": "中", "pitfall_risk": "中", "reason": "夹具"} for c in cands_list]
+
+        self._patch((trip_mod, "douyin_enabled"), return_value=True)
+        self._patch((trip_mod, "PROBE_ENABLED"), True)
+        self._patch((trip_mod, "_probe_with_cache"), side_effect=fake_probe)
+        self._patch((trip_mod, "_try_crawl"), side_effect=fake_crawl)
+        self._patch((trip_mod, "_extract_and_stat"), side_effect=fake_extract)
+        self._patch((trip_mod, "save_raw"), return_value=str(Path(self._orig_db).parent / "x.json"))
+        self._patch((trip_mod, "verify_candidates"), side_effect=fake_verify)
+        # 回补生成一律打桩（默认不给新候选）——离线套件绝不调真实 LLM
+        self._patch((trip_mod, "generate_candidates"), side_effect=(gen or (lambda *a, **k: [])))
+        logs = []
+        bundle = trip_mod._run_candidate_funnel(
+            city="测试城", days=2, preferences="", guide={}, draft_plan={}, draft_names=[],
+            cands=cands, job_id=None, log=logs.append, cancelled=lambda: False)
+        return bundle, crawled, logs
+
+    @staticmethod
+    def _mk(names_cats):
+        return [{"name": n, "category": c, "reason": ""} for n, c in names_cats]
+
+    def test_target_met_stops_early(self):
+        """达标即退（§4.4）：凑满总数 8 + 景点 4 + 美食 1 即停，剩余候选不再采集。"""
+        from core import knowledge
+        cands = self._mk([("A1", "景点"), ("A2", "景点"), ("A3", "景点"), ("A4", "景点"),
+                          ("A5", "景点"), ("B1", "美食"), ("B2", "美食"), ("C1", "体验"),
+                          ("C2", "体验")])
+        counts = {c["name"]: 5 for c in cands}
+        verify_calls = []
+        bundle, crawled, logs = self._run(
+            cands, counts, crawl_ok=lambda n: True, keeps=lambda n: True,
+            verify_calls=verify_calls)
+        self.assertTrue(bundle["funnel"]["target"]["met"])
+        # A1..A5(5) + B1(6) + B2(7) + C1(8) 达标即退 -> C2 不再采
+        self.assertEqual(len(crawled), 8)
+        self.assertNotIn("C2", crawled)
+        # D8：完整交叉验证只触发一次
+        self.assertEqual(len(verify_calls), 1)
+        self.assertEqual(len(bundle["kept"]), 8)
+        self.assertTrue(any("达标即退" in x for x in logs))
+
+    def test_budget_stop_marks_skipped(self):
+        """预算/风控熔断（§2 缺口修复）：未采候选标 skipped_budget，绝不当"处理过了"。"""
+        from core import knowledge
+        from crawler import base as cbase
+        cands = self._mk([("A1", "景点"), ("A2", "景点"), ("A3", "景点")])
+        self._patch((cbase, "session_stopped"), return_value=True)
+        bundle, crawled, logs = self._run(
+            cands, {c["name"]: 3 for c in cands}, crawl_ok=lambda n: True, keeps=lambda n: True)
+        self.assertEqual(crawled, [])          # 一条都不采（预检直接熔断）
+        rec = knowledge.load_candidate_statuses()
+        self.assertEqual({v["status"] for v in rec.values()}, {knowledge.ST_SKIPPED_BUDGET})
+        self.assertTrue(any("情况 A" in x for x in logs))
+        self.assertTrue(any("未采集" in x for x in bundle["unresolved"]))
+
+    def test_probe_drop_and_count_order(self):
+        """探测层：0 条淘汰不进深采；有内容的按条数降序先采（§4.3/§4.4）。"""
+        from core import knowledge
+        cands = self._mk([("X", "景点"), ("Y", "景点"), ("Z", "景点")])
+        bundle, crawled, logs = self._run(
+            cands, {"X": 0, "Y": 9, "Z": 3}, crawl_ok=lambda n: True, keeps=lambda n: True)
+        self.assertNotIn("X", crawled)
+        self.assertEqual(crawled[0], "Y")      # 条数高者先采
+        rec = knowledge.load_candidate_statuses()
+        self.assertEqual(rec["X"]["status"], knowledge.ST_DROPPED_PROBE)
+        self.assertTrue(any("探测淘汰" in x for x in logs))
+
+    def test_reuse_path_skips_crawl(self):
+        """复用层：命中新鲜缓存 -> reused（不发采集）且不消耗预算；提取照常。"""
+        from core import entity_match, knowledge
+        cants = self._mk([("甲", "景点"), ("乙", "景点")])
+        raw = Path(self._orig_db).parent / "cached.json"
+        raw.write_text("[]", encoding="utf-8")
+
+        def fake_resolve(names, ttl):
+            return {n: ({"record": {"raw_path": str(raw), "keyword": n},
+                         "level": "高", "via": "exact", "hit_name": n, "score": None,
+                         "expired": False, "detail": "关键词路命中"}
+                        if n == "甲" else
+                        {"record": None, "level": "低", "via": "none", "hit_name": None,
+                         "score": None, "expired": False, "detail": "未命中"})
+                    for n in names}
+
+        self._patch((entity_match, "resolve_prior_records"), side_effect=fake_resolve)
+        bundle, crawled, logs = self._run(
+            cants, {"甲": 9, "乙": 3}, crawl_ok=lambda n: True, keeps=lambda n: True)
+        self.assertEqual(crawled, ["乙"])      # 甲走缓存，不发采集
+        rec = knowledge.load_candidate_statuses()
+        self.assertEqual(rec["甲"]["status"], knowledge.ST_REUSED)
+
+    def test_fillback_situation_b_with_exclusions(self):
+        """情况 B（§4.5）：候选池处理完仍不达标 -> 带排除清单回生成层，轮次有上限。"""
+        from core import knowledge
+        cands = self._mk([("甲", "景点"), ("乙", "美食")])
+        gen_calls = []
+
+        def fake_gen(city, days, prefs, *, guide_evidence=None, draft_plan=None,
+                     exclude_names=None):
+            gen_calls.append(list(exclude_names or []))
+            if len(gen_calls) == 1:
+                return [{"name": "丙", "category": "景点", "reason": ""}]
+            return []   # 第二轮不再给新点（轮次上限内的收敛）
+
+        bundle, crawled, logs = self._run(
+            cands, {c["name"]: 1 for c in cands},
+            crawl_ok=lambda n: False,               # 采不到内容 -> 不达标
+            keeps=lambda n: False, gen=fake_gen)
+        self.assertEqual(len(gen_calls), 1)         # FILLBACK_ROUNDS_MAX=1
+        # 排除清单必须包含第一轮两个候选（D11：否则 LLM 重复生成同批点位）
+        self.assertIn("甲", gen_calls[0])
+        self.assertIn("乙", gen_calls[0])
+        self.assertIn("丙", crawled)                # 新候选进了第二轮采集
+        rec = knowledge.load_candidate_statuses(["甲", "乙"])
+        self.assertEqual(rec["甲"]["status"], knowledge.ST_CRAWLED_EMPTY)
+        self.assertTrue(any("情况 B" in x for x in logs))
+        self.assertTrue(any("未达采集目标" in x for x in bundle["unresolved"]))
+
+
+class TestGenerateCandidatesExclude(unittest.TestCase):
+    """D11：回补生成必须把"已处理名单"写进提示词，并在输出端兜底过滤。"""
+
+    def test_exclusions_in_prompt_and_filtered(self):
+        from unittest import mock
+
+        from pipeline import candidates as C
+        captured = {}
+
+        def fake_chat(system, user, **kw):
+            captured["user"] = user
+            return {"candidates": [{"name": "甲", "category": "景点"},
+                                   {"name": "乙", "category": "美食"}]}
+
+        with mock.patch.object(C, "chat_json", fake_chat):
+            out = C.generate_candidates("某城", 2, "", exclude_names=["乙"])
+        self.assertIn("不要再出现", captured["user"])
+        self.assertIn("乙", captured["user"])
+        self.assertEqual([c["name"] for c in out], ["甲"])
+
+
+class TestRagCorpus(unittest.TestCase):
+    """§13 文本检索：切块（按条目、不按字数）/ 入库 / Top-K / 降级链 / 追问接入。"""
+
+    def setUp(self):
+        import tempfile as _tf
+
+        from core import embeddings, knowledge
+        self._orig_db = knowledge._DB_PATH
+        knowledge._DB_PATH = Path(_tf.mkdtemp()) / "rag.db"
+        embeddings.reset_embedder()
+        # 离线铁律：默认注入降级 embedder（等价无 embedding/无网络）；_inject_sem 覆盖。
+        embeddings.set_embedder(lambda texts: None)
+
+    def tearDown(self):
+        from core import embeddings, knowledge
+        knowledge._DB_PATH = self._orig_db
+        embeddings.reset_embedder()
+
+    @staticmethod
+    def _tp():
+        return {
+            "meta": {"city": "成都", "days": 2, "stay": "春熙路", "generated_at": "2026-10-01T10:00:00"},
+            "snap": {
+                "profiles": {"武侯祠": {"highlights": ["红墙竹影出片率高"], "avoid": [],
+                                        "food": [], "photo_spots": [], "tips": "None",
+                                        "duration_hours": "None", "best_time_slot": "上午"}},
+                "foods": {"钟水饺": {"highlights": ["甜水面必点"], "avoid": []}},
+                "digests": {"武侯祠": {"verdict": "整体推荐", "positive": "红墙好看",
+                                       "negative": "", "quotes": ["锦里夜宵也不错"]}},
+                "pitfall": [{"claim": "周末排队久", "quote": "周末排队一小时"}],
+            },
+            "catalog": {"poi": {"武侯祠": {"summary": "附近有地铁武侯祠站", "ticket_price": None,
+                                           "ticket_nature": "待核实"}},
+                        "food": {}},
+            "itinerary": [{"day": 1, "blocks": [{"slot": "上午", "spot": "武侯祠",
+                                                 "reasons": "和锦里连着逛最顺路"}]}],
+        }
+
+    def _inject_sem(self):
+        """语义夹具：文本按关键词映射到正交向量（离线、确定性）。"""
+        from core import embeddings
+
+        def _fake(texts):
+            out = []
+            for t in texts:
+                if "武侯祠" in t:
+                    out.append([1.0, 0.0, 0.0])
+                elif "钟水饺" in t or "甜水面" in t:
+                    out.append([0.0, 1.0, 0.0])
+                else:
+                    out.append([0.0, 0.0, 1.0])
+            return out
+
+        embeddings.set_embedder(_fake)
+
+    def test_chunks_are_entry_based(self):
+        """切块按要点/评论条目、不按字数：条目完整、字符串化空值被清洗。"""
+        from core import rag
+        chunks = rag.chunks_from_trip_plan(self._tp(), "行程_测试.md")
+        texts = [c["text"] for c in chunks]
+        self.assertIn("武侯祠·亮点：红墙竹影出片率高", texts)
+        self.assertIn("武侯祠·真实评价：整体推荐", texts)
+        self.assertIn("武侯祠·评论原话：锦里夜宵也不错", texts)
+        self.assertIn("武侯祠·官方信息：附近有地铁武侯祠站；票价待核实", texts)
+        self.assertIn("武侯祠·排线理由：和锦里连着逛最顺路", texts)
+        self.assertIn("避坑：周末排队久；评论原话：周末排队一小时", texts)
+        self.assertTrue(all("None" not in t for t in texts))
+        self.assertTrue(all(c["meta"]["city"] == "成都" for c in chunks))
+
+    def test_index_search_roundtrip(self):
+        from core import rag
+        self._inject_sem()
+        result = {"report_name": "行程_成都_测试.md", "trip_plan": self._tp()}
+        n = rag.index_result(result)
+        self.assertGreater(n, 5)
+        self.assertEqual(rag.index_result(result), 0)   # 幂等：不重复入库
+        hits = rag.search("武侯祠有什么亮点", top_k=3)
+        self.assertTrue(hits)
+        self.assertIn("武侯祠", hits[0]["text"])
+
+    def test_context_for_question_and_degrade(self):
+        from core import rag
+        result = {"report_name": "行程_成都_测试.md", "trip_plan": self._tp()}
+        # 无 embedding：返回 None（调用方退回压缩档案，零回归）
+        self.assertIsNone(rag.context_for_question(result, "武侯祠怎么样"))
+        self.assertEqual(rag.search("武侯祠"), [])
+        # 有 embedding：骨架 + 检索片段
+        self._inject_sem()
+        ctx = rag.context_for_question(result, "武侯祠的亮点是什么")
+        self.assertIsNotNone(ctx)
+        self.assertIn("行程骨架", ctx)
+        self.assertIn("第1天", ctx)
+        self.assertIn("检索片段", ctx)
+        self.assertIn("武侯祠", ctx)
+
+    def test_city_guide_index_rebuilds(self):
+        from core import rag, vector_store
+        self._inject_sem()
+        guide = {"guide_candidates": [{"name": "宽窄巷子", "category": "景点", "heat": "高",
+                                       "note": "晚上逛"}],
+                 "plan_hints": ["第一天先逛宽窄巷子再去人民公园"], "stay_advice": "春熙路"}
+        n1 = rag.index_city_guide("成都", guide)
+        self.assertGreaterEqual(n1, 3)
+        n2 = rag.index_city_guide("成都", {**guide, "plan_hints": ["只保留一条新建议"]})
+        # 重建：同一命名空间先删后写，旧片段不残留
+        keys = [k for k in vector_store.keys(rag.CORPUS_COLLECTION) if k.startswith("cityguide:成都|")]
+        self.assertEqual(len(keys), n2)
+
+    def test_ask_retrieval_preferred_with_fallback(self):
+        """追问接入：检索可用走片段路径（含待确认清单），不可用退回压缩档案（零回归）。"""
+        from unittest import mock
+
+        from core import rag
+        from pipeline import ask as ask_mod
+        result = {"report_name": "行程_成都_测试.md", "trip_plan": self._tp(),
+                  "markdown": "# 行程全文占位"}
+        captured = {}
+
+        def fake_chat(system, user, temperature=0.3):
+            captured["user"] = user
+            return "好"
+
+        # 无检索：走压缩档案路径（trip_plan 结构化摘要）
+        with mock.patch.object(ask_mod, "chat_text", fake_chat):
+            ask_mod.answer(result, "武侯祠怎么样")
+        self.assertIn("报告档案", captured["user"])
+        self.assertNotIn("检索片段", captured["user"])
+        # 有检索：走片段路径
+        self._inject_sem()
+        rag.index_result(result)
+        with mock.patch.object(ask_mod, "chat_text", fake_chat):
+            ask_mod.answer(result, "武侯祠的亮点是什么")
+        self.assertIn("检索片段", captured["user"])
+        self.assertIn("行程骨架", captured["user"])
+
+
+class TestEmbeddingsAndVectorStore(unittest.TestCase):
+    """基础组件：embedding 缓存/降级、向量入库/检索/前缀工具。"""
+
+    def setUp(self):
+        import tempfile as _tf
+
+        from core import embeddings, knowledge
+        self._orig_db = knowledge._DB_PATH
+        knowledge._DB_PATH = Path(_tf.mkdtemp()) / "vs.db"
+        embeddings.reset_embedder()
+
+    def tearDown(self):
+        from core import embeddings, knowledge
+        knowledge._DB_PATH = self._orig_db
+        embeddings.reset_embedder()
+
+    def test_embed_cache_and_batch_dedup(self):
+        from core import embeddings
+        calls = []
+
+        def _fake(texts):
+            calls.append(list(texts))
+            return [[float(len(t)), 0.0] for t in texts]
+
+        embeddings.set_embedder(_fake)
+        v1 = embeddings.embed_texts(["甲甲", "甲甲", "乙"])
+        self.assertEqual(len(v1), 3)
+        self.assertEqual(calls, [["甲甲", "乙"]])          # 去重后只请求一次
+        v2 = embeddings.embed_texts(["甲甲"])               # 命中缓存不再请求
+        self.assertEqual(calls, [["甲甲", "乙"]])
+        self.assertEqual(v1[0], v2[0])
+
+    def test_embed_failure_returns_none(self):
+        from core import embeddings
+
+        def _boom(texts):
+            raise RuntimeError("端点不可用")
+
+        embeddings.set_embedder(_boom)
+        self.assertIsNone(embeddings.embed_texts(["甲"]))
+
+    def test_vector_upsert_search_prefix(self):
+        from core import vector_store
+        col = "test_col"
+        vector_store.clear(col)
+        vector_store.upsert_items(col, [
+            {"key": "ns|a", "text": "甲", "vec": [1.0, 0.0]},
+            {"key": "ns|b", "text": "乙", "vec": [0.0, 1.0]},
+        ])
+        self.assertEqual(vector_store.count(col), 2)
+        hits = vector_store.search(col, [1.0, 0.05], top_k=2)
+        self.assertEqual(hits[0]["key"], "ns|a")
+        self.assertGreater(hits[0]["score"], hits[1]["score"])
+        self.assertTrue(vector_store.has_key_prefix(col, "ns|"))
+        self.assertFalse(vector_store.has_key_prefix(col, "ns|a_x"))
+        self.assertEqual(vector_store.delete_prefix(col, "ns|"), 2)
+        self.assertEqual(vector_store.count(col), 0)
+
+    def test_vector_search_skips_bad_dimension(self):
+        from core import vector_store
+        col = "test_col2"
+        vector_store.clear(col)
+        vector_store.upsert_items(col, [
+            {"key": "ok", "text": "甲", "vec": [1.0, 0.0, 0.0]},
+            {"key": "bad", "text": "乙", "vec": [1.0, 0.0]},       # 维度不符
+        ])
+        hits = vector_store.search(col, [1.0, 0.0, 0.0], top_k=5)
+        self.assertEqual([h["key"] for h in hits], ["ok"])
 
 
 if __name__ == "__main__":

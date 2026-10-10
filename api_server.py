@@ -7,6 +7,7 @@
     POST /api/trip             发起行程规划任务 {city, days, hotel, spots?, preferences?, preference_mode?, start_date?} -> {job_id}
     POST /api/heat/refresh     发起城市热度刷榜任务 {city} -> {job_id}（元数据轻量采集）
     POST /api/ask              就一份已生成的报告追问 {question, job_id?/report_name?} -> {answer}
+    GET  /api/kb/search        知识库语义检索（行程档案片段 + 城市攻略编排知识）
     GET  /api/heat/{city}      查询城市实时热度榜（本周最火/长盛不衰/正在降温/平稳）
     GET  /api/jobs/{id}        轮询任务状态/进度/结果（含重启前的历史任务）
     POST /api/jobs/{id}/cancel 取消运行中的任务（攻略/行程通用）
@@ -169,6 +170,38 @@ def city_heat(city: str):
             f"暂无《{name}》的榜单数据。两条路都行："
             "① 点「刷新榜单」跑一轮采集（只采元数据，约 3~5 分钟）；"
             "② 直接做一份行程规划——热度会一并采好并留在本页。"
+        ),
+    }
+
+
+@app.get("/api/kb/search", summary="知识库语义检索（按问题检索历史档案片段）")
+def kb_search(q: str, city: str = "", top_k: int = 0):
+    """按语义检索本地点位知识库（设计规格 §13.3：对外暴露的检索能力）。
+
+    语料 = 已完成行程的档案片段（要点/真实评价/避坑/官方信息/排线理由）
+    + 城市攻略层的编排知识；不发起任何采集、不消耗抖音频控。
+    返回命中的片段（含出处元数据）；检索不可用（未配 embedding）时 results 为空并给 hint。
+    """
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="查询不能为空")
+    from core import rag
+    hits = rag.search(query, top_k=(top_k or None), prefer_city=(city or "").strip())
+    return {
+        "query": query,
+        "count": len(hits),
+        "results": [
+            {"text": h.get("text"), "score": h.get("score"),
+             "spot": (h.get("meta") or {}).get("spot") or "",
+             "city": (h.get("meta") or {}).get("city") or "",
+             "kind": (h.get("meta") or {}).get("kind") or "",
+             "source": (h.get("meta") or {}).get("source") or "",
+             "report": (h.get("meta") or {}).get("ns") or ""}
+            for h in hits
+        ],
+        "hint": "" if hits else (
+            "未命中的两种可能：① 知识库还没有可检索语料（先在网页端生成一份行程报告，"
+            "语料会在任务完成时自动入库）；② 未配置 embedding 服务（检索降级不影响报告与追问）。"
         ),
     }
 

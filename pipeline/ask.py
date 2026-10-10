@@ -11,6 +11,10 @@
 
 分工：
 - ``build_context``：把 TripPlan / 报告全文压成给模型看的档案（纯函数，可离线断言）；
+- ``_retrieval_context``：§13 检索优先路径——档案切块入库，按问题检索 Top-K 片段，
+  只把命中的片段喂给模型（解决"压缩必然丢信息"）；检索不可用返回 None，
+  由 ``answer`` 退回 build_context（降级链 §13.6，零回归）。检索仍然只读、不采集、不重排，
+  只是换了一种"取哪部分信息"的方式。
 - ``answer``：拼提示词并调用 ``core.llm.chat_text``（唯一有副作用的一步）。
 
 防幻觉约束写死在 system 提示里：只依据档案回答，档案没有就说不知道，
@@ -37,7 +41,9 @@ _SYSTEM = """你是这份旅游报告的解读助手。报告基于抖音公开�
 3. 用户问"A 和 B 只能选一个"这类取舍时，必须给出明确选择并说明理由
    （依据档案里的亮点、避雷、真实评价、热度）；
 4. 不要输出 Markdown 标题（#），可以用短句与短分点；不要客套开场白；
-5. 涉及票价、开放时间、预约、排队等会变化的信息时，提醒以官方渠道为准。"""
+5. 涉及票价、开放时间、预约、排队等会变化的信息时，提醒以官方渠道为准；
+6. 片段标注了出处（本报告 / 历史报告 / 城市攻略）；冲突时以本报告为准，
+   历史信息仅作补充；"尚未确认的信息"一节里的内容不得当成已知事实。"""
 
 
 def _clip(text, limit: int = _MAX_ITEM_CHARS) -> str:
@@ -139,6 +145,28 @@ def _point_dossier(tp: dict, name: str, deep: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _checklist_block(tp: dict) -> str:
+    """「出发前请自行确认」清单块（压缩档案路径与检索路径共用）。
+
+    追问也应当知道"哪些还没确认"，避免把不确定说成确定（防幻觉的关键一块）。"""
+    try:
+        from pipeline.checklist import build_checklist
+        cl = build_checklist(tp)
+        if not cl.get("groups"):
+            return ""
+        lines = ["■ 尚未确认的信息（回答时不得当成已知事实）"]
+        for g in cl["groups"]:
+            for it in g["rows"][:3]:
+                lines.append(f"- [{g['kind']}] {it['name']}：{_clip(it['detail'], 70)}")
+        if cl.get("footnote"):
+            lines.append(cl["footnote"])
+        if cl.get("cutoff"):
+            lines.append(f"（以上信息截至 {cl['cutoff']}）")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _tp_context(tp: dict, question: str, max_chars: int) -> str:
     """行程报告：结构化档案上下文（要点名优先，其余给骨架 + 摘要）。"""
     meta = tp.get("meta") or {}
@@ -195,20 +223,9 @@ def _tp_context(tp: dict, question: str, max_chars: int) -> str:
             for r in heat[:6]))
 
     # 复用「出发前请自行确认」清单：追问也应当知道"哪些还没确认"，避免把不确定说成确定
-    try:
-        from pipeline.checklist import build_checklist
-        cl = build_checklist(tp)
-        if cl.get("groups"):
-            parts += ["", "■ 尚未确认的信息（回答时不得当成已知事实）"]
-            for g in cl["groups"]:
-                for it in g["rows"][:3]:
-                    parts.append(f"- [{g['kind']}] {it['name']}：{_clip(it['detail'], 70)}")
-            if cl.get("footnote"):
-                parts.append(cl["footnote"])
-            if cl.get("cutoff"):
-                parts.append(f"（以上信息截至 {cl['cutoff']}）")
-    except Exception:
-        pass
+    _guard = _checklist_block(tp)
+    if _guard:
+        parts += [""] + _guard.split("\n")
 
     return "\n".join(parts)[:max_chars]
 
@@ -244,15 +261,37 @@ def _history_block(history, limit: int = 2) -> str:
     return "\n".join(lines)
 
 
+def _retrieval_context(result: dict | None, question: str) -> str | None:
+    """§13 检索优先的追问上下文；检索不可用返回 None（调用方退回压缩档案路径）。
+
+    检索之外必带「尚未确认的信息」清单（防幻觉：这些不得当成已知事实）。"""
+    try:
+        from core import rag
+        ctx = rag.context_for_question(result or {}, question, max_chars=_CTX_MAX_CHARS)
+    except Exception:
+        ctx = None
+    if not ctx:
+        return None
+    guard = _checklist_block((result or {}).get("trip_plan") or {})
+    if guard:
+        room = max(0, _CTX_MAX_CHARS - len(guard) - 2)
+        ctx = ctx[:room] + "\n\n" + guard
+    return ctx
+
+
 def answer(result: dict | None, question: str, history=None) -> str:
     """回答一个追问（唯一有副作用的一步：调用一次 LLM）。
 
+    上下文优先走 §13 检索（档案切块 -> 按问题取 Top-K 片段），
+    检索不可用时退回压缩档案路径（降级链 §13.6，零回归）。
     档案为空时直接给出可执行的提示，不空跑一次调用。
     """
     q = (question or "").strip()
     if not q:
         raise ValueError("问题不能为空")
-    ctx = build_context(result, q)
+    ctx = _retrieval_context(result, q)
+    if not ctx:
+        ctx = build_context(result, q)
     if not ctx:
         raise ValueError("这份报告没有可供追问的档案（可能已过期或未生成结果）")
     user = f"{ctx}\n\n【此前的追问】\n{_history_block(history)}\n\n【用户追问】\n{q}" \

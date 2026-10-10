@@ -13,8 +13,8 @@ from urllib.parse import quote
 
 from DrissionPage import ChromiumPage
 
-from config import (MAX_COMMENTS_PER_VIDEO, MAX_SEARCH_SCROLLS, SEARCH_POOL_SIZE,
-                    SEARCH_SORT_BY_LIKES)
+from config import (MAX_COMMENTS_PER_VIDEO, MAX_SEARCH_SCROLLS, PROBE_SCROLLS,
+                    SEARCH_POOL_SIZE, SEARCH_SORT_BY_LIKES)
 from core.models import Comment, VideoItem
 from core.quality import screen_pool, video_quality_score
 from core.rate_limiter import RateLimiter
@@ -386,6 +386,23 @@ class DouyinCrawler:
         pool = self.search_pool([keyword, f"{keyword} 攻略", f"{keyword} 避雷"],
                                 pool_size=max(SEARCH_POOL_SIZE, limit * 3))
         return self.rank_pool(pool, limit, level=level)["urls"]
+
+    # ---- 探测：只数搜索结果条数，不深采（设计规格 §4.3 的弱信号）----
+    def probe_count(self, keyword: str, *, max_n: int = 60,
+                    scrolls: int | None = None) -> int | None:
+        """探测层：返回搜索页收集到的结果卡片数（弱信号）；风控中止返回 None。
+
+        与 search_pool 的区别：单查询、不做质量排序、不深采——它只要一个便宜的
+        "这个点位大概有没有内容"的信号。不消耗 SESSION_DETAIL_BUDGET
+        （该预算只计详情页导航；本方法只做搜索页导航）。
+        调用方负责批量复用浏览器会话（D16：不得一个候选开一次浏览器）。"""
+        if base.session_stopped():
+            return None
+        sc = PROBE_SCROLLS if scrolls is None else scrolls
+        got = self._search_one(keyword, max_n, scrolls=sc)
+        if base.session_stopped():
+            return None   # 本次查询触发了风控：结果不可信，按"未探测"处理
+        return len(got)
 
     # ---- 单个视频页：文案 + 标签 + 点赞 + 发布时间 + (可选)口播转写 + 评论 ----
     def fetch_video(self, url: str, max_comments: int = MAX_COMMENTS_PER_VIDEO,

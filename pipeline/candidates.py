@@ -303,13 +303,17 @@ def _normalize_candidate(x: dict) -> dict | None:
 
 def generate_candidates(city: str, days: int, preferences: str, *,
                         guide_evidence: dict | None = None,
-                        draft_plan: dict | None = None) -> list[dict]:
+                        draft_plan: dict | None = None,
+                        exclude_names: list[str] | None = None) -> list[dict]:
     """大模型圈定候选：按类别配额裁剪后返回（上限 TOTAL_CANDIDATES_MAX）。
 
     guide_evidence：城市高赞攻略视频的真实提炼结果。传入时候选以"攻略里
     真实被反复提到的点"为底稿、LLM 只做补充与配额平衡，取代从前凭空想象；
     draft_plan：审核后的视频行程草案。草案点位确定性前置进候选清单且不受
     类别配额限制（行程主干，必须逐个进验证采集），LLM 补充点仍受配额约束；
+    exclude_names：回补层（设计规格 §4.5 情况 B / D11）的**排除清单**——
+    已处理过的点位（crawled_ok / crawled_empty / dropped_probe）必须在提示词里
+    明确要求"不要再给"，否则 LLM 会重复生成同一批点位、回补白跑；
     两者不传则保持原纯 LLM 行为（kernel-only / 攻略层未启用时零回归）。
     联网搜索随配置生效（服务商不支持时自动降级为纯基线）。"""
     user = (f"城市：{city}\n天数：{days}\n用户偏好：{preferences or '无'}\n"
@@ -332,9 +336,18 @@ def generate_candidates(city: str, days: int, preferences: str, *,
     if draft_names:
         user += ("\n\n以下是高赞攻略视频行程草案里已确定的点位，必须全部纳入候选清单"
                  "（本次行程主干，逐个验证即可）：\n- " + "\n- ".join(draft_names))
+    exclusions = list(dict.fromkeys(
+        str(x).strip() for x in (exclude_names or []) if str(x or "").strip()))
+    if exclusions:
+        user += ("\n\n以下点位本次已经采集验证过或已处理，**不要再出现在候选里**，"
+                 "请只补充名单之外的其他点位：\n- " + "\n- ".join(exclusions))
     data = chat_json(GEN_SYSTEM, user, web_search=LLM_WEB_SEARCH)
     raw = [c for c in (_normalize_candidate(x)
                        for x in (data.get("candidates") or []) if isinstance(x, dict)) if c]
+    if exclusions:
+        # 提示词层面的排除是主防线，这里再兜一道（LLM 偶尔无视指令）——绝不静默放行
+        blocked = set(exclusions)
+        raw = [c for c in raw if c["name"] not in blocked]
     # 草案点位前置：类别取自攻略提及或 LLM 候选，都查不到就按景点处理（骨架优先）
     cat_map = {str(m.get("name") or "").strip(): str(m.get("category") or "")
                for m in gc if isinstance(m, dict)}
