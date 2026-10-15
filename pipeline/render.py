@@ -74,6 +74,7 @@ def _quick_glance(points: list[dict]) -> str:
 
 
 def render_report(keyword: str, body_md: str, items: list[VideoItem], points: list[dict]) -> str:
+    points = [p for p in points if p.get("support_status") not in {"pending", "rejected", "unverified"}]
     total_comments = sum(len(i.comments) for i in items)
     stance_dist = {}
     for p in points:
@@ -126,6 +127,7 @@ def render_report_html(keyword: str, body_md: str, items: list[VideoItem],
     没有 markdown 依赖，离线产物又不引 JS 框架（不能用 marked.js），故只支持
     报告实际用到的语法子集，未支持的语法按纯文本输出（宁可少解析，不可丢内容）。
     """
+    points = [p for p in points if p.get("support_status") not in {"pending", "rejected", "unverified"}]
     total_comments = sum(len(i.comments) for i in items)
 
     stance_dist: dict[str, int] = {}

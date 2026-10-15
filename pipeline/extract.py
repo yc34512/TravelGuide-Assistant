@@ -5,10 +5,14 @@
 供报告生成「值得做/别踩坑」速览清单。
 """
 import re
+import logging
 from datetime import datetime
 
 from core.llm import chat_json
 from core.models import VideoItem
+from core.evidence import bind_point, registry_for
+
+_LOG = logging.getLogger(__name__)
 
 # 发布超过该年限的视频在提取上下文中标注"较旧"，提醒模型谨慎对待其时效信息；
 # 提取阶段拿不到发布时间/点赞数时不参与判断，由下游置信度机制兜底。
@@ -26,7 +30,7 @@ EXTRACT_SYSTEM = """你是旅游攻略信息抽取助手，负责从单条抖音
 4. 视频标题式口号与引导话术没有信息量（"一定要收藏""看这一条就够了""关注我""点赞"），
    不提取；纯情绪感叹（"太美了""绝了"）也不提取，除非它包含具体事实（如"雨天的西湖有雾"）；
 5. 门票价格、开放时间、预约政策、排队情况类信息必须标记 time_sensitive=true；
-6. 每条要点必须带来源 url（就是输入给出的 video_url）；
+6. 每条要点必须选择输入素材的evidence_id，不能编造编号；来源url由系统回填；
 7. 每条要点必须标注 stance（立场）：
    - "推荐"：内容把这件事说成值得做的（正面经验、好评、强烈推荐、高赞认可的做法）；
    - "避雷"：内容把这件事说成不值得/有坑的（踩坑吐槽、劝退、排队太久、不值、宰客）；
@@ -37,9 +41,10 @@ EXTRACT_SYSTEM = """你是旅游攻略信息抽取助手，负责从单条抖音
 8. 若输入标注了"发布较旧"，其中的时效敏感信息照提取但照常标注，不要擅自丢弃；
 9. 标记了（作者回复）的评论是视频作者本人的回应，可信度高于普通评论；
    它与普通评论就同一事实说法矛盾时，优先采信作者回复；
-10. 每条要点附 quote：最能支撑该要点的一条评论原文（逐字摘录不改写，不超过 80 字）；
-    依据来自视频文案/口播或无合适评论时，quote 为空字符串；
-11. 输出严格 JSON：{"points": [{"topic": "门票|交通|避雷|打卡|美食|住宿|路线|其他", "claim": "一句话要点", "stance": "推荐|避雷|中性", "time_sensitive": true/false, "quote": "评论原文或空", "source": "视频url"}]}
+10. 每条要点附evidence_id与excerpt：选择最能支持结论的一条评论/文案/口播素材，
+    excerpt是该素材中连续出现的原文片段，逐字摘录不改写；保留数字、否定词和适用条件。
+    不得断章取义，原文含辟谣、转述或反例时必须看完整上下文；无支持证据就不输出。
+11. 输出严格 JSON：{"points": [{"topic": "门票|交通|避雷|打卡|美食|住宿|路线|其他", "claim": "一句话要点", "stance": "推荐|避雷|中性", "time_sensitive": true/false, "evidence_id": "输入素材编号", "excerpt": "完整原文片段"}]}
 没有可抽取的信息时返回 {"points": []}"""
 
 # 代码层兜底：疑问句（带不带问号都要拦）/ 常见低价值话术
@@ -98,25 +103,35 @@ def _is_stale(publish_time: str | None) -> bool:
 
 
 def extract_points(item: VideoItem) -> list[dict]:
-    comments_text = "\n".join(
-        f"- {c.text}（赞{c.like_count if c.like_count is not None else '?'}"
-        f"{'，作者回复' if c.is_author_reply else ''}）"
-        for c in item.comments[:50]
-    )
+    registry = registry_for(item)
+    comments_lines = []
+    for eid, record in registry.items():
+        if record["kind"] != "comment":
+            continue
+        comment = item.comments[int(record["slot"][1:]) - 1]
+        comments_lines.append(
+            f"- [{eid}] {record['text']}（赞{comment.like_count if comment.like_count is not None else '?'}"
+            f"{'，作者回复' if comment.is_author_reply else ''}）")
+    comments_text = "\n".join(comments_lines)
+    def video_text(kind):
+        return next((f"[{eid}] {r['text']}" for eid, r in registry.items()
+                     if r["kind"] == kind), "(无)")
     like_str = f"{item.like_count}" if item.like_count is not None else "未知"
     meta = f"video_url: {item.url}\n发布时间: {item.publish_time or '未知'}（视频点赞 {like_str}）"
     if _is_stale(item.publish_time):
         meta += "  ← 发布较旧（超过两年），其中价格/政策类信息可能已变化"
     user = (
         f"{meta}\n"
-        f"视频文案: {item.description or '(无)'}\n"
-        f"视频口播内容: {item.transcript or '(无)'}\n\n"
+        f"视频文案: {video_text('description')}\n"
+        f"视频口播内容: {video_text('transcript')}\n\n"
         f"评论区:\n{comments_text or '(无评论)'}"
     )
     data = chat_json(EXTRACT_SYSTEM, user)
 
     points: list[dict] = []
     for p in data.get("points", []):
+        if not isinstance(p, dict):
+            continue
         claim = str(p.get("claim", "")).strip().rstrip("。")
         if not claim or _low_value(claim):
             continue
@@ -124,19 +139,18 @@ def extract_points(item: VideoItem) -> list[dict]:
         stance = stance if stance in _ALLOWED_STANCES else "中性"
         # 历史叙事永远不该是"避雷"：代码层兜底防 LLM 误标（提示词已约束，双防线）
         stance = _sanitize_stance(claim, stance)
-        # 评论原文引用：匿名化已由去标识化闸口保证（无昵称等个人信息），此处只做截断兜底；
-        # 防幻觉兜底：引用必须真实出现在输入评论中，否则丢弃（LLM 编造的引用绝不下传）
-        quote = str(p.get("quote") or "").strip()[:80]
-        if quote and not any(quote[:15] in c.text for c in item.comments):
-            quote = ""
-        points.append(
+        # 完整匹配后才回填原话；不能清空伪造quote却保留依赖它的结论。
+        bound = bind_point(p, registry, item.url)
+        if bound is None:
+            _LOG.info("丢弃证据编号、完整摘录或来源无效的要点：%s", item.url)
+            continue
+        bound.update(
             {
                 "topic": str(p.get("topic", "其他")),
                 "claim": claim,
                 "stance": stance,
                 "time_sensitive": bool(p.get("time_sensitive", False)),
-                "quote": quote,
-                "source": str(p.get("source") or item.url),
             }
         )
+        points.append(bound)
     return points

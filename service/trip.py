@@ -37,6 +37,7 @@ from pipeline.candidates import (
     verify_candidates,
 )
 from pipeline.extract import extract_points
+from core.evidence import VERSION as EVIDENCE_VERSION, usable_points
 from pipeline.heat import heat_index, pitfall_digest, sentiment_trend
 from pipeline.verify import annotate_confidence
 from pipeline.decision import (apply_attribution_check, build_decisions, build_trip_plan,
@@ -168,11 +169,15 @@ def _extract_and_stat(name: str, items: list, log) -> tuple[list[dict], dict]:
                 extract_fails += 1
         if extract_fails:
             log(f"    {name}：{extract_fails}/{len(items)} 条要点提取失败（已重试仍失败）")
-    pos = sum(1 for p in pts if p.get("stance") == "推荐")
-    neg = sum(1 for p in pts if p.get("stance") == "避雷")
     if pts:
         mkt_src = {it.url for it in items if is_marketing(it.description)}
         pts = annotate_confidence(pts, marketing_sources=mkt_src)
+        pending = len(pts) - len(usable_points(pts))
+        if pending:
+            log(f"    {name}：{pending}条要点未获原文支持，未参与选点和规划")
+        pts = usable_points(pts)
+    pos = sum(1 for p in pts if p.get("stance") == "推荐")
+    neg = sum(1 for p in pts if p.get("stance") == "避雷")
     stat = {"videos": len(items), "marketing_hits": mkt, "positive": pos,
             "negative": neg,
             "sample_quotes": [p.get("quote") for p in pts if p.get("quote")][:3]}
@@ -852,6 +857,15 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 # 置信度标注：景点/餐厅组内交叉验证，营销号来源降为低置信度
                 mkt_src = {it.url for it in items if is_marketing(it.description)}
                 pts = annotate_confidence(pts, marketing_sources=mkt_src)
+                pending = len(pts) - len(usable_points(pts))
+                if pending:
+                    msg = f"{name}：{pending}条要点未完成原文支持性确认，未用于规划"
+                    log(msg)
+                    funnel_unresolved.append(msg)
+                pts = usable_points(pts)
+                if not pts:
+                    log(f"{name}：没有通过原文支持性复核的要点，跳过")
+                    continue
                 points[name] = pts
                 sources[name] = [it.url for it in items]
                 items_by[name] = items
@@ -1001,7 +1015,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         job["stage"] = "生成规划"
         plan = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
                               preference_mode, heat_summary=heat_summary,
-                              guide_hints=guide_hints, draft_plan=draft_plan or None)
+                              guide_hints=guide_hints, draft_plan=draft_plan or None,
+                              points_by_spot=spot_points)
         if not plan["days"]:
             raise RuntimeError("规划生成失败：未产出有效行程，请重试或减少天数/景点")
 
@@ -1050,7 +1065,8 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
             plan2 = plan_itinerary(city, days, hotel, profiles, travel_lines, preferences,
                                    preference_mode, extra_issues=report.issues,
                                    heat_summary=heat_summary,
-                                   guide_hints=guide_hints, draft_plan=draft_plan or None)
+                                   guide_hints=guide_hints, draft_plan=draft_plan or None,
+                                   points_by_spot=spot_points)
             if not plan2["days"]:
                 break
             decs2 = _build_decs(plan2)
@@ -1087,6 +1103,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         # 决策层产出唯一 TripPlan，并据它补判 R11/R12（输出完整性，不入回炉）
         # 呈现快照由编排层用决策层纯函数预先整理（表达层只读，零计算）
         snap = {
+            "evidence_version": EVIDENCE_VERSION,
             "user_spots": user_spots,
             "overview": build_overview(days, plan, profiles, pitfall, food_profiles or None),
             "pitfall": pitfall, "digests": digests, "legs": legs,

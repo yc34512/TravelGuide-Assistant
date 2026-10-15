@@ -1,5 +1,6 @@
 """Reduce 阶段：汇总全部要点，生成带溯源的攻略报告正文。"""
 from core.llm import chat_text
+from core.evidence import usable_points
 
 REPORT_SYSTEM = """你是资深旅游攻略编辑。基于带来源编号、置信度与立场标注的信息要点，撰写一份实用的中文景点攻略（Markdown 格式）。
 
@@ -26,6 +27,15 @@ def _strip_code_fence(text: str) -> str:
 
 
 def synthesize_report(keyword: str, points: list[dict]) -> str:
+    pending = [p for p in points if p.get("support_status") != "supported"]
+    points = usable_points(points)
+    waiting = ""
+    if pending:
+        waiting = "\n\n## 待确认的素材结论\n\n" + "\n".join(
+            f"- 待确认：{p.get('claim', '')}（{p.get('support_reason') or '缺少原文支持性确认'}）"
+            for p in pending)
+    if not points:
+        return "本次没有通过原文支持性复核的攻略要点，不能据此确认票价或开放安排。" + waiting
     numbered = "\n".join(
         f"[{i + 1}] ({p['topic']}|{p.get('confidence', '单源')}|{p.get('stance', '中性')}"
         f"{'|时效敏感' if p['time_sensitive'] else ''}) {p['claim']} —— {p['source']}"
@@ -36,4 +46,4 @@ def synthesize_report(keyword: str, points: list[dict]) -> str:
         f"景点/主题：{keyword}\n\n信息要点：\n{numbered or '(无)'}",
         temperature=0.3,
     )
-    return _strip_code_fence(body)
+    return _strip_code_fence(body) + waiting

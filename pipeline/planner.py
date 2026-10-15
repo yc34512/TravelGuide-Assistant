@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from config import LLM_WEB_SEARCH
 from core.llm import chat_json
+from core.evidence import quote_bank, select_quotes, usable_points
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -73,14 +74,15 @@ PLAN_SYSTEM = """你是专业行程规划师。基于景点档案与通行时间
    绝不能把已排过的景点再排一次，重复排入会被系统剔除）；与用户偏好相符的地标景点
    （如主题乐园、偏好中点名的类型）必须排入行程；
 8. reasons 一句话说明为什么值得去（来自档案 highlights）；
-9. pitfall_quotes：从该景点档案 avoid 对应的要点中挑最重要的 1~2 条评论原文引用（逐字，不改写）；没有则空数组；
+9. pitfall_quote_ids：仅选择该景点给定的避坑引用编号，最多2条；没有则空数组。
+   不输出、不续写评论原话，引用由代码回填；不得使用其他景点的编号；
 10. 若给了“高赞攻略视频的行程草案”，以草案为主干安排：草案里的点位优先排入并尽量保留其先后顺序，
     天数不符时按档案的时长/最佳时段增删调整；草案点不在景点档案里说明未被验证通过，不得排入；
     没有草案时按档案与通行数据自行编排；
 11. summary_note：若有调研过但未排入行程的景点，必须把它们列为"备选"并一句话说明原因；无则空字符串；
 12. 输出严格 JSON：{"summary_note": "...", "days": [{"day": 1, "slots": [{"slot": "上午|下午|晚上|全天", "spot": "景点名",
    "duration": "约X小时", "transport": "从上一地点至此的方式与耗时",
-   "reasons": "...", "notes": [{"type": "避坑|费用|时间|提示", "text": "一句话"}], "food": "", "pitfall_quotes": ["评论原文"]}]}]}"""
+   "reasons": "...", "notes": [{"type": "避坑|费用|时间|提示", "text": "一句话"}], "food": "", "pitfall_quote_ids": ["引用编号"]}]}]}"""
 
 TRANSPORT_SYSTEM = """你是本地交通向导。给定城市、住宿位置与景点清单，为各段路线给出具体交通建议。
 规则：
@@ -98,8 +100,11 @@ DIGEST_SYSTEM = """你是评价分析专家。给定某景点的编号信息要�
 2. verdict：一句话总评（不超过 25 字），客观概括口碑情况（如"口碑两极：景观震撼但体力劝退"）；
 3. positive：好评摘要（不超过 60 字），压缩"推荐"立场的要点，保留具体事实；
 4. negative：差评摘要（不超过 60 字），压缩"避雷"立场的要点，保留具体事实；
-5. quotes：从要点自带的评论原文引用中挑最有代表性的 2 条（逐字照抄不改写）；
-6. 输出严格 JSON：{"verdict": "...", "positive": "...", "negative": "...", "quotes": ["..."]}"""
+5. quote_ids：只选输入名单里的最多2条引用编号，不输出或续写原话；系统从原文回填；
+6. verdict/positive/negative各自附verdict_refs/positive_refs/negative_refs：支持它的要点编号；
+   数字、适用条件和否定词必须与所引用要点一致，无依据的字段给空字符串；
+7. 输出严格 JSON：{"verdict": "...", "positive": "...", "negative": "...", "quote_ids": ["引用编号"],
+   "verdict_refs": [要点编号], "positive_refs": [要点编号], "negative_refs": [要点编号]}"""
 
 
 def candidate_spots(city: str, days: int, max_n: int) -> list[str]:
@@ -244,6 +249,9 @@ def _conf_badge(p: dict) -> str:
 
 def build_spot_profile(spot: str, points: list[dict]) -> dict:
     """从某景点的全部要点蒸馏结构化档案（单次 LLM 调用）。"""
+    points = usable_points(points)
+    if not points:
+        return empty_profile()
     numbered = "\n".join(
         f"[{i + 1}] ({p.get('topic', '其他')}|{_conf_badge(p)}|{p.get('stance', '中性')}) {p['claim']}"
         for i, p in enumerate(points)
@@ -256,32 +264,56 @@ def empty_digest() -> dict:
     return {"verdict": "", "positive": "", "negative": "", "quotes": []}
 
 
-def _normalize_digest(data: dict, quote_pool: list[str]) -> dict:
+def _normalize_digest(data: dict, quote_pool: list[str] | dict,
+                      points: list[dict] | None = None) -> dict:
     """摘要防御性规范化：引文防幻觉校验（必须真实出自输入要点自带的原文）。纯函数可测。"""
-    raw_quotes = [str(q).strip()[:80] for q in (data.get("quotes") or []) if str(q).strip()]
-    quotes = [
-        q for q in raw_quotes
-        if any(q[:15] in p or p[:15] in q for p in quote_pool)
-    ][:2]
+    if isinstance(quote_pool, dict):
+        records = select_quotes(data.get("quote_ids"), quote_pool)
+        quotes = [r["text"] for r in records]
+    else:
+        # 兼容纯函数的旧调用：也必须全段匹配，禁止原文作为伪造引文的前缀。
+        records = []
+        raw = data.get("quotes") or []
+        raw = raw if isinstance(raw, list) else []
+        quotes = [q.strip() for q in raw if isinstance(q, str) and q.strip()
+                  and any(q.strip() in p for p in quote_pool if isinstance(p, str) and p)][:2]
+    def field(name, limit):
+        text = str(data.get(name) or "").strip()
+        if points is not None:
+            refs = data.get(name + "_refs")
+            valid = [points[i - 1] for i in refs if type(i) is int and 1 <= i <= len(points)] if isinstance(refs, list) else []
+            if not valid:
+                return ""
+            # 不允许凭空加数字；引用编号存在只证明有出处，摘要的复杂语义仍有模型误判边界。
+            from core.evidence import support_rule_reason
+            if support_rule_reason({"claim": text, "evidence": {"text": "；".join(p["claim"] for p in valid)}}):
+                return ""
+        return text[:limit]
     return {
-        "verdict": str(data.get("verdict") or "").strip()[:60],
-        "positive": str(data.get("positive") or "").strip()[:120],
-        "negative": str(data.get("negative") or "").strip()[:120],
+        "verdict": field("verdict", 60),
+        "positive": field("positive", 120),
+        "negative": field("negative", 120),
         "quotes": quotes,
+        "quote_ids": [r["id"] for r in records],
+        "quote_points": [r["point"] for r in records],
     }
 
 
 def build_review_digest(spot: str, points: list[dict]) -> dict:
     """把景点的推荐/避雷/中性要点压缩成真实评价摘要（单次 LLM 调用）。
     返回 {"verdict", "positive", "negative", "quotes"}；调用方失败时降级为空摘要。"""
-    quote_pool = [p["quote"] for p in points if p.get("quote")]
+    points = usable_points(points)
+    if not points:
+        return empty_digest()
+    quote_pool = quote_bank(points)
     numbered = "\n".join(
         f"[{i + 1}] ({p.get('stance', '中性')}|{_conf_badge(p)}) {p['claim']}"
-        + (f"（评论原文：{p['quote']}）" if p.get("quote") else "")
+        + (f"（可选引用编号：{p['quote_id']}）" if p.get("quote_id") else "")
         for i, p in enumerate(points)
     )
-    data = chat_json(DIGEST_SYSTEM, f"景点：{spot}\n信息要点：\n{numbered or '(无)'}")
-    return _normalize_digest(data, quote_pool)
+    available = "\n".join(f"[{qid}] {r['text']}" for qid, r in quote_pool.items())
+    data = chat_json(DIGEST_SYSTEM, f"景点：{spot}\n信息要点：\n{numbered}\n引用名单：\n{available}")
+    return _normalize_digest(data, quote_pool, points)
 
 
 # —— 注意事项分点化：类型图标 + 关键词兜底分类（纯函数，独立可测）——
@@ -323,7 +355,8 @@ def normalize_notes(raw) -> list[dict]:
     return out
 
 
-def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
+def _normalize_plan(data: dict, allowed_spots: set[str], days: int,
+                    quote_banks: dict[str, dict] | None = None) -> dict:
     """行程防御性规范化：丢弃不在名单中的景点、修正非法时段、限制天数、跨天去重。纯函数可测。
 
     每个景点全程只排一次（PLAN_SYSTEM 规则 7）：LLM 偶尔把同一点排进多天（如九龙壁第 1、2 天各一次），
@@ -342,8 +375,8 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
                 duplicate_drops.append(f"{spot}（第{len(out_days) + 1}天{slot or '未标时段'}）")
                 continue
             seen_spots.add(spot)
-            quotes = s.get("pitfall_quotes")
-            quotes = [str(q).strip()[:80] for q in quotes if str(q).strip()] if isinstance(quotes, list) else []
+            records = select_quotes(s.get("pitfall_quote_ids"), (quote_banks or {}).get(spot, {}))
+            quotes = [r["text"] for r in records]
             slots.append(
                 {
                     "slot": slot if slot in ALLOWED_SLOTS else "下午",
@@ -354,6 +387,7 @@ def _normalize_plan(data: dict, allowed_spots: set[str], days: int) -> dict:
                     "notes": normalize_notes(s.get("notes")),
                     "food": str(s.get("food") or "").strip(),
                     "pitfall_quotes": quotes,
+                    "pitfall_quote_ids": [r["id"] for r in records],
                 }
             )
         if slots:
@@ -492,7 +526,8 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
                    extra_issues: list[str] | None = None,
                    heat_summary: str = "",
                    guide_hints: list[str] | None = None,
-                   draft_plan: dict | None = None) -> dict:
+                   draft_plan: dict | None = None,
+                   points_by_spot: dict[str, list[dict]] | None = None) -> dict:
     """一次 LLM 调用生成行程 JSON，随后做防御性规范化（排布兜底见 rebalance_days）。
 
     extra_issues：来自 pipeline.qc 权威门禁的修正指令（F5.2 有限回炉）。传入时连同覆盖率
@@ -543,8 +578,14 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         if draft_txt:
             user += ("\n\n高赞攻略视频的行程草案（真实攻略里被反复验证的编排，作为主干优先采用；"
                      "点位顺序尽量保留，天数不符时按档案的建议时长/最佳时段增删）：\n" + draft_txt)
+    quote_banks = {name: quote_bank([p for p in pts if p.get("stance") == "避雷"])
+                   for name, pts in (points_by_spot or {}).items() if name in profiles}
+    if quote_banks:
+        user += "\n\n按景点限定的避坑引用名单（只选择编号）：\n" + "\n".join(
+            f"{name} [{qid}] {record['text']}" for name, bank in quote_banks.items()
+            for qid, record in bank.items())
     data = chat_json(PLAN_SYSTEM, user)
-    plan = _normalize_plan(data, set(profiles.keys()), days)
+    plan = _normalize_plan(data, set(profiles.keys()), days, quote_banks)
     # 覆盖率兜底 + 质量门禁回炉：排点过少/晚上型错位/未排景点无备选说明（_coverage_issues），
     # 以及来自 pipeline.qc 的权威门禁指令（extra_issues），一起写进回炉提示重试一次。
     base_issues = _coverage_issues(plan, profiles, days)
@@ -553,7 +594,7 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         fix_note = ("\n\n上一版规划存在以下问题，本版必须修正：\n"
                     + "\n".join(f"- {x}" for x in base_issues + extra))
         data2 = chat_json(PLAN_SYSTEM, user + fix_note)
-        plan2 = _normalize_plan(data2, set(profiles.keys()), days)
+        plan2 = _normalize_plan(data2, set(profiles.keys()), days, quote_banks)
         base2 = len(_coverage_issues(plan2, profiles, days))
         # 无外部门禁指令：覆盖率问题必须严格变少才采纳（原有行为）；
         # 有门禁指令：覆盖率不变差即返回重试版，权威采纳交调用方（qc.problem_count 比较）

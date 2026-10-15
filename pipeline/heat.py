@@ -154,6 +154,8 @@ def pitfall_digest(all_points: list[dict]) -> list[dict]:
     fallback = {"多源一致": CONF_MID, "存分歧": CONF_MID}  # 旧数据无评分时按标签回退
     rows = []
     for p in all_points:
+        if p.get("support_status") in {"pending", "rejected", "unverified"}:
+            continue
         if p.get("stance") != "避雷":
             continue
         score = p.get("conf_score")
@@ -167,6 +169,8 @@ def pitfall_digest(all_points: list[dict]) -> list[dict]:
             "conf_level": p.get("conf_level", ""),
             "conf_score": score,
             "n_sources": p.get("n_sources", 1),
+            **{k: p[k] for k in ("evidence", "evidence_id", "evidence_version", "quote_id",
+                                 "grounding_status", "support_status") if k in p},
         })
     rows.sort(key=lambda r: (-r["conf_score"], order.get(r["confidence"], 3)))
     return rows[:DIGEST_MAX]

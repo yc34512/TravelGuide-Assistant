@@ -26,6 +26,7 @@ import ast
 
 from config import RAG_ENABLED, RAG_TOP_K
 from core import embeddings, vector_store
+from core.evidence import VERSION, digest_quotes, usable_points
 
 CORPUS_COLLECTION = "corpus"
 _MAX_CHUNK_CHARS = 400      # 单条片段上限（要点本身短，超出多半是异常数据）
@@ -61,9 +62,9 @@ def _result_key(result: dict) -> str:
     """语料命名空间：优先 report_name（带时间戳、天然唯一），退回 generated_at。"""
     name = _clean((result or {}).get("report_name"))
     if name:
-        return name
+        return f"evidence-v{VERSION}:" + name
     gen = _clean((((result or {}).get("trip_plan") or {}).get("meta") or {}).get("generated_at"))
-    return gen or "adhoc"
+    return f"evidence-v{VERSION}:" + (gen or "adhoc")
 
 
 def chunks_from_trip_plan(tp: dict, ns: str = "") -> list[dict]:
@@ -89,7 +90,9 @@ def chunks_from_trip_plan(tp: dict, ns: str = "") -> list[dict]:
         chunks.append({
             "key": f"{ns}|{source}|{kind}|{spot}|{n}",
             "text": label + text,
-            "meta": {"city": city, "spot": spot, "kind": kind, "source": source, "ns": ns},
+            "meta": {"city": city, "spot": spot, "kind": kind, "source": source, "ns": ns,
+                     "evidence_version": VERSION,
+                     "legacy_unverified": snap.get("evidence_version") != VERSION},
         })
 
     # 1) 档案要点（景点与餐厅同等待遇）：亮点/避雷/美食/打卡点/贴士/花费/建议
@@ -118,14 +121,14 @@ def chunks_from_trip_plan(tp: dict, ns: str = "") -> list[dict]:
             add("好评：" + _clean(dg.get("positive")), spot, "真实评价")
         if _clean(dg.get("negative")):
             add("差评：" + _clean(dg.get("negative")), spot, "真实评价")
-        for q in _as_list(dg.get("quotes"))[:3]:
+        for q in digest_quotes(dg):
             add(q, spot, "评论原话")
     # 3) 避坑专题（claim + 评论原话）
     for row in snap.get("pitfall") or []:
         if not isinstance(row, dict):
             continue
         claim = _clean(row.get("claim"))
-        quote = _clean(row.get("quote"))
+        quote = _clean(row.get("quote")) if usable_points([row]) else ""
         if not claim:
             continue
         add(claim + ("；评论原话：" + quote if quote else ""), "", "避坑")
@@ -276,6 +279,9 @@ def search(query: str, *, top_k: int | None = None, prefer_ns: str = "",
         hits = vector_store.search(CORPUS_COLLECTION, vecs[0], max(k * 3, k))
     except Exception:
         return []
+    # 老索引没有原文校验版本，不能继续把其中的字符串当作已验证评论原话。
+    hits = [h for h in hits if (h.get("meta") or {}).get("evidence_version") == VERSION
+            or (h.get("meta") or {}).get("source") == "city_guide"]
     for h in hits:
         m = h.get("meta") or {}
         bonus = 0.0
@@ -294,7 +300,8 @@ def format_hit(h: dict, ns: str = "") -> str:
     origin = ("本报告" if ns and m.get("ns") == ns
               else (_SOURCE_LABELS.get(m.get("source") or "") or "历史档案")
               + (f" {m.get('ns')}" if m.get("ns") else ""))
-    return f"（{origin}）{h.get('text') or ''}"
+    pending = "；历史内容未完成原文复核" if m.get("legacy_unverified") else ""
+    return f"（{origin}{pending}）{h.get('text') or ''}"
 
 
 def context_for_question(result: dict, question: str, max_chars: int = 6000) -> str | None:

@@ -21,6 +21,21 @@ from pathlib import Path
 import config as _cfg
 from core import geo as _geo
 
+
+def _grounded_point(claim, source="https://fixture.test/v1", quote="", **fields):
+    """格式/置信度测试的已复核合成夹具，不代表真实模型评测结果。"""
+    from core.evidence import bind_point, registry_for
+    from core.models import Comment, VideoItem
+    item = VideoItem("fixture", source, description="" if quote else claim,
+                     comments=[Comment(quote)] if quote else [])
+    reg = registry_for(item)
+    raw = {"topic": "门票", "claim": claim, "stance": "中性", "time_sensitive": False,
+           "evidence_id": next(iter(reg)), "excerpt": quote or claim}
+    raw.update(fields)
+    point = bind_point(raw, reg, source)
+    point["support_status"] = "supported"
+    return point
+
 # —— 离线铁律：本套件不得发任何真实网络请求、不得消耗任何配额 ——
 # .env 配了 AMAP_API_KEY 时 core.geo 会真发 HTTP（耗日配额、结果随网络漂移，
 # "无 Key 降级"类用例直接失败——已踩过）。geo 是 from config import 的值拷贝，
@@ -1527,13 +1542,13 @@ class TestDigestAndHeatApi(unittest.TestCase):
         out = _normalize_digest(
             {"verdict": "口碑两极", "positive": "景观震撼",
              "negative": "人太多", "quotes": [
-                 "真的很好玩就是人太多了，值得去",   # 与池内原文互含，保留
+                 "真的很好玩就是人太多了，值得去",   # 真实前缀+编造后缀，必须丢弃
                  "完全是编造的引用内容",             # 不在池中，丢弃
                  "门票 120 有点贵"]},
             pool,
         )
         self.assertEqual(out["verdict"], "口碑两极")
-        self.assertEqual(len(out["quotes"]), 2)
+        self.assertEqual(out["quotes"], ["门票 120 有点贵"])
         self.assertNotIn("完全是编造的引用内容", out["quotes"])
 
     def test_heat_endpoints(self):
@@ -1676,22 +1691,26 @@ class TestConfidenceScoring(unittest.TestCase):
         import pipeline.verify as v
 
         def pt(src):
-            return {"topic": "门票", "claim": "免费", "stance": "中性",
-                    "time_sensitive": False, "source": src}
+            return _grounded_point("免费", src)
+
+        def reviewed(groups, conflicts):
+            ids = {i for group in groups for i in group}
+            return {"groups": groups, "conflicts": conflicts,
+                    "support": [{"id": i, "status": "supported", "reason": "原文支持"} for i in ids]}
 
         orig = v.chat_json
         try:
-            v.chat_json = lambda *a, **k: {"groups": [[1, 2, 3, 4]], "conflicts": []}
+            v.chat_json = lambda *a, **k: reviewed([[1, 2, 3, 4]], [])
             out = v.annotate_confidence([pt("u1"), pt("u2"), pt("u3"), pt("mkt1")],
                                         marketing_sources={"mkt1"})
             self.assertEqual(out[0]["conf_level"], "高置信度")  # 3 个有效源无矛盾
             self.assertEqual(out[0]["conf_score"], 0.9)
             self.assertEqual(out[0]["n_sources"], 3)  # 营销号不计入印证
             self.assertEqual(out[3]["conf_level"], "低置信度")  # 自身来源是营销号
-            v.chat_json = lambda *a, **k: {"groups": [[1, 2]], "conflicts": []}
+            v.chat_json = lambda *a, **k: reviewed([[1, 2]], [])
             out2 = v.annotate_confidence([pt("u1"), pt("u2")])
             self.assertEqual(out2[0]["conf_level"], "中置信度")  # 2 源
-            v.chat_json = lambda *a, **k: {"groups": [[1, 2, 3]], "conflicts": [[1, 2]]}
+            v.chat_json = lambda *a, **k: reviewed([[1, 2, 3]], [[1, 2]])
             out3 = v.annotate_confidence([pt("u1"), pt("u2"), pt("u3")])
             self.assertEqual(out3[0]["confidence"], "存分歧")
             self.assertEqual(out3[0]["conf_level"], "中置信度")  # 轻微矛盾不高于中
@@ -4048,6 +4067,9 @@ class TestAskContext(unittest.TestCase):
             },
             "to_verify": ["悬空寺"],
         }
+        quote = _grounded_point("现场比照片震撼十倍", quote="现场比照片震撼十倍")
+        tp["snap"]["evidence_version"] = 1
+        tp["snap"]["digests"]["云冈石窟"].update(quote_ids=[quote["quote_id"]], quote_points=[quote])
         result = {"trip_plan": tp}
         result.update(over)
         return result
@@ -5602,7 +5624,7 @@ class TestRagCorpus(unittest.TestCase):
 
     @staticmethod
     def _tp():
-        return {
+        tp = {
             "meta": {"city": "成都", "days": 2, "stay": "春熙路", "generated_at": "2026-10-01T10:00:00"},
             "snap": {
                 "profiles": {"武侯祠": {"highlights": ["红墙竹影出片率高"], "avoid": [],
@@ -5619,6 +5641,12 @@ class TestRagCorpus(unittest.TestCase):
             "itinerary": [{"day": 1, "blocks": [{"slot": "上午", "spot": "武侯祠",
                                                  "reasons": "和锦里连着逛最顺路"}]}],
         }
+        quote = _grounded_point("锦里夜宵也不错", quote="锦里夜宵也不错")
+        pit = _grounded_point("周末排队久", quote="周末排队一小时", stance="避雷")
+        tp["snap"]["evidence_version"] = 1
+        tp["snap"]["digests"]["武侯祠"].update(quote_ids=[quote["quote_id"]], quote_points=[quote])
+        tp["snap"]["pitfall"] = [pit]
+        return tp
 
     def _inject_sem(self):
         """语义夹具：文本按关键词映射到正交向量（离线、确定性）。"""
@@ -5786,6 +5814,12 @@ class TestEmbeddingsAndVectorStore(unittest.TestCase):
         ])
         hits = vector_store.search(col, [1.0, 0.0, 0.0], top_k=5)
         self.assertEqual([h["key"] for h in hits], ["ok"])
+
+
+def load_tests(loader, tests, pattern):
+    """既有CI入口同时执行新的证据链回归，不依赖额外命令。"""
+    tests.addTests(loader.loadTestsFromName("tests_evidence"))
+    return tests
 
 
 if __name__ == "__main__":

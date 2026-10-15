@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from core.llm import chat_text
+from core.evidence import VERSION, digest_quotes, usable_points
 
 # 上下文体积上限（字符）：中文约 1 字 ≈ 1 token，控制在 6k 以内，
 # 既够放下一天的行程细节，又不会把调用成本推高。
@@ -43,7 +44,8 @@ _SYSTEM = """你是这份旅游报告的解读助手。报告基于抖音公开�
 4. 不要输出 Markdown 标题（#），可以用短句与短分点；不要客套开场白；
 5. 涉及票价、开放时间、预约、排队等会变化的信息时，提醒以官方渠道为准；
 6. 片段标注了出处（本报告 / 历史报告 / 城市攻略）；冲突时以本报告为准，
-   历史信息仅作补充；"尚未确认的信息"一节里的内容不得当成已知事实。"""
+   历史信息仅作补充；"尚未确认的信息"与"未完成原文复核"的内容不得当成已知事实；
+7. 不续写、改写或补造评论引文，未提供已验证评论原话时不得声称有这条评论。"""
 
 
 def _clip(text, limit: int = _MAX_ITEM_CHARS) -> str:
@@ -137,7 +139,7 @@ def _point_dossier(tp: dict, name: str, deep: bool) -> str:
                 lines.append(f"      好评：{_clip(dg['positive'])}")
             if dg.get("negative"):
                 lines.append(f"      差评：{_clip(dg['negative'])}")
-            for q in (dg.get("quotes") or [])[:2]:
+            for q in digest_quotes(dg):
                 lines.append(f"      评论原话：{_clip(q, 80)}")
         for pit in (det.get("pitfalls") or [])[:_MAX_LIST_ITEMS]:
             if isinstance(pit, dict) and pit.get("text"):
@@ -176,6 +178,8 @@ def _tp_context(tp: dict, question: str, max_chars: int) -> str:
         f"住宿：{meta.get('stay') or '未指定'}",
         f"生成时间：{meta.get('generated_at') or '—'}",
     ]
+    if snap.get("evidence_version") != VERSION:
+        head.append("原文复核状态：历史档案未完成原文复核，内容只能作待确认线索")
     if meta.get("prefs"):
         head.append(f"用户偏好：{meta['prefs']}")
     if snap.get("summary_note"):
@@ -211,7 +215,7 @@ def _tp_context(tp: dict, question: str, max_chars: int) -> str:
         parts += ["", "■ 避坑专题（附评论原文与来源）"]
         for row in pitfall[:5]:
             seg = f"- {_clip(row.get('claim'), 100)}"
-            if row.get("quote"):
+            if row.get("quote") and usable_points([row]):
                 seg += f"｜评论原话：{_clip(row['quote'], 80)}"
             parts.append(seg)
 
