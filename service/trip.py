@@ -19,7 +19,8 @@ from pathlib import Path
 
 from config import (CITY_GUIDE_ENABLED, CITY_GUIDE_TTL_DAYS, CITY_GUIDE_VIDEOS,
                     FILLBACK_ROUNDS_MAX, KB_TTL_DAYS, PROBE_ENABLED, PROBE_TTL_DAYS,
-                    REPORT_DIR)
+                    REPORT_DIR, PLANNING_GRAPH_ENABLED, PLANNING_POLICY,
+                    PLANNING_MAX_HTTP_ATTEMPTS, PLANNING_SNAPSHOT_TTL)
 from core import entity_match, geo, knowledge, rag
 from core.llm import usage_note
 from core.official_facts import load_city_facts
@@ -552,7 +553,15 @@ def _guide_note(guide: dict, draft: dict | None = None) -> str:
 
 def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
                preferences: str = "",
-               preference_mode: str = "均衡", start_date: str | None = None) -> str:
+               preference_mode: str = "均衡", start_date: str | None = None,
+               excluded_spots: list[str] | None = None) -> str:
+    if excluded_spots and not PLANNING_GRAPH_ENABLED:
+        raise ValueError("明确排除约束需要启用规划子图")
+    if excluded_spots and PLANNING_POLICY != "hard-first-v1":
+        raise ValueError("明确排除约束需要hard-first-v1策略")
+    if PLANNING_GRAPH_ENABLED:
+        from service.planning_flow import ensure_runtime
+        ensure_runtime()
     job_id = uuid.uuid4().hex[:12]
     with _LOCK:
         JOBS[job_id] = {
@@ -570,7 +579,7 @@ def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
         }
     threading.Thread(
         target=_run_trip,
-        args=(job_id, city, days, hotel, spots, preferences, preference_mode, start_date),
+        args=(job_id, city, days, hotel, spots, preferences, preference_mode, start_date, excluded_spots),
         daemon=True,
     ).start()
     return job_id
@@ -579,7 +588,7 @@ def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
 def _run_trip(job_id: str, city: str, days: int, hotel: str,
               user_spots: list[str] | None, preferences: str,
               preference_mode: str = "均衡",
-              start_date: str | None = None) -> None:
+              start_date: str | None = None, excluded_spots: list[str] | None = None) -> None:
     job = JOBS[job_id]
     started = time.time()
     crawler_base.reset_session()   # 任务级会话起点：清空风控标记与导航预算（逐点采集不再各自清零）
@@ -1010,6 +1019,53 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
                 f"{name}：证据{ev}｜热度{h['score']:.2f} {h['trend']}" if h
                 else f"{name}：证据{ev}")
         heat_summary = "\n".join(hs_lines)
+
+        if PLANNING_GRAPH_ENABLED:
+            from service import planning_flow
+            from core.planning_runs import RunCancelled
+            if _cancelled():
+                raise Cancelled()
+            today = datetime.now().strftime("%Y-%m-%d")
+            names = list(profiles) + [str(c.get("name") or "").strip()
+                                     for c in (cands or []) if isinstance(c, dict)]
+            official_map = load_city_facts(city, names, with_amap=geo.available())
+            # 在持久规划边界前完成原热度UPSERT；恢复不重新采集或重复查询地图。
+            try:
+                _persist_heat(city, heat_rows, all_items_for_heat, set(food_profiles))
+            except Exception as exc:
+                log(f"热度快照未写入（不影响路书）：{type(exc).__name__}")
+            snapshot = {
+                "city": city, "days": days, "hotel": hotel, "user_spots": user_spots,
+                "preferences": preferences, "preference_mode": preference_mode, "start_date": start_date,
+                "constraints": {"excluded_spots": sorted({x.strip() for x in (excluded_spots or []) if x.strip()})},
+                "profiles": profiles, "food_profiles": food_profiles, "digests": digests,
+                "spot_points": spot_points, "food_points": food_points,
+                "spot_sources": spot_sources, "food_sources": food_sources,
+                "spot_dates": spot_dates, "food_dates": food_dates,
+                "cands": cands, "verify_results": verify_results,
+                "heat_rows": heat_rows, "heat_summary": heat_summary, "pitfall": pitfall,
+                "guide": guide, "guide_hints": guide_hints, "draft_plan": draft_plan,
+                "guide_note": _guide_note(guide, draft_plan), "locs": locs, "travel_lines": travel_lines,
+                "official_map": official_map, "geo_on": geo.available(), "today": today,
+                "day_weekdays": day_weekdays_from(start_date, days),
+                "funnel_info": funnel_info, "funnel_unresolved": funnel_unresolved,
+                "repair_rounds": QC_REPAIR_ROUNDS, "food_min_samples": FOOD_RANK_MIN_SAMPLES,
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "facts_cutoff": _earliest_data_date({**spot_dates, **food_dates}, today),
+                "collect_mode": "douyin+cache" if douyin_enabled() else "kernel-only",
+                "video_count": sum(len(v) for v in all_items_for_heat.values()),
+                "comment_count": sum(len(i.comments) for v in all_items_for_heat.values() for i in v),
+                "point_count": sum(len(v) for v in spot_points.values()) + sum(len(v) for v in food_points.values()),
+                "elapsed_before_planning": time.time() - started,
+            }
+            try:
+                job["result"] = planning_flow.run_new(
+                    snapshot, job, policy=PLANNING_POLICY, max_attempts=PLANNING_MAX_HTTP_ATTEMPTS,
+                    ttl_seconds=PLANNING_SNAPSHOT_TTL, log=log)
+            except RunCancelled as exc:
+                raise Cancelled() from exc
+            _finish("done", "完成")
+            return
 
         # 5) 规划生成（以视频行程草案为主干；餐饮解耦为美食榜，不排餐厅进时间线）
         job["stage"] = "生成规划"

@@ -130,6 +130,17 @@ def _client_and_model() -> tuple[OpenAI, str]:
     )
 
 
+def planning_client_and_model() -> tuple[OpenAI, str]:
+    """规划专用传输：应用层统一重试，不自动重定向或叠加SDK重试。"""
+    import httpx
+    cfg = get_llm_config()
+    if not cfg:
+        raise NoApiKeyError("未配置模型接入，请先配置后按同run恢复")
+    return OpenAI(api_key=cfg["api_key"], base_url=cfg.get("base_url"), timeout=120,
+                  max_retries=0, http_client=httpx.Client(follow_redirects=False, timeout=120)), (
+        cfg.get("model") or "qwen-turbo")
+
+
 # qwen3.x 混合推理模型默认开启思考模式，会产生超长推理链（大输入下单次数分钟）。
 # 本管道是确定性结构化抽取，思考没有收益只有延迟，统一关闭。
 _EXTRA_BODY = {"enable_thinking": False}

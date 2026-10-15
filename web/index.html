@@ -969,6 +969,7 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
     <div class="stage-row" data-page-node-id="CABZGgDaDodmqCa4AOFkA1">
       <div class="stage" id="stage" data-step="" data-page-node-id="1pKbk2vg9AU3GaHsEXwHgS"></div>
       <button id="cancelBtn" class="mini-btn" onclick="cancelJob()" data-page-node-id="3oclWZqYYr9TuMizaQBHrH">取消任务</button>
+      <button id="resumePlanningBtn" class="mini-btn hidden" onclick="resumePlanning()">恢复规划</button>
     </div>
     <div class="step-rail" id="stepRail" aria-hidden="true" data-page-node-id="LbNlTeJ4YMYm2QnMo1h1ng">
       <span class="step-track" data-page-node-id="aRR0gd78BCaeCa6eHuMs4w"><i data-page-node-id="y77qdA3M396CjC5HlYNRlM"></i></span>
@@ -1049,6 +1050,7 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
 <script>
 const $ = id => document.getElementById(id);
 let currentJobId = null;  // 当前正在轮询的任务，供取消按钮使用
+let currentPlanningRunId = null;
 let currentTab = 'research';
 let outputTab = null;     // 输出区（进度/结果）归属的页签，切换时跟随分类不串页
 let historyRows = [];     // 历史报告原始数据：按报告类型归入对应页签展示
@@ -1184,6 +1186,8 @@ async function go() {
 async function poll(id) {
   const resp = await fetch('/api/jobs/' + id);
   const job = await resp.json();
+  currentPlanningRunId = job.planning_run_id || null;
+  $('resumePlanningBtn').classList.toggle('hidden', !(job.planning && job.planning.resumable));
   $('stage').innerHTML = job.status === 'running'
     ? '<span class="spin"></span>' + job.stage
     : job.stage;
@@ -1204,7 +1208,7 @@ async function poll(id) {
     $('stage').textContent = '任务失败：' + job.error;
     return;
   }
-  $('progress').classList.add('hidden');
+  $('progress').classList.toggle('hidden', !(job.planning && job.planning.resumable));
   if (job.kind === 'heat') {
     renderHeat(job.result);
     if (!$('result').classList.contains('hidden')) {
@@ -1239,6 +1243,25 @@ async function poll(id) {
   }
   loadHistory();
   syncOutput();
+}
+
+async function resumePlanning() {
+  if (!currentPlanningRunId) return;
+  const button = $('resumePlanningBtn');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/planning-runs/' + currentPlanningRunId + '/resume', {method: 'POST'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || '恢复未成功');
+    currentJobId = data.job_id;
+    button.classList.add('hidden');
+    $('stage').className = 'stage';
+    $('stage').textContent = '恢复规划';
+    $('progress').classList.remove('hidden');
+    await poll(data.job_id);
+  } catch (error) {
+    $('stage').textContent = error.message;
+  } finally { button.disabled = false; }
 }
 
 async function goTrip() {

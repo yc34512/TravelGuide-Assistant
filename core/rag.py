@@ -188,6 +188,21 @@ def index_result(result: dict, *, force: bool = False) -> int:
     return _index_chunks(chunks)
 
 
+def index_result_complete(result: dict) -> dict:
+    """独立finalizer使用：检查全部片段，补齐部分失败，不凭一个prefix宣布完成。"""
+    tp = (result or {}).get("trip_plan") or {}
+    chunks = chunks_from_trip_plan(tp, _result_key(result))
+    missing = []
+    for chunk in chunks:
+        old = vector_store.get_item(CORPUS_COLLECTION, chunk["key"])
+        if old is None or old.get("text") != chunk["text"] or old.get("meta") != chunk["meta"]:
+            missing.append(chunk)
+    written = _index_chunks(missing) if missing else 0
+    complete = all((item := vector_store.get_item(CORPUS_COLLECTION, c["key"])) is not None
+                   and item.get("text") == c["text"] and item.get("meta") == c["meta"] for c in chunks)
+    return {"complete": complete, "written": written, "expected": len(chunks)}
+
+
 def index_city_guide(city: str, guide: dict) -> int:
     """把城市攻略层（编排知识，§13.4）切块入库；重复调用时重建该城的片段。
 

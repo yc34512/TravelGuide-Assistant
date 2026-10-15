@@ -5819,6 +5819,7 @@ class TestEmbeddingsAndVectorStore(unittest.TestCase):
 def load_tests(loader, tests, pattern):
     """既有CI入口同时执行新的证据链回归，不依赖额外命令。"""
     tests.addTests(loader.loadTestsFromName("tests_evidence"))
+    tests.addTests(loader.loadTestsFromName("tests_planning"))
     return tests
 
 

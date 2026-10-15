@@ -13,3 +13,6 @@ PyYAML>=6.0
 # 向量检索加速（设计规格 §13.5 选型）：装不上/缺失时自动降级为 SQLite 向量 + 纯 Python 余弦，
 # 检索功能不受影响（本地语料规模足够），因此它属于可选依赖。
 faiss-cpu>=1.8.0
+# 规划子图及持久SQLite检查点（本次隔离环境核验版本）
+langgraph==1.2.15
+langgraph-checkpoint-sqlite==3.1.2

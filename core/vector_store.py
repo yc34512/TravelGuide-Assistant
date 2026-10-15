@@ -16,13 +16,14 @@ import json
 import sqlite3
 from array import array
 from datetime import datetime
+from core.sqlite_utils import ClosingConnection
 
 _LOCK_HINT = None   # 并发写由 SQLite 自身事务保证；本模块不做进程内缓存（查询频率低）
 
 
 def _conn() -> sqlite3.Connection:
     from core import knowledge   # 延迟导入：复用同一个 DB 路径变量（测试可替换）
-    conn = sqlite3.connect(knowledge._DB_PATH)
+    conn = sqlite3.connect(knowledge._DB_PATH, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute(
         """

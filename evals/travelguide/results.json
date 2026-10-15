@@ -1,0 +1,153 @@
+{
+  "evaluation": "synthetic_policy_counterexamples",
+  "fixture_version": 1,
+  "source_hash": "c48c6b41c6aacf5ed3d428c5b00af4adcd865dae0121e779714eb99b5635ff44",
+  "model": null,
+  "model_requests": 0,
+  "token_usage": null,
+  "correct_cases": 7,
+  "total_cases": 7,
+  "cases": [
+    {
+      "id": "soft_gain_adds_closed_conflict",
+      "label_source": "设计A07：禁止软收益抵消新增硬违反",
+      "input_hash": "ce52d59ddadd9af480faf2995dabf7c2c0e83e3e639da8f3609cfaa4fc7b913a",
+      "expected": {
+        "legacy-v1": true,
+        "hard-first-v1": false
+      },
+      "actual": {
+        "legacy-v1": {
+          "adopt": true,
+          "reason": "legacy_problem_count"
+        },
+        "hard-first-v1": {
+          "adopt": false,
+          "reason": "new_hard_violation"
+        }
+      },
+      "passed": true
+    },
+    {
+      "id": "same_count_different_hard",
+      "label_source": "设计A07：集合身份而非违反数量",
+      "input_hash": "c2b6f9478b5f1c3a31c304a3d2c2fcb5965444681c7087c5d908cc5b032b3e46",
+      "expected": {
+        "legacy-v1": true,
+        "hard-first-v1": false
+      },
+      "actual": {
+        "legacy-v1": {
+          "adopt": true,
+          "reason": "legacy_problem_count"
+        },
+        "hard-first-v1": {
+          "adopt": false,
+          "reason": "new_hard_violation"
+        }
+      },
+      "passed": true
+    },
+    {
+      "id": "hard_removed_soft_more",
+      "label_source": "设计6.4：硬集严格缩小优先",
+      "input_hash": "1e5cd032cc5c16524ba81297a386bf47191d735824a951316ca7391f7bb22633",
+      "expected": {
+        "legacy-v1": false,
+        "hard-first-v1": true
+      },
+      "actual": {
+        "legacy-v1": {
+          "adopt": false,
+          "reason": "legacy_problem_count"
+        },
+        "hard-first-v1": {
+          "adopt": true,
+          "reason": "hard_set_reduced"
+        }
+      },
+      "passed": true
+    },
+    {
+      "id": "soft_strict_improvement",
+      "label_source": "设计6.4：硬集相同才比较软问题",
+      "input_hash": "ca4be5c5a9eca81cf0e87f06dc0b047faa245f520ec7162d08d47b554475f535",
+      "expected": {
+        "legacy-v1": true,
+        "hard-first-v1": true
+      },
+      "actual": {
+        "legacy-v1": {
+          "adopt": true,
+          "reason": "legacy_problem_count"
+        },
+        "hard-first-v1": {
+          "adopt": true,
+          "reason": "soft_improved"
+        }
+      },
+      "passed": true
+    },
+    {
+      "id": "tie_keeps_old",
+      "label_source": "设计6.4：平局保留旧版",
+      "input_hash": "b4ccff035f925d4236b02c8b43ae5bf54018406280812ae45c6b163e8aaa2d9e",
+      "expected": {
+        "legacy-v1": false,
+        "hard-first-v1": false
+      },
+      "actual": {
+        "legacy-v1": {
+          "adopt": false,
+          "reason": "legacy_problem_count"
+        },
+        "hard-first-v1": {
+          "adopt": false,
+          "reason": "no_strict_improvement"
+        }
+      },
+      "passed": true
+    },
+    {
+      "id": "data_removed_false_pass",
+      "label_source": "设计A07：资料丢失不能形成虚假改善",
+      "input_hash": "6af4dfc0d8d96bd1d0aa064d3f2b786d9ba3c4999c1485628591ee3cecb5b45e",
+      "expected": {
+        "legacy-v1": true,
+        "hard-first-v1": false
+      },
+      "actual": {
+        "legacy-v1": {
+          "adopt": true,
+          "reason": "legacy_problem_count"
+        },
+        "hard-first-v1": {
+          "adopt": false,
+          "reason": "lost_validation_coverage"
+        }
+      },
+      "passed": true
+    },
+    {
+      "id": "invalid_contract",
+      "label_source": "设计6.4：格式与点位契约必须有效",
+      "input_hash": "cad380425e707ab2308d0e6fd0ce0353353fc48c30364ad32792bf9522bec284",
+      "expected": {
+        "legacy-v1": true,
+        "hard-first-v1": false
+      },
+      "actual": {
+        "legacy-v1": {
+          "adopt": true,
+          "reason": "legacy_problem_count"
+        },
+        "hard-first-v1": {
+          "adopt": false,
+          "reason": "invalid_contract"
+        }
+      },
+      "passed": true
+    }
+  ],
+  "scope": "规则采纳反例；不代表真实模型效果、旅游事实准确率或成本节省"
+}

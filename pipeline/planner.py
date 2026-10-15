@@ -520,15 +520,15 @@ def build_legs(city: str, hotel: str, plan: dict, locs: dict[str, str],
     return legs
 
 
-def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
+def prepare_plan_request(city: str, days: int, hotel: str, profiles: dict[str, dict],
                    travel_lines: list[str], preferences: str,
                    preference_mode: str = "均衡",
                    extra_issues: list[str] | None = None,
                    heat_summary: str = "",
                    guide_hints: list[str] | None = None,
                    draft_plan: dict | None = None,
-                   points_by_spot: dict[str, list[dict]] | None = None) -> dict:
-    """一次 LLM 调用生成行程 JSON，随后做防御性规范化（排布兜底见 rebalance_days）。
+                   points_by_spot: dict[str, list[dict]] | None = None) -> tuple[str, dict]:
+    """纯函数构造规划提示与引用名单；不发送模型请求。
 
     extra_issues：来自 pipeline.qc 权威门禁的修正指令（F5.2 有限回炉）。传入时连同覆盖率
     问题一起写进回炉提示；采纳条件放宽为"覆盖率不变差即返回重试版"，最终是否采纳由调用方
@@ -584,6 +584,22 @@ def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
         user += "\n\n按景点限定的避坑引用名单（只选择编号）：\n" + "\n".join(
             f"{name} [{qid}] {record['text']}" for name, bank in quote_banks.items()
             for qid, record in bank.items())
+    return user, quote_banks
+
+
+def plan_itinerary(city: str, days: int, hotel: str, profiles: dict[str, dict],
+                   travel_lines: list[str], preferences: str,
+                   preference_mode: str = "均衡",
+                   extra_issues: list[str] | None = None,
+                   heat_summary: str = "",
+                   guide_hints: list[str] | None = None,
+                   draft_plan: dict | None = None,
+                   points_by_spot: dict[str, list[dict]] | None = None) -> dict:
+    """兼容原入口：保留生成、覆盖修复、餐饮清理与排布顺序。"""
+    user, quote_banks = prepare_plan_request(
+        city, days, hotel, profiles, travel_lines, preferences, preference_mode,
+        heat_summary=heat_summary, guide_hints=guide_hints, draft_plan=draft_plan,
+        points_by_spot=points_by_spot)
     data = chat_json(PLAN_SYSTEM, user)
     plan = _normalize_plan(data, set(profiles.keys()), days, quote_banks)
     # 覆盖率兜底 + 质量门禁回炉：排点过少/晚上型错位/未排景点无备选说明（_coverage_issues），

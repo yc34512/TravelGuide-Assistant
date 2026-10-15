@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from config import DATA_DIR
+from core.sqlite_utils import ClosingConnection
 
 _DB_PATH = DATA_DIR / "knowledge.db"
 
@@ -44,7 +45,7 @@ def normalize_keyword(keyword: str) -> str:
 
 
 def _conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(_DB_PATH)
+    conn = sqlite3.connect(_DB_PATH, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute(
         """
@@ -492,9 +493,10 @@ def register_report(keyword: str, report_path: str, video_count: int = 0,
     with _conn() as conn:
         conn.execute(
             "INSERT INTO report_registry (keyword, report_path, reported_at,"
-            " video_count, comment_count) VALUES (?, ?, ?, ?, ?)",
+            " video_count, comment_count) SELECT ?, ?, ?, ?, ?"
+            " WHERE NOT EXISTS (SELECT 1 FROM report_registry WHERE report_path=?)",
             (keyword, report_path, datetime.now().isoformat(timespec="seconds"),
-             video_count, comment_count),
+             video_count, comment_count, report_path),
         )
 
 
@@ -547,7 +549,7 @@ def list_history(limit: int = 20) -> list[dict]:
 # —— 任务档案：只持久化终态（完成/失败/取消），运行中任务仅存内存 ——
 
 def record_job(job: dict) -> None:
-    """任务到达终态时落库（UPSERT）：重启后历史任务仍可查询。"""
+    """任务档案UPSERT；规划开始时也可保存，只有终态填写finished_at。"""
     result_json = json.dumps(job.get("result"), ensure_ascii=False) if job.get("result") else None
     with _conn() as conn:
         conn.execute(
@@ -565,7 +567,8 @@ def record_job(job: dict) -> None:
                 result_json,
                 job.get("error"),
                 job.get("created_at", datetime.now().isoformat(timespec="seconds")),
-                datetime.now().isoformat(timespec="seconds"),
+                datetime.now().isoformat(timespec="seconds") if job.get("status") in
+                {"done", "error", "cancelled"} else None,
             ),
         )
 

@@ -56,6 +56,7 @@ class TripIn(BaseModel):
     preferences: str = ""
     preference_mode: str = "均衡"  # 省钱优先 / 体验优先 / 均衡（影响选点倾向，不参与预算计算）
     start_date: str | None = None  # 出发日 YYYY-MM-DD（选填）：提供后 R3 按官方闭馆日真校行程
+    excluded_spots: list[str] | None = None  # 用户显式提交的硬约束，不从自由文本猜测
 
 
 class HeatRefreshIn(BaseModel):
@@ -236,11 +237,17 @@ def start_trip_api(body: TripIn):
     mode = body.preference_mode.strip() or "均衡"
     if mode not in ("省钱优先", "体验优先", "均衡"):
         raise HTTPException(status_code=400, detail="消费偏好仅支持：省钱优先 / 体验优先 / 均衡")
-    job_id = trip.start_trip(
-        city, body.days, body.hotel.strip(), body.spots, body.preferences.strip(),
-        preference_mode=mode,
-        start_date=(body.start_date or "").strip() or None,
-    )
+    try:
+        job_id = trip.start_trip(
+            city, body.days, body.hotel.strip(), body.spots, body.preferences.strip(),
+            preference_mode=mode,
+            start_date=(body.start_date or "").strip() or None,
+            excluded_spots=body.excluded_spots,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     return {"job_id": job_id}
 
 
@@ -254,6 +261,8 @@ def jobs_history():
 @app.get("/api/jobs/{job_id}", summary="查询任务状态/进度/结果")
 def job_status(job_id: str):
     job = research.get_job(job_id)
+    from service import planning_flow
+    job = planning_flow.job_state(job_id, job)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
     return job
@@ -262,11 +271,65 @@ def job_status(job_id: str):
 @app.post("/api/jobs/{job_id}/cancel", summary="取消运行中的任务")
 def cancel_job(job_id: str):
     """取消运行中的任务。已在终态或不存在时返回 409。"""
-    if research.get_job(job_id) is None:
+    from core.planning_runs import default_store
+    store = default_store()
+    planning = store.for_job(job_id)
+    if research.get_job(job_id) is None and planning is None:
         raise HTTPException(status_code=404, detail="任务不存在")
+    if planning and planning["status"] != "done":
+        store.cancel(planning["run_id"])
+        research.cancel_job(job_id)
+        return {"ok": True}
     if not research.cancel_job(job_id):
         raise HTTPException(status_code=409, detail="任务不在运行中，无法取消")
     return {"ok": True}
+
+
+@app.get("/api/planning-runs/{run_id}", summary="查询持久规划状态、恢复边界和调用账本")
+def planning_status(run_id: str):
+    from core.planning_runs import default_store
+    try:
+        return default_store().public(run_id)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="规划运行不存在")
+
+
+@app.get("/api/planning-runs/{run_id}/events", summary="读取规划节点、请求及采纳事件")
+def planning_events(run_id: str):
+    from core.planning_runs import default_store
+    try:
+        store = default_store()
+        store.get(run_id)
+        return {"run_id": run_id, "events": store.events(run_id)}
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="规划运行不存在")
+
+
+@app.post("/api/planning-runs/{run_id}/resume", status_code=202,
+          summary="按原快照恢复规划和补做报告；不重新采集")
+def resume_planning(run_id: str):
+    from core.planning_runs import RunError
+    from service import planning_flow
+    try:
+        return planning_flow.resume(run_id)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="规划运行不存在")
+    except RunError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/api/planning-runs/{run_id}/cancel", summary="持久取消规划；恢复不能清除取消状态")
+def cancel_planning(run_id: str):
+    from core.planning_runs import default_store
+    try:
+        store = default_store()
+        row = store.get(run_id)
+        if row["status"] == "done":
+            raise HTTPException(status_code=409, detail="规划已完成")
+        store.cancel(run_id)
+        return {"ok": True, "run_id": run_id}
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="规划运行不存在")
 
 
 @app.get("/api/reports", summary="历史报告列表")

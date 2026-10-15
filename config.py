@@ -13,6 +13,12 @@ REPORT_DIR = DATA_DIR / "reports"
 DEBUG_DIR = DATA_DIR / "debug"
 BROWSER_PROFILE_DIR = PROJECT_ROOT / "browser_profile"
 
+# 一期只迁移准备好资料后的规划。可关闭回退原流程；不改变采集导航与风控预算。
+PLANNING_GRAPH_ENABLED = os.getenv("PLANNING_GRAPH_ENABLED", "true").lower() == "true"
+PLANNING_POLICY = os.getenv("PLANNING_POLICY", "hard-first-v1")
+PLANNING_MAX_HTTP_ATTEMPTS = int(os.getenv("PLANNING_MAX_HTTP_ATTEMPTS", "12"))
+PLANNING_SNAPSHOT_TTL = int(os.getenv("PLANNING_SNAPSHOT_TTL", "86400"))
+
 for _d in (DATA_DIR, RAW_DIR, REPORT_DIR, DEBUG_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
