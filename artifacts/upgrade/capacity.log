@@ -1,0 +1,111 @@
+wrote C:\Users\35290\Desktop\TravelGuide Assitant\data\upgrade\capacity_report.json
+{
+  "submit_query": [
+    {
+      "concurrency": 1,
+      "elapsed_s": 0.005,
+      "accepted": 1,
+      "rejected": 0,
+      "errors": [],
+      "latency_ms": {
+        "p50": 4.294,
+        "p95": 4.294,
+        "max": 4.294
+      },
+      "queue_states": {
+        "pipeline": {
+          "queued": 1
+        }
+      }
+    },
+    {
+      "concurrency": 5,
+      "elapsed_s": 0.044,
+      "accepted": 5,
+      "rejected": 0,
+      "errors": [],
+      "latency_ms": {
+        "p50": 12.991,
+        "p95": 40.243,
+        "max": 43.325
+      },
+      "queue_states": {
+        "pipeline": {
+          "queued": 5
+        }
+      }
+    },
+    {
+      "concurrency": 10,
+      "elapsed_s": 0.141,
+      "accepted": 10,
+      "rejected": 0,
+      "errors": [],
+      "latency_ms": {
+        "p50": 37.375,
+        "p95": 125.273,
+        "max": 139.673
+      },
+      "queue_states": {
+        "pipeline": {
+          "queued": 10
+        }
+      }
+    },
+    {
+      "concurrency": 20,
+      "elapsed_s": 0.475,
+      "accepted": 20,
+      "rejected": 0,
+      "errors": [],
+      "latency_ms": {
+        "p50": 96.883,
+        "p95": 366.946,
+        "max": 472.89
+      },
+      "queue_states": {
+        "pipeline": {
+          "queued": 20
+        }
+      }
+    },
+    {
+      "concurrency": 50,
+      "elapsed_s": 2.132,
+      "accepted": 50,
+      "rejected": 0,
+      "errors": [],
+      "latency_ms": {
+        "p50": 360.641,
+        "p95": 1857.655,
+        "max": 2126.6
+      },
+      "queue_states": {
+        "pipeline": {
+          "queued": 50
+        }
+      }
+    },
+    {
+      "concurrency": 100,
+      "elapsed_s": 4.153,
+      "accepted": 100,
+      "rejected": 0,
+      "errors": [],
+      "latency_ms": {
+        "p50": 998.063,
+        "p95": 3601.416,
+        "max": 4141.853
+      },
+      "queue_states": {
+        "pipeline": {
+          "queued": 100
+        }
+      }
+    }
+  ],
+  "rejection": {
+    "configured_queue_cap": 5,
+    "accepted": 5,
+    "rejected": 5,
+    "

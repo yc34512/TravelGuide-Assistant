@@ -1,0 +1,23 @@
+{
+  "tests": {
+    "ok": true,
+    "tail": [
+      "OK (skipped=1)"
+    ]
+  },
+  "agent_eval": {
+    "ok": true
+  },
+  "fault_injection": {
+    "ok": true
+  },
+  "migration_dry_run": {
+    "ok": true
+  },
+  "ui_logic": {
+    "ok": true
+  },
+  "capacity": {
+    "ok": true
+  }
+}

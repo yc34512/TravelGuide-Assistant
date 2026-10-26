@@ -811,6 +811,24 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
   .tbl-wrap{ overflow:visible; }
   #report .heat-tbl{ min-width:0; }
 }
+
+/* —— 版本/差异/工具追问（2026-10 服务化升级）—— */
+.versions-panel{margin:14px 0 18px;padding:14px 16px;border:1px solid rgba(120,90,60,.18);border-radius:12px;background:rgba(255,252,246,.72)}
+.versions-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.versions-head b{font-size:15px}
+.versions-head span{font-size:12px;opacity:.65}
+.versions-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.versions-list li{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;padding:6px 0;border-bottom:1px dashed rgba(120,90,60,.14)}
+.versions-list li:last-child{border-bottom:0}
+.versions-list .v-active{color:#2e7d32;font-weight:600}
+.versions-list .v-meta{opacity:.65}
+.version-actions{margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.diff-box{margin-top:12px;padding:12px;border-radius:10px;background:rgba(245,240,230,.7);font-size:13px;line-height:1.65}
+.diff-box h4{margin:6px 0 4px;font-size:13px}
+.diff-box ul{margin:2px 0 6px;padding-left:18px}
+.diff-ok{color:#2e7d32}.diff-bad{color:#b3261e}
+.agent-answer{white-space:pre-wrap}
+.agent-meta{margin-top:8px;font-size:12px;opacity:.72}
 </style>
 </head>
 <body data-page-node-id="JjgoRjxoaq3gTCm95tlqZJ">
@@ -873,13 +891,26 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
     </div>
   </section>
 
-  <!-- 01 检索台 -->
+  <!-- 01 旧稿书阁（展厅化：首屏展示已有成品，访客先看到报告再看到采集入口） -->
+  <div id="history" class="card hidden" data-page-node-id="j998GUGOBlttERCSt2EO3z">
+    <div class="sec-head" data-page-node-id="JM69xSSLEXdBdoDOElJzfa">
+      <span class="sec-no" aria-hidden="true" data-page-node-id="RwjN8s14CjnoySDuZv9Rb0">01</span>
+      <div class="sec-title" data-page-node-id="US1vuS6pAHVYi3dTNTR30n"><h2 data-page-node-id="loAJup7xod4ayQ6phFIuen">旧稿书阁</h2><p class="sec-en" data-page-node-id="KKFkJG00Zs3xnIfYEYqpCC">ARCHIVE · 历史报告（知识库）</p></div>
+      <span class="sec-rule" aria-hidden="true" data-page-node-id="wnmPtbAQSkuZfsTwHzgC0d"></span>
+    </div>
+    <ul class="hist" id="hist" data-page-node-id="5pHm8ucMTs1nYRonLwgttp"></ul>
+  </div>
+
+  <!-- 02 检索台 -->
   <div class="card console reveal" style="--d:60ms" data-page-node-id="0Lp2GhvDFSjVtXiGgnllkI">
     <div class="sec-head" data-page-node-id="byM4ot2ODy7XJF0injhsSP">
-      <span class="sec-no" aria-hidden="true" data-page-node-id="yw6WQ79NlW9LRk5Uzv9GxT">01</span>
+      <span class="sec-no" aria-hidden="true" data-page-node-id="yw6WQ79NlW9LRk5Uzv9GxT">02</span>
       <div class="sec-title" data-page-node-id="2lFZWO4E5f2LHkpD7Fq8Jm"><h2 data-page-node-id="BSSsvomgO98gKklAjXLEDk">检索台</h2><p class="sec-en" data-page-node-id="iK9bWrkXRQXkLaVUvEOHFH">SEARCH DESK</p></div>
       <span class="sec-rule" aria-hidden="true" data-page-node-id="GpXZFVvXXZfluPcG5M4C69"></span>
     </div>
+    <p style="margin:12px 0 2px; padding:10px 14px; border-left:3px solid var(--cinnabar); background:rgba(192,57,43,.055); font-size:13px; line-height:1.8; color:var(--ink-2); border-radius:0 6px 6px 0;" data-page-node-id="demoNoteReadOnly">
+      <b>线上为只读演示</b>：已有报告可直接浏览、追问；<b>采集与生成任务需在本地执行</b>——云服务器 IP 采集会触发平台风控，本项目坚持“只熔断不绕过”，因此线上不开放实时采集。
+    </p>
     <div class="tabs" data-page-node-id="HrpHcGFUB82rw9ydvkwmlP">
       <span class="tab-pill" aria-hidden="true" data-page-node-id="YYN6dK5aHtWHpzOAzO1mbd"></span>
       <button id="tab-research" class="tab active" onclick="switchTab('research')" data-page-node-id="po24VMcGasaTt5q4JZ7DKH">攻略报告</button>
@@ -959,16 +990,17 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
     </div>
   </div>
 
-  <!-- 02 采录中 -->
+  <!-- 03 采录中 -->
   <div id="progress" class="card progress-card hidden" data-page-node-id="o1NK5Vwm3T0oZzfEDGjhwO">
     <div class="sec-head" data-page-node-id="uaRxrbPfJsJxAeVLFklCX7">
-      <span class="sec-no" aria-hidden="true" data-page-node-id="4wbkFSmSAgxaHXagG6Y6TG">02</span>
+      <span class="sec-no" aria-hidden="true" data-page-node-id="4wbkFSmSAgxaHXagG6Y6TG">03</span>
       <div class="sec-title" data-page-node-id="nC2eHzVPIy1MuxtcY7Sqsl"><h2 data-page-node-id="vBTQTEe7zXxQ4i6db47vO8">采录中</h2><p class="sec-en" data-page-node-id="UucLifsa4D7osuOVA8ZC8l">IN PROGRESS</p></div>
       <span class="sec-rule" aria-hidden="true" data-page-node-id="aAwUmY7NS4LogQ6XxNx6JR"></span>
     </div>
     <div class="stage-row" data-page-node-id="CABZGgDaDodmqCa4AOFkA1">
       <div class="stage" id="stage" data-step="" data-page-node-id="1pKbk2vg9AU3GaHsEXwHgS"></div>
       <button id="cancelBtn" class="mini-btn" onclick="cancelJob()" data-page-node-id="3oclWZqYYr9TuMizaQBHrH">取消任务</button>
+      <button id="retryBtn" class="mini-btn hidden" onclick="retryJob()">重试任务</button>
       <button id="resumePlanningBtn" class="mini-btn hidden" onclick="resumePlanning()">恢复规划</button>
     </div>
     <div class="step-rail" id="stepRail" aria-hidden="true" data-page-node-id="LbNlTeJ4YMYm2QnMo1h1ng">
@@ -983,10 +1015,10 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
     </div>
   </div>
 
-  <!-- 03 成稿 -->
+  <!-- 04 成稿 -->
   <div id="result" class="card hidden" data-page-node-id="VNjLV8Ro6axxkNfI8ZcZwG">
     <div class="sec-head" data-page-node-id="PEAjQ7xFEN7oWXoQprkuD7">
-      <span class="sec-no" aria-hidden="true" data-page-node-id="YNb90tuZZfZWMltKclR5hu">03</span>
+      <span class="sec-no" aria-hidden="true" data-page-node-id="YNb90tuZZfZWMltKclR5hu">04</span>
       <div class="sec-title" data-page-node-id="WaSNhorC83d0SPEIXn6QQU"><h2 data-page-node-id="6QcA9Y43FspofFmdGu1dyf">成稿</h2><p class="sec-en" data-page-node-id="aLj9x6qs51CsJAOWgYj3E3">THE REPORT</p></div>
       <span class="sec-rule" aria-hidden="true" data-page-node-id="XtOCzmBUVELbCtrMcSeKpx"></span>
     </div>
@@ -996,6 +1028,15 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
         <a id="dlHtml" class="mini-btn btn-solid hidden" href="#" target="_blank" data-page-node-id="cUMq1zgSEYhMunE8H3itsX">📊 打开可视化路书</a>
         <a id="dl" class="mini-btn" download data-page-node-id="607Ew5RRmswVv5gMcYDZIJ">下载 Markdown</a>
       </div>
+    </div>
+    <div id="versionsPanel" class="versions-panel hidden">
+      <div class="versions-head"><b>行程版本</b><span id="versionsHint">旧版保留，采用新版需你明确确认</span></div>
+      <ul id="versionsList" class="versions-list"></ul>
+      <div class="version-actions">
+        <button id="changeBtn" class="mini-btn" onclick="createChange()">变更此行程</button>
+        <span id="changeMsg" class="v-meta"></span>
+      </div>
+      <div id="diffBox" class="diff-box hidden"></div>
     </div>
     <div class="toc hidden" id="toc" data-page-node-id="MbPy7QBJRJMpkxG7yZBIgK"></div>
     <article id="report" data-page-node-id="aLDxgwhNv5BfaeXFDrTG0W"></article>
@@ -1013,20 +1054,12 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
         <input type="text" id="askInput" placeholder="例如：两个景点只能去一个，选哪个？为什么？"
                onkeydown="if(event.key==='Enter')askQuestion()" data-page-node-id="xaF1ihotnVkM5NS484Hprj">
         <button id="askBtn" class="btn-primary" onclick="askQuestion()" data-page-node-id="SkDoWdOXFwzBYILDMhSkt6">提问</button>
+        <button id="askAgentBtn" class="mini-btn" onclick="askAgent()" title="复杂比较/交通/证据核对：调用只读工具，速度较慢">深度分析</button>
       </div>
       <p class="ask-tip" data-page-node-id="1NT28Vx7kshJgn91vJQWGM">回答只依据这份报告已有的档案，不会重新采集数据；票价、开放时间等时效信息请以官方渠道为准。</p>
     </div>
   </div>
 
-  <!-- 04 旧稿书阁 -->
-  <div id="history" class="card hidden" data-page-node-id="j998GUGOBlttERCSt2EO3z">
-    <div class="sec-head" data-page-node-id="JM69xSSLEXdBdoDOElJzfa">
-      <span class="sec-no" aria-hidden="true" data-page-node-id="RwjN8s14CjnoySDuZv9Rb0">04</span>
-      <div class="sec-title" data-page-node-id="US1vuS6pAHVYi3dTNTR30n"><h2 data-page-node-id="loAJup7xod4ayQ6phFIuen">旧稿书阁</h2><p class="sec-en" data-page-node-id="KKFkJG00Zs3xnIfYEYqpCC">ARCHIVE · 历史报告（知识库）</p></div>
-      <span class="sec-rule" aria-hidden="true" data-page-node-id="wnmPtbAQSkuZfsTwHzgC0d"></span>
-    </div>
-    <ul class="hist" id="hist" data-page-node-id="5pHm8ucMTs1nYRonLwgttp"></ul>
-  </div>
 </main>
 
 <footer data-page-node-id="qPcpxyb669C4xN5fGNJemb">
@@ -1051,6 +1084,10 @@ body.ready .hfx-fade{ opacity:1; transition:opacity 1.1s ease var(--d,0ms); }
 const $ = id => document.getElementById(id);
 let currentJobId = null;  // 当前正在轮询的任务，供取消按钮使用
 let currentPlanningRunId = null;
+let currentReportId = null;          // 当前报告的版本账本 ID
+let currentActiveVersionId = null;   // 当前激活版本（激活 CAS 的 expected 值）
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+  {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let currentTab = 'research';
 let outputTab = null;     // 输出区（进度/结果）归属的页签，切换时跟随分类不串页
 let historyRows = [];     // 历史报告原始数据：按报告类型归入对应页签展示
@@ -1165,7 +1202,8 @@ async function go() {
   try {
     const resp = await fetch('/api/research', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json',
+                'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) },
       body: JSON.stringify({
         keyword: kw,
         mode: document.querySelector('input[name=mode]:checked').value,
@@ -1198,6 +1236,13 @@ async function poll(id) {
   $('tripBtn').disabled = false;
   $('heatBtn').disabled = false;
   currentJobId = null;
+  $('retryBtn').classList.add('hidden');
+  if (job.state === 'needs_review') {
+    $('stage').className = 'stage err';
+    $('stage').textContent = '任务需要人工复核：' + (job.error || '外部调用状态不确定');
+    if (job.retryable) $('retryBtn').classList.remove('hidden');
+    return;
+  }
   if (job.status === 'cancelled') {
     $('stage').className = 'stage err';
     $('stage').textContent = '任务已取消（浏览器与采集资源已释放）';
@@ -1206,7 +1251,14 @@ async function poll(id) {
   if (job.status === 'error') {
     $('stage').className = 'stage err';
     $('stage').textContent = '任务失败：' + job.error;
+    if (job.retryable) $('retryBtn').classList.remove('hidden');
     return;
+  }
+  if (job.kind === 'trip' || job.kind === 'trip_change') {
+    currentReportId = job.report_id || (job.result && job.result.report_id) || null;
+    if (currentReportId) loadVersions(currentReportId);
+  } else {
+    $('versionsPanel').classList.add('hidden');
   }
   $('progress').classList.toggle('hidden', !(job.planning && job.planning.resumable));
   if (job.kind === 'heat') {
@@ -1227,7 +1279,7 @@ async function poll(id) {
   } else {
     $('dlHtml').classList.add('hidden');
   }
-  $('stats').innerHTML = job.kind === 'trip'
+  $('stats').innerHTML = (job.kind === 'trip' || job.kind === 'trip_change')
     ? `<span>行程 <b>${job.keyword}</b></span><span>景点 <b>${s.spots}</b> 个</span>` +
       `<span>要点 <b>${s.points}</b> 条</span><span>耗时 <b>${s.elapsed}</b> 秒</span>` +
       `<span>文件：${r.report_name}</span>`
@@ -1281,7 +1333,8 @@ async function goTrip() {
   try {
     const resp = await fetch('/api/trip', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json',
+                'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) },
       body: JSON.stringify({
         city: city,
         days: days,
@@ -1436,7 +1489,8 @@ async function goHeatRefresh() {
   try {
     const resp = await fetch('/api/heat/refresh', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json',
+                'Idempotency-Key': (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()) },
       body: JSON.stringify({ city: city }),
     });
     if (!resp.ok) throw new Error((await resp.json()).detail || '请求失败');
@@ -1487,7 +1541,8 @@ function renderHistory() {
     const isMd = (r.report_path || '').endsWith('.md');
     const isTrip = isMd && (r.keyword || '').startsWith('行程');
     const enc = encodeURIComponent(r.report_path);
-    const open = isMd ? `openHtmlReport('${enc}')` : `viewReport('${enc}')`;
+    const rid = (isTrip && r.report_id) ? `'${r.report_id}'` : 'null';
+    const open = isMd ? `openHtmlReport('${enc}', ${rid})` : `viewReport('${enc}', ${rid})`;
     return `<li><span class="kw" onclick="${open}">${r.keyword}</span>` +
       `<span class="meta">${(r.reported_at || '').replace('T', ' ')} · 视频 ${r.video_count} · 评论 ${r.comment_count}</span>` +
       (isMd
@@ -1503,9 +1558,11 @@ function renderHistory() {
 // 杂志排版、行程全景图、详情弹层都在那边，Markdown 只是工程留档。
 // 同时把追问上下文指向这份报告，回到站内还能接着问。
 // 早期报告只有 Markdown 留档（HTML 是后加的），先探测一次再决定，避免开空页。
-async function openHtmlReport(name) {
+async function openHtmlReport(name, reportId) {
   const md = decodeURIComponent(name);
   outputTab = currentTab;
+  currentReportId = reportId || null;
+  if (currentReportId) loadVersions(currentReportId);
   setAskCtx({ report_name: md });   // 让追问仍能反查到这份报告的档案
   const url = '/api/reports/download?name='
     + encodeURIComponent(md.replace(/\.md$/, '.html'));
@@ -1519,11 +1576,13 @@ async function openHtmlReport(name) {
   viewReport(name);                 // 退化：站内 Markdown 视图，至少内容不丢
 }
 
-async function viewReport(name) {
+async function viewReport(name, reportId) {
   const resp = await fetch('/api/reports/download?name=' + name);
   if (!resp.ok) { alert('报告文件不存在或已被删除'); return; }
   const md = await resp.text();
   outputTab = currentTab;  // 从历史点开的内容归属当前页签
+  currentReportId = reportId || null;
+  if (currentReportId) loadVersions(currentReportId);
   $('result').classList.remove('hidden');
   // 历史报告没有 job_id：用文件名让后端反查生成它的任务档案
   setAskCtx({ report_name: decodeURIComponent(name) });
@@ -1581,12 +1640,171 @@ async function askQuestion(preset) {
   }
 }
 
+
+// —— 报告版本：列表 / 结构化差异 / 激活 CAS / 变更任务 ——
+async function loadVersions(reportId) {
+  if (!reportId) { $('versionsPanel').classList.add('hidden'); return; }
+  try {
+    const resp = await fetch('/api/reports/' + reportId + '/versions');
+    if (!resp.ok) throw new Error('版本列表加载失败');
+    const data = await resp.json();
+    const versions = data.versions || [];
+    const detail = await (await fetch('/api/reports/' + reportId + '/summary')).json().catch(() => ({}));
+    currentActiveVersionId = detail.active_version_id || null;
+    $('versionsPanel').classList.remove('hidden');
+    $('versionsList').innerHTML = versions.map(v => {
+      const active = v.version_id === currentActiveVersionId;
+      const created = (v.created_at ? new Date(v.created_at * 1000).toLocaleString() : '');
+      const cls = active ? 'v-active' : '';
+      const actions = active ? '<span class="v-active">当前版本</span>'
+        : `<button class="mini-btn" onclick="showDiff('${reportId}','${v.version_id}')">查看差异</button>` +
+          `<button class="mini-btn" onclick="activateVersion('${reportId}','${v.version_id}')">采用此版</button>`;
+      return `<li><span class="${cls}">v${v.version_no}</span>` +
+        `<span class="v-meta">${esc(v.quality_status || '')} · ${esc(created)}</span>` +
+        `${actions}</li>`;
+    }).join('') || '<li class="v-meta">暂无版本记录</li>';
+    $('changeMsg').textContent = '';
+  } catch (e) {
+    $('versionsPanel').classList.add('hidden');
+  }
+}
+
+async function showDiff(reportId, versionId) {
+  const box = $('diffBox');
+  box.classList.remove('hidden');
+  box.innerHTML = '<span class="ask-loading"><span class="spin"></span>正在比较版本…</span>';
+  try {
+    const q = '?to_version_id=' + encodeURIComponent(versionId);
+    const resp = await fetch('/api/reports/' + reportId + '/diff' + q);
+    const d = await resp.json();
+    if (!resp.ok) throw new Error(d.detail || '差异加载失败');
+    const reA = d.recheck.from_under_new_constraints || {};
+    const reB = d.recheck.to_under_new_constraints || {};
+    box.innerHTML =
+      `<div><b>v${esc(d.from_version_no)} → v${esc(d.to_version_no)}</b>：${esc(d.summary)}</div>` +
+      `<h4>点位增删</h4><ul><li>新增：${esc((d.added_spots || []).join('、') || '无')}</li>` +
+      `<li>移除：${esc((d.removed_spots || []).join('、') || '无')}</li></ul>` +
+      `<h4>时段调整</h4><ul>${(d.moved_spots || []).length ? d.moved_spots.map(x => `<li>${esc(x.spot)}：${esc(JSON.stringify(x.from))} → ${esc(JSON.stringify(x.to))}</li>`).join('') : '<li>无</li>'}</ul>` +
+      `<h4>新约束下重检</h4><div>旧版：<span class="${reA.valid ? 'diff-ok' : 'diff-bad'}">${reA.valid ? '通过' : '有硬冲突'}</span> ${esc((reA.issues || []).join('；'))}</div>` +
+      `<div>新版：<span class="${reB.valid ? 'diff-ok' : 'diff-bad'}">${reB.valid ? '通过' : '有硬冲突'}</span> ${esc((reB.issues || []).join('；'))}</div>` +
+      `<h4>质量</h4><div>旧版 ${esc(d.quality.from.score)} 分 / ${esc(d.quality.from.passed ? '通过' : '有提醒')}；` +
+      `新版 ${esc(d.quality.to.score)} 分 / ${esc(d.quality.to.passed ? '通过' : '有提醒')}</div>`;
+  } catch (e) {
+    box.innerHTML = '<span class="diff-bad">' + esc(e.message) + '</span>';
+  }
+}
+
+async function activateVersion(reportId, versionId) {
+  if (!confirm('采用这个版本？旧版会保留，可随时切回。')) return;
+  try {
+    const resp = await fetch('/api/reports/' + reportId + '/activate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({version_id: versionId,
+                            expected_active_version_id: currentActiveVersionId}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || '激活失败');
+    await loadVersions(reportId);
+    $('changeMsg').textContent = '已采用 v' + (data.active_version_id || '');
+  } catch (e) { alert('激活失败：' + e.message); }
+}
+
+async function createChange() {
+  if (!currentReportId || !currentActiveVersionId) {
+    alert('这份报告还没有可变更的版本记录'); return;
+  }
+  const note = prompt('变更说明（必填，例如：第二天下雨改室内、不去乙馆）');
+  if (!note || !note.trim()) return;
+  const excludedRaw = prompt('新增排除地点（顿号/逗号分隔，可留空）') || '';
+  const prefs = prompt('新的偏好（可留空，留空表示不修改）') || '';
+  const changes = {note: note.trim()};
+  const excluded = excludedRaw.split(/[,，、]/).map(x => x.trim()).filter(Boolean);
+  if (excluded.length) changes.excluded_spots = excluded;
+  if (prefs.trim()) changes.preferences = prefs.trim();
+  const idem = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+  try {
+    const resp = await fetch('/api/reports/' + currentReportId + '/changes', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Idempotency-Key': idem},
+      body: JSON.stringify({base_version_id: currentActiveVersionId, changes: changes}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || '变更任务创建失败');
+    $('changeMsg').textContent = data.change_summary || '变更任务已排队';
+    $('progress').classList.remove('hidden');
+    $('stage').className = 'stage';
+    $('stage').innerHTML = '<span class="spin"></span>' + esc(data.change_summary || '变更任务排队中');
+    currentJobId = data.job_id;
+    poll(data.job_id);
+  } catch (e) { alert('变更失败：' + e.message); }
+}
+
+async function retryJob() {
+  if (!currentJobId) return;
+  try {
+    const resp = await fetch('/api/jobs/' + currentJobId + '/retry', {method: 'POST'});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || '重试失败');
+    $('retryBtn').classList.add('hidden');
+    $('stage').className = 'stage';
+    $('stage').innerHTML = '<span class="spin"></span>已重新排队';
+    poll(currentJobId);
+  } catch (e) { alert('重试失败：' + e.message); }
+}
+
+// —— 深度分析：真实工具调用（只读），轮询 query 队列任务 ——
+async function askAgent() {
+  const q = String($('askInput').value || '').trim();
+  if (!q || !askCtx) return;
+  $('askInput').value = '';
+  $('askAgentBtn').disabled = true;
+  askBubble('ask-q', q);
+  const box = askBubble('ask-a', '');
+  box.innerHTML = '<span class="ask-loading"><span class="spin"></span>正在按需检索档案、核对证据与路线…</span>';
+  try {
+    const resp = await fetch('/api/ask', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question: q, mode: 'agent', ...askCtx, history: askHistory}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.detail || '深度分析失败');
+    const jobId = data.job_id;
+    const pollAgent = async () => {
+      const r = await (await fetch('/api/jobs/' + jobId)).json();
+      if (r.status === 'running' || r.state === 'queued' || r.state === 'retry_wait') {
+        setTimeout(pollAgent, 1500); return;
+      }
+      if (r.status !== 'done' || !r.result) {
+        box.className = 'ask-a err';
+        box.textContent = '深度分析未完成：' + (r.error || r.stage || '未知原因');
+        return;
+      }
+      const res = r.result;
+      box.innerHTML = '<div class="agent-answer">' + esc(res.answer || '') + '</div>' +
+        '<div class="agent-meta">证据：' + esc((res.evidence_refs || []).join('、') || '无') +
+        '｜停止原因：' + esc(res.stop_reason || '—') +
+        (res.tool_calls && res.tool_calls.length ? '｜工具调用：' + esc(res.tool_calls.map(x => x.tool).join('、')) : '') +
+        ((res.limitations || []).length ? '<br>限制：' + esc(res.limitations.join('；')) : '') + '</div>';
+      askHistory.push({q: q, a: res.answer || ''});
+      if (askHistory.length > 4) askHistory = askHistory.slice(-4);
+    };
+    pollAgent();
+  } catch (e) {
+    box.className = 'ask-a err';
+    box.textContent = '没能完成深度分析：' + e.message;
+  } finally {
+    $('askAgentBtn').disabled = false;
+  }
+}
+
 $('askChips').addEventListener('click', (e) => {
   const b = e.target.closest ? e.target.closest('.ask-chip') : null;
   if (b) askQuestion(b.textContent.trim());
 });
 
 $('heatCity').value = localStorage.getItem('heatCity') || '';
+switchTab('trip');   // 展厅化：默认停在行程页签，首屏直接展示已有行程报告
 loadHistory();
 syncToTop();
 </script>
@@ -1753,8 +1971,11 @@ syncToTop();
       idx.className = 'flip-idx'; idx.setAttribute('aria-hidden', 'true'); idx.textContent = pad2(i + 1);
       const visual = document.createElement('span');
       visual.className = 'kw-visual'; visual.textContent = kw.textContent;
+      // 正面标题直接可点开：原本只有背面标题可点，访客要先悬停/翻转才找得到入口
+      visual.style.cursor = 'pointer';
+      visual.onclick = (e) => { e.stopPropagation(); if (kw.onclick) kw.onclick.call(kw, e); };
       const hint = document.createElement('span');
-      hint.className = 'flip-hint'; hint.setAttribute('aria-hidden', 'true'); hint.textContent = '悬停看元信息';
+      hint.className = 'flip-hint'; hint.setAttribute('aria-hidden', 'true'); hint.textContent = '点开看路书 →';
       const toggle = document.createElement('button');
       toggle.type = 'button'; toggle.className = 'flip-toggle';
       toggle.setAttribute('aria-label', '展开元信息'); toggle.textContent = '⋯';

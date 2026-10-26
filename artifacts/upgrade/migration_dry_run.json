@@ -1,0 +1,1618 @@
+{
+  "sources": {
+    "knowledge": {
+      "path": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\data\\knowledge.db",
+      "exists": true,
+      "tables": {
+        "alias_map": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "query_name",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "canonical",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "source",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "'confirmed'"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "query_name"
+          ]
+        },
+        "candidate_records": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "keyword",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "source",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "'自动圈定'"
+            },
+            {
+              "name": "detail",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "''"
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "keyword"
+          ]
+        },
+        "city_guide": {
+          "rows": 3,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "city",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "raw_path",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "video_count",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "guide_json",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "''"
+            },
+            {
+              "name": "crawled_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "id"
+          ]
+        },
+        "heat_city": {
+          "rows": 57,
+          "columns": [
+            {
+              "name": "city",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "spot",
+              "type": "TEXT",
+              "pk": 2,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "city",
+            "spot"
+          ]
+        },
+        "heat_snapshots": {
+          "rows": 24,
+          "columns": [
+            {
+              "name": "city",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "spot",
+              "type": "TEXT",
+              "pk": 2,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "score",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "fresh7",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "fresh60",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "old60",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "likes",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "videos",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "trend",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "'平稳'"
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "kind",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "'景点'"
+            },
+            {
+              "name": "mkt_ratio",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "sentiment",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "''"
+            },
+            {
+              "name": "source",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "'refresh'"
+            }
+          ],
+          "primary_key": [
+            "city",
+            "spot"
+          ]
+        },
+        "jobs": {
+          "rows": 43,
+          "columns": [
+            {
+              "name": "id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "keyword",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "mode",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "stage",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "result_json",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "error",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "finished_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "id"
+          ]
+        },
+        "probe_results": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "keyword",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "result_count",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "probed_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "keyword"
+          ]
+        },
+        "report_registry": {
+          "rows": 27,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "keyword",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "report_path",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "reported_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "video_count",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "comment_count",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            }
+          ],
+          "primary_key": [
+            "id"
+          ]
+        },
+        "semantic_hits": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "query_name",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "hit_name",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "score",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "level",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "via",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "adopted",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "note",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": "''"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "id"
+          ]
+        },
+        "spot_cache": {
+          "rows": 66,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "keyword",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "raw_path",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "video_count",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "comment_count",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": "0"
+            },
+            {
+              "name": "crawled_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "report_path",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "reported_at",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "id"
+          ]
+        }
+      }
+    },
+    "tasks": {
+      "path": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\data\\tasks.db",
+      "exists": true,
+      "tables": {
+        "principals": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "token_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "enabled",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "1"
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "id"
+          ]
+        },
+        "resource_leases": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "lease_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "resource",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "owner",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "job_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "generation",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "0"
+            },
+            {
+              "name": "expires_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "released_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "lease_id"
+          ]
+        },
+        "task_events": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "event_id",
+              "type": "INTEGER",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "trace_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "job_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "run_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "event_type",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "payload",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "'{}'"
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "event_id"
+          ]
+        },
+        "task_jobs": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "request_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "owner_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "idempotency_key",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "request_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "queue_name",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "kind",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "state",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "stage",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "''"
+            },
+            {
+              "name": "payload",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "result_json",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "error_code",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "error_detail",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "attempt",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "0"
+            },
+            {
+              "name": "max_attempts",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "2"
+            },
+            {
+              "name": "available_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "lease_owner",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "lease_expires_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "generation",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "0"
+            },
+            {
+              "name": "checkpoint_realm",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "cancel_requested",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "0"
+            },
+            {
+              "name": "trace_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "updated_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "started_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "finished_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "quality_status",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "result_ref",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "parent_version_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "base_report_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "id"
+          ]
+        },
+        "task_requests": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "request_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "owner_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "idempotency_key",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "request_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "normalized_payload",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "request_id"
+          ]
+        },
+        "task_steps": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "job_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "step_key",
+              "type": "TEXT",
+              "pk": 2,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "input_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "state",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "output_ref",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "error",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "attempts",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "0"
+            },
+            {
+              "name": "updated_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "job_id",
+            "step_key"
+          ]
+        }
+      }
+    },
+    "reports": {
+      "path": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\data\\reports.db",
+      "exists": true,
+      "tables": {
+        "report_evidence": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "version_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "evidence_id",
+              "type": "TEXT",
+              "pk": 2,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "spot",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "kind",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "source",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "quote",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "as_of",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "meta",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "'{}'"
+            }
+          ],
+          "primary_key": [
+            "version_id",
+            "evidence_id"
+          ]
+        },
+        "report_versions": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "version_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "report_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "version_no",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "parent_version_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "job_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "owner_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "input_snapshot_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "material_manifest",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "'{}'"
+            },
+            {
+              "name": "policy_version",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "''"
+            },
+            {
+              "name": "content_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "quality_status",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "artifact_state",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "'pending'"
+            },
+            {
+              "name": "index_state",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "'pending'"
+            },
+            {
+              "name": "result_json",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "change_summary",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "''"
+            },
+            {
+              "name": "report_name",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "''"
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "version_id"
+          ]
+        },
+        "reports": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "report_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "owner_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "active_version_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "updated_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "report_id"
+          ]
+        }
+      }
+    },
+    "planning_runs": {
+      "path": "C:\\Users\\35290\\Desktop\\TravelGuide Assitant\\data\\planning\\runs.db",
+      "exists": true,
+      "tables": {
+        "events": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "event_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "run_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "node_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "call_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "attempt_no",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "kind",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "input_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "model",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "started_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "ended_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "prompt_tokens",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "completion_tokens",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "detail",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "event_id"
+          ]
+        },
+        "responses": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "run_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "call_id",
+              "type": "TEXT",
+              "pk": 2,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "input_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "response",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "run_id",
+            "call_id"
+          ]
+        },
+        "runs": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "run_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "job_id",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "input_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "snapshot",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "schema_version",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "graph_version",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "policy",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "stop_reason",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "cancel_requested",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "0"
+            },
+            {
+              "name": "max_attempts",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "used_attempts",
+              "type": "INTEGER",
+              "pk": 0,
+              "notnull": true,
+              "default": "0"
+            },
+            {
+              "name": "created_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "expires_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "result",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "owner",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": false,
+              "default": null
+            },
+            {
+              "name": "updated_at",
+              "type": "REAL",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "implementation_hash",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": "''"
+            }
+          ],
+          "primary_key": [
+            "run_id"
+          ]
+        },
+        "steps": {
+          "rows": 0,
+          "columns": [
+            {
+              "name": "run_id",
+              "type": "TEXT",
+              "pk": 1,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "name",
+              "type": "TEXT",
+              "pk": 2,
+              "notnull": true,
+              "default": null
+            },
+            {
+              "name": "value",
+              "type": "TEXT",
+              "pk": 0,
+              "notnull": true,
+              "default": null
+            }
+          ],
+          "primary_key": [
+            "run_id",
+            "name"
+          ]
+        }
+      }
+    }
+  },
+  "notes": [
+    "dry-run 只读；未写入目标数据库",
+    "知识库旧数据归属：local_legacy",
+    "checkpoint 与 browser_profile 不迁移",
+    "未知发布时间/费用/usage 保持 NULL，不补 0"
+  ],
+  "checks": {
+    "task_jobs": 0,
+    "job_steps": 0,
+    "task_events": 0,
+    "legacy_jobs": 43,
+    "vector_chunks": 0,
+    "report_versions": 0
+  }
+}

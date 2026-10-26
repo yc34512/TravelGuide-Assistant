@@ -10,7 +10,9 @@
 - [示例路书（Markdown）](https://github.com/YC34512/TravelGuide-Assistant/blob/main/examples/示例路书_上海3天.md): 一份完整的真实生成产物，无需安装即可阅读。
 - [示例路书（可视化 HTML）](https://github.com/YC34512/TravelGuide-Assistant/blob/main/examples/示例路书_上海3天.html): 单文件离线可打开，含行程全景图、详情弹层与来源链接。这是产品的主要阅读形态。
 - [API 参考（智能体用）](https://github.com/YC34512/TravelGuide-Assistant/blob/main/.qoder/skills/travel-guide-research/reference.md): 完整接口字段与响应结构、轮询约定、典型耗时。以智能体视角编写，非人类教程。
-- [配置项说明](https://github.com/YC34512/TravelGuide-Assistant/blob/main/.env.example): 全部环境变量（LLM、抖音采集开关、高德、ASR）及其默认值与影响。
+- [配置项说明](https://github.com/YC34512/TravelGuide-Assistant/blob/main/.env.example): 全部环境变量（LLM、抖音采集开关、高德、ASR、持久任务/Worker/缓存/身份）及其默认值与影响。
+- [服务化运行说明](https://github.com/YC34512/TravelGuide-Assistant/blob/main/docs/服务化运行说明.md): SQLite/MySQL、嵌入/独立 Worker、API Token、版本与回滚。
+- [升级验收记录](https://github.com/YC34512/TravelGuide-Assistant/blob/main/docs/升级验收记录.md): 实际通过项、未验收项与原始结果位置。
 - [LICENSE](https://github.com/YC34512/TravelGuide-Assistant/blob/main/LICENSE): MIT。
 
 ## 服务启动后的运行时接口
@@ -19,8 +21,15 @@
 
 - `/openapi.json`: OpenAPI 规范，可直接导入 Dify / Coze / GPTs Actions / n8n。
 - `/docs`: 交互式接口文档。
-- `/api/health`: 健康检查 + 知识库概览。
-- 典型调用链：`POST /api/research` → 每 20 秒轮询 `GET /api/jobs/{id}` → `result.markdown` 即报告。
+- `/api/health`: 健康检查（本地模式含知识库概览；令牌模式只返回存活信息）。
+- 典型调用链：`POST /api/research`（或 `/api/trip`）→ 202 + `job_id` → 每 20 秒轮询
+  `GET /api/jobs/{id}` → `status=done` 时取 `result.markdown`；增量日志用
+  `GET /api/jobs/{id}/events?after=`。
+- 幂等：提交时带 `Idempotency-Key`；同键同内容返回原任务，同键不同内容 409。
+- 追问：`POST /api/ask` 默认 `mode=report` 同步回答；`mode=agent` 返回 202 + `job_id`，
+  由 query Worker 执行只读工具循环（仅限已登记版本的行程报告）。
+- 版本：`GET /api/reports/{id}/versions`、`/diff`；`POST /api/reports/{id}/changes`、
+  `/activate`；变更需用户显式激活，旧版保留。
 
 ## 关键约定（供智能体遵循）
 
@@ -32,5 +41,5 @@
 ## Optional
 
 - [MCP 服务器源码](https://github.com/YC34512/TravelGuide-Assistant/blob/main/mcp_server.py): 10 个工具，stdio 传输；任何工具调用会按需自动拉起本地服务。
-- [离线测试](https://github.com/YC34512/TravelGuide-Assistant/blob/main/tests_offline.py): 246 项，纯函数与夹具驱动，不联网、不调 LLM、不开浏览器。
+- [离线测试](https://github.com/YC34512/TravelGuide-Assistant/blob/main/tests_offline.py): 纯函数/夹具/替身驱动，不联网、不调 LLM、不开浏览器；当前完整套件 438 项（1 项真实 faiss 集成 skip），数量以实际运行为准。
 - [Qoder 代理技能](https://github.com/YC34512/TravelGuide-Assistant/tree/main/.qoder/skills/travel-guide-research): 教智能体通过 API 驱动本项目的完整工作流。

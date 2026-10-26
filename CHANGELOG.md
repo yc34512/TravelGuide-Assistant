@@ -10,6 +10,44 @@ stances are presented side by side rather than averaged away. See `README.md`._
 
 ---
 
+## v1.3.0 — 2026-10-25
+
+服务化与 Agent 升级（S0—S7）。默认本地 SQLite 模式仍可直接运行；服务模式新增
+MySQL/Redis 适配、持久任务与独立 Worker、复杂追问工具 Agent、行程版本与差异。
+
+### 可靠任务
+
+- 每个请求不再创建长任务线程；任务先写 `task_jobs`，由 pipeline（容量 1）/query（容量 2）
+  有界 Worker 领取。支持 `Idempotency-Key`、租约 generation、协作式取消、事件游标、
+  `needs_review` 人工复核与重试计数。
+- 新增 `/api/jobs/{id}/events`、`/api/jobs/{id}/retry`；`/api/jobs/{id}` 合并持久状态与
+  旧 `status` 字段。旧 API 继续可用，提交接口返回 202。
+- MySQL 适配使用 InnoDB 短事务 + `FOR UPDATE SKIP LOCKED`；SQLite 使用
+  `BEGIN IMMEDIATE` 条件更新。缺少 MySQL 配置时明确失败，不回退。
+
+### 采集与检索修正
+
+- 采集导航预算改为任务级，验证码熔断改为账号会话级；新任务不会清除上一任务触发的熔断。
+- FAISS 搜索使用返回的索引把分数映射回原始记录，修复“排序分数贴错文本”。
+  真实 faiss 未安装时集成用例 skip。
+
+### Agent、版本与缓存
+
+- `/api/ask?mode=agent`：真实 Function Calling 工具循环（read_report/search_knowledge/
+  get_evidence/query_route），代码层限制工具、预算、归属并校验证据编号。
+- 报告不可变版本、变更任务、代码计算 diff、新约束重检、expected-version CAS 激活；
+  页面新增版本/差异/采用/变更入口。
+- Redis 缓存键带 owner/报告版本/模型/坐标系/方式/出发时间；NoOp 降级；持久资源租约
+  限制全局模型在途调用。
+
+### 验收边界
+
+完整离线套件 438 项通过（1 项真实 faiss 集成 skip）；故障注入 16/16；本地容量与
+脚本模型 Agent 对照有原始记录。真实 MySQL/Redis、真实付费模型、真实浏览器点击流程
+未验收；详见 `docs/升级验收记录.md`。
+
+---
+
 ## v1.2.0 — 2026-10-10
 
 候选筛选从"逐个采集后统一验证"改为**四层证据漏斗 + 回补循环**：先用手头免费的证据筛，

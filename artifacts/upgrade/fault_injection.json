@@ -1,0 +1,132 @@
+{
+  "kind": "fault-injection",
+  "real_services": false,
+  "environment": {
+    "python": "3.13.13",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "results": [
+    {
+      "name": "double_consumer_single_claim",
+      "kind": "direct",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.017
+    },
+    {
+      "name": "expired_owner_stale_write_rejected",
+      "kind": "direct",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.053
+    },
+    {
+      "name": "cancel_running_is_cooperative",
+      "kind": "direct",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.026
+    },
+    {
+      "name": "redis_disconnect_bounded_fallback",
+      "kind": "direct",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.0
+    },
+    {
+      "name": "unknown_external_goes_needs_review",
+      "kind": "direct",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.019
+    },
+    {
+      "name": "retry_exhaustion_terminal_failed",
+      "kind": "direct",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.032
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_subprocess_generate_checkpoint_resumes_without_call",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 5.222
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_subprocess_quality_checkpoint_resumes_without_call",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.928
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_response_saved_before_graph_checkpoint_is_reused",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.65
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_uncertain_request_window_marked_unknown_then_counted_again",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 4.07
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_budget_not_refilled_after_restart",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 3.887
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_finalizer_registration_failure_then_idempotent_retry",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.594
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_index_repair_checks_all_keys_not_any_prefix",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.115
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_skipped_embedding_can_be_completed_after_configuration",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.239
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_cancel_after_request_stops_before_next_node",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.071
+    },
+    {
+      "name": "tests_planning.PlanningTest.test_resume_api_reuses_snapshot_and_no_crawl_or_session_reset",
+      "kind": "unit",
+      "ok": true,
+      "error": null,
+      "elapsed_s": 0.462
+    }
+  ],
+  "summary": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0
+  },
+  "limitations": [
+    "未在任意指令点强杀进程；子进程用例覆盖 checkpoint 前后中断。",
+    "不宣称远端 LLM/地图 exactly-once；未知结果保留为 unknown/needs_review。",
+    "真实 MySQL/Redis 服务器未启动，相关集成项未在此脚本验证。"
+  ]
+}

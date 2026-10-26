@@ -1,0 +1,2 @@
+wrote C:\Users\35290\Desktop\TravelGuide Assitant\data\upgrade\agent_eval.json
+{"cases": 4, "tool_chain_ok": 4, "evidence_ok": 4, "answer_contains_expected": 4, "retrieval_hits": 2}

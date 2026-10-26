@@ -1,0 +1,66 @@
+{
+  "crawler_session": {
+    "after_task_a": {
+      "active": "task-a",
+      "nav": 1,
+      "stopped": true
+    },
+    "task_b_reset_while_a_active": {
+      "reset_returned": false,
+      "active": "task-a",
+      "nav": 1,
+      "stopped": true
+    },
+    "task_b_reset_after_a_end": {
+      "reset_returned": true,
+      "nav": 0,
+      "stopped": true
+    },
+    "expected": "B 不得清空 A 的计数；A 结束后预算从 0 开始；熔断持续"
+  },
+  "faiss": {
+    "original_keys": [
+      "far",
+      "near",
+      "mid"
+    ],
+    "original_vectors": [
+      [
+        0.0,
+        1.0
+      ],
+      [
+        1.0,
+        0.0
+      ],
+      [
+        0.7,
+        0.7
+      ]
+    ],
+    "query": [
+      1.0,
+      0.0
+    ],
+    "search_returns_sorted_indices": [
+      1,
+      2,
+      0
+    ],
+    "search_returns_sorted_scores": [
+      1.0,
+      0.7071,
+      0.0
+    ],
+    "old_zip_wrong": {
+      "far": 1.0,
+      "near": 0.7071,
+      "mid": 0.0
+    },
+    "fixed_map_by_index": {
+      "far": 0.0,
+      "near": 1.0,
+      "mid": 0.7071
+    }
+  }
+}

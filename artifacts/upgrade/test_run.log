@@ -1,0 +1,841 @@
+test_cap_zero_blocks_without_http (__main__.TestAmapQuota.test_cap_zero_blocks_without_http) ... ok
+test_counter_increments_and_daily_reset (__main__.TestAmapQuota.test_counter_increments_and_daily_reset) ... ok
+test_endpoints_and_traversal_guard (__main__.TestApi.test_endpoints_and_traversal_guard) ... C:\Users\35290\Desktop\TravelGuide Assitant\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+  _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+ok
+test_answer_rejects_blank_question_and_empty_archive (__main__.TestAskContext.test_answer_rejects_blank_question_and_empty_archive)
+answer 的参数校验：空问题、空档案都抛 ValueError，且不发起任何 LLM 调用。 ... ok
+test_asked_point_gets_full_dossier (__main__.TestAskContext.test_asked_point_gets_full_dossier)
+被点名的点：票价/开放时间/亮点/避雷/真实评价摘要/评论原话都进上下文。 ... ok
+test_checklist_marked_as_unconfirmed (__main__.TestAskContext.test_checklist_marked_as_unconfirmed)
+待确认信息必须显式标注"不得当成已知事实"，且带事实截止日。 ... ok
+test_context_respects_max_chars (__main__.TestAskContext.test_context_respects_max_chars)
+上下文体积受 max_chars 硬约束（调用成本护栏）。 ... ok
+test_empty_result_returns_empty (__main__.TestAskContext.test_empty_result_returns_empty)
+空档案 → 空上下文（answer 会据此拒绝空跑 LLM）。 ... ok
+test_history_block_keeps_last_two_rounds (__main__.TestAskContext.test_history_block_keeps_last_two_rounds)
+多轮追问只带最近 2 轮进上下文（连续性够，成本不涨）。 ... ok
+test_markdown_report_fallback (__main__.TestAskContext.test_markdown_report_fallback)
+攻略报告（无 trip_plan）：退化为全文截断，过长时给截断说明。 ... ok
+test_mentioned_points_longest_first_no_false_hit (__main__.TestAskContext.test_mentioned_points_longest_first_no_false_hit)
+点名识别：长名优先，且问题里没出现的点不得命中。 ... ok
+test_unasked_point_only_brief (__main__.TestAskContext.test_unasked_point_only_brief)
+没被点名的点：只给一句话摘要，不得把评论原话等深字段塞进上下文。 ... ok
+test_unknown_ticket_not_double_parenthesized (__main__.TestAskContext.test_unknown_ticket_not_double_parenthesized)
+ticket_nature 已是"待核实"时输出"票价：待核实"，不得套娃成"待核实（待核实）"。 ... ok
+test_drops_cross_day_duplicate (__main__.TestBugfixDuplicateSpot.test_drops_cross_day_duplicate) ... ok
+test_r1_counts_unique_spots_and_reports_drops (__main__.TestBugfixDuplicateSpot.test_r1_counts_unique_spots_and_reports_drops) ... ok
+test_same_day_duplicate_and_no_dup_regression (__main__.TestBugfixDuplicateSpot.test_same_day_duplicate_and_no_dup_regression) ... ok
+test_catalog_and_itinerary_same_price (__main__.TestBugfixTicketSameSource.test_catalog_and_itinerary_same_price) ... ok
+test_normalize_profile_drops_third_party_ticket (__main__.TestBugfixTicketSameSource.test_normalize_profile_drops_third_party_ticket) ... ok
+test_pick_ticket_price_rules (__main__.TestBugfixTicketSameSource.test_pick_ticket_price_rules) ... ok
+test_r12_two_source_split_detected (__main__.TestBugfixTicketSameSource.test_r12_two_source_split_detected) ... ok
+test_budget_stop_marks_skipped (__main__.TestCandidateFunnelE2E.test_budget_stop_marks_skipped)
+预算/风控熔断（§2 缺口修复）：未采候选标 skipped_budget，绝不当"处理过了"。 ... ok
+test_fillback_situation_b_with_exclusions (__main__.TestCandidateFunnelE2E.test_fillback_situation_b_with_exclusions)
+情况 B（§4.5）：候选池处理完仍不达标 -> 带排除清单回生成层，轮次有上限。 ... ok
+test_probe_drop_and_count_order (__main__.TestCandidateFunnelE2E.test_probe_drop_and_count_order)
+探测层：0 条淘汰不进深采；有内容的按条数降序先采（§4.3/§4.4）。 ... ok
+test_reuse_path_skips_crawl (__main__.TestCandidateFunnelE2E.test_reuse_path_skips_crawl)
+复用层：命中新鲜缓存 -> reused（不发采集）且不消耗预算；提取照常。 ... ok
+test_target_met_stops_early (__main__.TestCandidateFunnelE2E.test_target_met_stops_early)
+达标即退（§4.4）：凑满总数 8 + 景点 4 + 美食 1 即停，剩余候选不再采集。 ... ok
+test_five_states_are_distinct (__main__.TestCandidateStatusMachine.test_five_states_are_distinct) ... ok
+test_probe_freshness_window (__main__.TestCandidateStatusMachine.test_probe_freshness_window)
+条数是弱信号：保鲜期内命中，过期即失效重新探测（§4.3 规则 4）。 ... ok
+test_status_roundtrip_and_upsert (__main__.TestCandidateStatusMachine.test_status_roundtrip_and_upsert) ... ok
+test_generate_quota_trim (__main__.TestCandidates.test_generate_quota_trim)
+候选生成：类别配额与总量上限裁剪生效。 ... ok
+test_marketing_regex (__main__.TestCandidates.test_marketing_regex)
+营销号文案识别：强营销信号命中，普通分享不误伤。 ... ok
+test_select_verify_fair_quota (__main__.TestCandidates.test_select_verify_fair_quota)
+F2.1 公平截断：按类别配额挑选，美食/体验/购物不因返回顺序靠后被整体截断。 ... ok
+test_select_verify_topup_when_sparse (__main__.TestCandidates.test_select_verify_topup_when_sparse)
+某类候选不足时余量按景点优先补给；候选总数不足则全取。 ... ok
+test_verify_fallback (__main__.TestCandidates.test_verify_fallback)
+交叉验证兜底：LLM 无输出时，有正面证据且营销号不过半则 keep。 ... ok
+test_extract_guide_knowledge_normalizes (__main__.TestCityGuideLayer.test_extract_guide_knowledge_normalizes) ... ok
+test_extract_guide_knowledge_survives_llm_failure (__main__.TestCityGuideLayer.test_extract_guide_knowledge_survives_llm_failure)
+提炼失败一律给空骨架：攻略层是增强项，绝不阻断行程生成。 ... ok
+test_generate_candidates_uses_guide_evidence (__main__.TestCityGuideLayer.test_generate_candidates_uses_guide_evidence)
+有攻略实证时候选以真实提到的点为底稿（提示词必须带上），不再凭空想象。 ... ok
+test_guide_corpus_and_empty_guard (__main__.TestCityGuideLayer.test_guide_corpus_and_empty_guard) ... ok
+test_guide_note_and_render (__main__.TestCityGuideLayer.test_guide_note_and_render)
+攻略层来源说明进报告概览（用户看得见实证依据从哪来）；无产物则不输出该行。 ... ok
+test_guide_queries_matrix (__main__.TestCityGuideLayer.test_guide_queries_matrix)
+用户要去某地旅游，搜的应该是"{城市}旅游攻略""{城市}三天两夜"，不是单个景点名。 ... ok
+test_knowledge_guide_roundtrip (__main__.TestCityGuideLayer.test_knowledge_guide_roundtrip)
+攻略缓存往返：按城市精确命中、提炼结果一并复用、空采集不算命中。 ... ok
+test_normalize_mention_defaults (__main__.TestCityGuideLayer.test_normalize_mention_defaults) ... ok
+test_plan_itinerary_eats_guide_hints (__main__.TestCityGuideLayer.test_plan_itinerary_eats_guide_hints)
+排线吃攻略编排知识：提示词里必须出现真实攻略建议。 ... ok
+test_levels_and_marketing (__main__.TestConfidenceScoring.test_levels_and_marketing)
+量化置信度：≥3源无矛盾=高，2源=中，矛盾=中，营销号来源=低且不计印证。 ... ok
+test_pitfall_sorted_by_score (__main__.TestConfidenceScoring.test_pitfall_sorted_by_score)
+避坑专题按置信度评分降序，无评分的旧数据按标签回退。 ... ok
+test_amap_cap_within_free_tier (__main__.TestCostGuard.test_amap_cap_within_free_tier)
+高德日上限护栏不超个人开发者免费配额（超额才会转付费）。 ... ok
+test_free_tier_distinct_from_arrearage (__main__.TestCostGuard.test_free_tier_distinct_from_arrearage)
+额度耗尽与真欠费走不同提示：前者换模型即可，后者才需要充值。 ... ok
+test_free_tier_exhausted_no_retry_and_hint (__main__.TestCostGuard.test_free_tier_exhausted_no_retry_and_hint)
+403 AllocationQuota.FreeTierOnly：一次都不重试，提示里给换模型的出路。 ... ok
+test_usage_ledger_accumulates (__main__.TestCostGuard.test_usage_ledger_accumulates)
+token 用量账本：累计调用次数与输入/输出 token，按模型分组可核对。 ... ok
+test_usage_without_usage_field (__main__.TestCostGuard.test_usage_without_usage_field)
+服务商不返 usage 时只计次数，不猜 token（不编造消耗数据）。 ... ok
+test_web_search_off_by_default (__main__.TestCostGuard.test_web_search_off_by_default)
+联网搜索默认关：不发 enable_search 就不可能产生独立计费的搜索费。 ... ok
+test_rank_candidates_backward_compatible (__main__.TestCrawlQualityWiring.test_rank_candidates_backward_compatible)
+排序改用质量分后，对只有点赞的候选结果与旧"点赞降序+无点赞垫后"一致。 ... ok
+test_search_pool_merges_queries (__main__.TestCrawlQualityWiring.test_search_pool_merges_queries)
+多查询词合并候选池：按 video_id 去重、池满即停（风控成本优先）。 ... ok
+test_search_url_carries_sort_param (__main__.TestCrawlQualityWiring.test_search_url_carries_sort_param) ... ok
+test_stat_normalizers (__main__.TestCrawlQualityWiring.test_stat_normalizers) ... ok
+test_video_item_new_fields_roundtrip (__main__.TestCrawlQualityWiring.test_video_item_new_fields_roundtrip)
+新质量字段随原始 JSON 落盘与还原；旧 JSON 无这些键时为 None（向后兼容）。 ... ok
+test_comments_by_listen (__main__.TestCrawlSpeedUp.test_comments_by_listen)
+评论监听路径：接口 JSON 包直接解析成评论，无需滚 DOM。 ... ok
+test_detail_node (__main__.TestCrawlSpeedUp.test_detail_node)
+详情包取节点：aweme_detail / item_list / 裸节点三种结构都认，脏数据给空。 ... ok
+test_drain_detail_buffers_other_packets (__main__.TestCrawlSpeedUp.test_drain_detail_buffers_other_packets)
+详情环节：找到详情包即返回，期间到达的评论包进缓冲不丢。 ... ok
+test_fetch_videos_parallel (__main__.TestCrawlSpeedUp.test_fetch_videos_parallel)
+多 Tab 并发：结果按原顺序返回，且同一 Tab 任意时刻只有一个线程在驱动。 ... ok
+test_fetch_videos_retry_and_cancel (__main__.TestCrawlSpeedUp.test_fetch_videos_retry_and_cancel)
+单条失败自动重试；任务取消时不再继续采集。 ... ok
+test_open_tabs_degrade (__main__.TestCrawlSpeedUp.test_open_tabs_degrade)
+Tab 池：开不出来就退化为可用数量，至少保留主页面。 ... ok
+test_packet_json_and_author_uid (__main__.TestCrawlSpeedUp.test_packet_json_and_author_uid)
+监听包容错：dict/JSON 字符串/bytes 都认，其余静默降级为 None。 ... ok
+test_parse_comment_payload (__main__.TestCrawlSpeedUp.test_parse_comment_payload)
+评论接口 JSON 解析：作者 UID 比对、脏数据跳过，个人信息不得落入结果。 ... ok
+test_rank_and_filter_shared (__main__.TestCrawlSpeedUp.test_rank_and_filter_shared)
+两条采集路径共用的点赞排序+低质过滤+保底放宽。 ... ok
+test_rate_limiter_global_queue (__main__.TestCrawlSpeedUp.test_rate_limiter_global_queue)
+全局令牌桶：并发调用也排在同一条时间轴上（请求间隔不因并发缩短）。 ... ok
+test_timestamp_to_date (__main__.TestCrawlSpeedUp.test_timestamp_to_date)
+评论精确时间戳换算：字符串数字也认，脏数据/越界给 None。 ... ok
+test_wait_helpers (__main__.TestCrawlSpeedUp.test_wait_helpers)
+条件等待：命中即返回，未命中以 timeout 封顶（不按选择器个数累加）。 ... ok
+test_comment_filter_logic (__main__.TestCrawlerFilter.test_comment_filter_logic)
+低质过滤 + 保底放宽（复现 _fetch_comments 尾部逻辑）。 ... ok
+test_coverage_issues_flags_missing_days (__main__.TestDayCoverageGuard.test_coverage_issues_flags_missing_days)
+回炉层：缺天要进 issues，否则不会触发重试就直接出报告了。 ... ok
+test_plan_system_demands_all_days (__main__.TestDayCoverageGuard.test_plan_system_demands_all_days)
+提示词层：硬约束必须写在规则里（LLM 会违反，但没写就更没依据）。 ... ok
+test_r1_fails_when_day_empty (__main__.TestDayCoverageGuard.test_r1_fails_when_day_empty)
+天数够但某天零槽位：同样 FAIL，并点名是第几天。 ... ok
+test_r1_fails_when_day_missing (__main__.TestDayCoverageGuard.test_r1_fails_when_day_missing)
+要求 3 天但只输出 2 天：即使点位总数达标也必须 FAIL。 ... ok
+test_r1_passes_when_days_sparse_but_complete (__main__.TestDayCoverageGuard.test_r1_passes_when_days_sparse_but_complete)
+素材不足时每天 1 点也合法：天数齐就不该因"不够密"而 FAIL。 ... ok
+test_empty_card_renders_note_and_keeps_anchor (__main__.TestDetailCardAndTicketLine.test_empty_card_renders_note_and_keeps_anchor)
+空档案 → 一句话说明；锚点必须保留（否则榜单 [详情] 变 R11 死链）。 ... ok
+test_has_content_judges (__main__.TestDetailCardAndTicketLine.test_has_content_judges)
+空壳判定：无任何实质字段才算空；ticket_price=0 与 guide_note 都算有内容。 ... ok
+test_ticket_line_no_duplicate_todo (__main__.TestDetailCardAndTicketLine.test_ticket_line_no_duplicate_todo)
+nature 兜底成"待核实"时不得再套一层括号（实测一份报告 15 处）。 ... ok
+test_digest_quote_guard (__main__.TestDigestAndHeatApi.test_digest_quote_guard)
+评价摘要引文防幻觉：不在输入原文池中的引用被丢弃，最多保留 2 条。 ... ok
+test_heat_endpoints (__main__.TestDigestAndHeatApi.test_heat_endpoints)
+/api/heat/* ：空城市拒绝 400；无快照城市返回空榜与引导提示。 ... ok
+test_heat_snapshot_roundtrip (__main__.TestDigestAndHeatApi.test_heat_snapshot_roundtrip)
+热度快照 UPSERT 与城市关联登记（临时库）。 ... ok
+test_format_and_inject_draft_plan (__main__.TestDraftChain.test_format_and_inject_draft_plan)
+format_draft_plan 文本化 + plan_itinerary 提示词注入（不传则零回归）。 ... ok
+test_generate_candidates_draft_priority (__main__.TestDraftChain.test_generate_candidates_draft_priority)
+草案点位确定性前置（LLM 没返回也在清单里）、去重，且提示词点名要求全纳入。 ... ok
+test_normalize_itinerary_and_names (__main__.TestDraftChain.test_normalize_itinerary_and_names)
+单条草案归一：时段越界回空、非法天丢弃、items/period/name 别名兼容；点名去重保序。 ... ok
+test_review_guide_itinerary_merges_and_degrades (__main__.TestDraftChain.test_review_guide_itinerary_merges_and_degrades)
+审核：合并多条视频编排→天数对齐（超出截断）→notes 回传；无素材/LLM 失败一律空。 ... ok
+test_select_verify_priority_first (__main__.TestDraftChain.test_select_verify_priority_first)
+验证名额：草案点位先占，剩余按类别配额公平分配；幽灵名不占名额。 ... ok
+test_embed_cache_and_batch_dedup (__main__.TestEmbeddingsAndVectorStore.test_embed_cache_and_batch_dedup) ... ok
+test_embed_failure_returns_none (__main__.TestEmbeddingsAndVectorStore.test_embed_failure_returns_none) ... ok
+test_vector_search_skips_bad_dimension (__main__.TestEmbeddingsAndVectorStore.test_vector_search_skips_bad_dimension) ... ok
+test_vector_upsert_search_prefix (__main__.TestEmbeddingsAndVectorStore.test_vector_upsert_search_prefix) ... ok
+test_alias_dict_hit_without_llm (__main__.TestEntityMatch.test_alias_dict_hit_without_llm)
+别名词典命中：不再调 LLM（§12.4 判决结果的缓存）。 ... ok
+test_empty_library_no_hit (__main__.TestEntityMatch.test_empty_library_no_hit)
+空库未命中（备案 §12.7 最后一行）。 ... ok
+test_expired_hit_goes_to_collect_queue (__main__.TestEntityMatch.test_expired_hit_goes_to_collect_queue)
+命中但过期：判"高"但 record 为空（调用方据此进采集队列，§4.2 动作表）。 ... ok
+test_keyword_exact_and_prefix_hit (__main__.TestEntityMatch.test_keyword_exact_and_prefix_hit)
+关键词路是主力：精确命中与前缀回退都判"高"（沿用 find_fresh，零回归）。 ... ok
+test_llm_failure_degrades_to_suspect (__main__.TestEntityMatch.test_llm_failure_degrades_to_suspect)
+判决 LLM 不可用：不崩、判中档（不采用）——绝不能因增强层失败毁掉主流程。 ... ok
+test_no_embedding_keyword_still_works (__main__.TestEntityMatch.test_no_embedding_keyword_still_works)
+降级链第 2 档：无 embedding 时跳过向量路，关键词路 + 词典仍生效（零回归）。 ... ok
+test_register_and_backfill_write_rules (__main__.TestEntityMatch.test_register_and_backfill_write_rules)
+D4 写入时机：regisster 只由采集成功后调用；回填只吃 video_count>0 的记录。 ... ok
+test_vector_recall_confirm_no_not_adopted (__main__.TestEntityMatch.test_vector_recall_confirm_no_not_adopted)
+宽窄巷子 -> 锦里：向量召回但判"否" -> 不采用（误命中是事故，§12.1）。 ... ok
+test_vector_recall_confirm_yes_writes_alias (__main__.TestEntityMatch.test_vector_recall_confirm_yes_writes_alias)
+紫禁城 -> 故宫（词典为空）：向量召回 -> LLM 判"是" -> 采用 + 写词典。 ... ok
+test_vector_unsure_is_suspect_level (__main__.TestEntityMatch.test_vector_unsure_is_suspect_level)
+判不准 -> 中档（疑似命中），不采用、可回溯（§4.2 中档绝不自动替换）。 ... ok
+test_is_stale (__main__.TestExtract.test_is_stale) ... ok
+test_sanitize_stance (__main__.TestExtract.test_sanitize_stance)
+历史叙事被误标"避雷"时降为中性；带警示词的真避坑与推荐不受影响。 ... ok
+test_blank_entries_ignored (__main__.TestFactsCutoff.test_blank_entries_ignored) ... ok
+test_earliest_wins (__main__.TestFactsCutoff.test_earliest_wins) ... ok
+test_empty_falls_back_to_today (__main__.TestFactsCutoff.test_empty_falls_back_to_today) ... ok
+test_food_rank_order_and_breakdown (__main__.TestFoodRank.test_food_rank_order_and_breakdown) ... ok
+test_food_sample_min_note (__main__.TestFoodRank.test_food_sample_min_note) ... ok
+test_food_score_reproducible (__main__.TestFoodRank.test_food_score_reproducible) ... ok
+test_md_food_rank_and_r11 (__main__.TestFoodRank.test_md_food_rank_and_r11) ... ok
+test_heat_index_marketing (__main__.TestFoodsRender.test_heat_index_marketing)
+热度画像附带营销号计数与占比。 ... ok
+test_render_foods_and_echo (__main__.TestFoodsRender.test_render_foods_and_echo)
+餐厅详情卡/美食榜/概览餐厅数/参数回显全链路（新 TripPlan 渲染器）。 ... ok
+test_cheap_keep_rule (__main__.TestFunnelPure.test_cheap_keep_rule)
+D8 便宜规则：positive>0 且营销号占比 ≤ 0.5（与保守兜底同口径）。 ... ok
+test_evaluate_target_multi_condition (__main__.TestFunnelPure.test_evaluate_target_multi_condition)
+D7 多条件：总数 + 景点骨架 + 美食不空，缺一不可。 ... ok
+test_fillback_exclusions_and_resume (__main__.TestFunnelPure.test_fillback_exclusions_and_resume)
+D11 排除清单 = 已处理过的（crawled_ok/crawled_empty/dropped_probe）；skipped 走续采。 ... ok
+test_order_names_by_probe (__main__.TestFunnelPure.test_order_names_by_probe) ... ok
+test_probe_drop_rules (__main__.TestFunnelPure.test_probe_drop_rules) ... ok
+test_rank_draft_then_count_then_category (__main__.TestFunnelPure.test_rank_draft_then_count_then_category) ... ok
+test_rank_without_counts_falls_to_category (__main__.TestFunnelPure.test_rank_without_counts_falls_to_category) ... ok
+test_missing_topics (__main__.TestGapFill.test_missing_topics) ... ok
+test_backward_compat_no_sections (__main__.TestGateWiringAndRender.test_backward_compat_no_sections)
+无候选/无质量报告时不渲染决策表与质量分卡（空数据降级不空窗）。 ... ok
+test_decision_rows_and_quality_dict (__main__.TestGateWiringAndRender.test_decision_rows_and_quality_dict)
+决策表模板投影（新渲染器）+ 质量报告序列化（quality 归一已由 to_dict 承担）。 ... ok
+test_plan_itinerary_extra_issues_repair (__main__.TestGateWiringAndRender.test_plan_itinerary_extra_issues_repair)
+extra_issues 触发回炉；覆盖率不变差即采纳重试版（无 extra 且达标时不回炉）。 ... ok
+test_render_html_sections (__main__.TestGateWiringAndRender.test_render_html_sections)
+HTML 面向用户只留"能玩的内容"：工程板块（质量分卡/决策表）不渲染。 ... ok
+test_render_md_sections (__main__.TestGateWiringAndRender.test_render_md_sections) ... ok
+test_exclusions_in_prompt_and_filtered (__main__.TestGenerateCandidatesExclude.test_exclusions_in_prompt_and_filtered) ... ok
+test_degrade_without_key (__main__.TestGeo.test_degrade_without_key)
+无高德 Key 时全部返回 None（降级路径，不抛异常）。 ... ok
+test_distance_km (__main__.TestGeo.test_distance_km)
+球面距离纯函数：北京两大坐标约 4.3km，非法输入返回 None。 ... ok
+test_attribution_check (__main__.TestGoldenCases.test_attribution_check) ... ok
+test_food_decoupled_plan_clears_timeline (__main__.TestGoldenCases.test_food_decoupled_plan_clears_timeline) ... ok
+test_r11_r12_skip_interface (__main__.TestGoldenCases.test_r11_r12_skip_interface) ... ok
+test_arbitration_official_wins (__main__.TestGoldenTimeCases.test_arbitration_official_wins) ... ok
+test_build_decisions_attaches_official (__main__.TestGoldenTimeCases.test_build_decisions_attaches_official) ... ok
+test_expired_official_still_attached_for_r9 (__main__.TestGoldenTimeCases.test_expired_official_still_attached_for_r9) ... ok
+test_official_price_wins_in_catalog (__main__.TestGoldenTimeCases.test_official_price_wins_in_catalog) ... ok
+test_seed_loader (__main__.TestGoldenTimeCases.test_seed_loader) ... ok
+test_apply_guide_evidence_only_fills_empty (__main__.TestGuideEvidenceFoodRank.test_apply_guide_evidence_only_fills_empty) ... ok
+test_food_ranking_order_by_guide_heat (__main__.TestGuideEvidenceFoodRank.test_food_ranking_order_by_guide_heat)
+榜单排序：全空档案时按攻略提及热度分先后，不再全部并列。 ... ok
+test_food_score_uses_guide_heat_with_discount (__main__.TestGuideEvidenceFoodRank.test_food_score_uses_guide_heat_with_discount)
+攻略提及按 0.7 折扣计入热度维；实测热度更高时不被拉低。 ... ok
+test_fuzzy_mention_matches_substring (__main__.TestGuideEvidenceFoodRank.test_fuzzy_mention_matches_substring) ... ok
+test_render_shows_guide_heat_and_note (__main__.TestGuideEvidenceFoodRank.test_render_shows_guide_heat_and_note)
+渲染层：美食榜标"攻略提及热度"，详情卡标来源（不与实测混淆）。 ... ok
+test_heat_index (__main__.TestHeatAndPitfall.test_heat_index)
+热度指数：0~1 区间，新鲜度/互动计入；空列表不崩。 ... ok
+test_pitfall_digest (__main__.TestHeatAndPitfall.test_pitfall_digest)
+避坑专题：只收避雷立场，多源一致排前，上限截断。 ... ok
+test_find_latest_trip_matches_city_only (__main__.TestHeatFallback.test_find_latest_trip_matches_city_only)
+按 trip_plan.meta.city 精确匹配；别的城市的行程不得被当成兜底数据。 ... ok
+test_rows_from_trip_kind_and_honest_nulls (__main__.TestHeatFallback.test_rows_from_trip_kind_and_honest_nulls)
+kind 按 catalog.food 判；时间窗口未知一律 None（宁缺勿编），不写 0。 ... ok
+test_rows_from_trip_skips_blank_names (__main__.TestHeatFallback.test_rows_from_trip_skips_blank_names)
+无名行直接跳过（榜单没有可展示的主体）；空输入返回空表。 ... ok
+test_tier1_does_not_duplicate_names_from_trip (__main__.TestHeatFallback.test_tier1_does_not_duplicate_names_from_trip)
+同名不重复：快照里已有的点，不再从行程补一遍。 ... ok
+test_tier1_snapshot_wins (__main__.TestHeatFallback.test_tier1_snapshot_wins)
+有快照且该城没有行程：直接用快照，来源标 refresh。 ... ok
+test_tier1_supplements_missing_kind_from_trip (__main__.TestHeatFallback.test_tier1_supplements_missing_kind_from_trip)
+快照只刷了景点（早期口径）：用行程里已经算过的餐厅热度补上美食榜。 ... ok
+test_tier2_reads_back_trip_when_no_snapshot (__main__.TestHeatFallback.test_tier2_reads_back_trip_when_no_snapshot)
+没快照但有该城行程：回读热度行，不重新采集。 ... ok
+test_tier2_splits_food_from_spots (__main__.TestHeatFallback.test_tier2_splits_food_from_spots)
+行程来源同样要按 kind 分成两个榜（餐厅不混进景点榜）。 ... ok
+test_tier3_empty_state_offers_two_paths (__main__.TestHeatFallback.test_tier3_empty_state_offers_two_paths)
+什么都没有：空榜 + 引导文案要同时提到「刷榜」与「做行程」两条路。 ... ok
+test_time_windows (__main__.TestHeatTrend.test_time_windows)
+三时间窗占比：新/中/旧正确分桶，发布时间缺失计入旧内容。 ... ok
+test_trend_of (__main__.TestHeatTrend.test_trend_of)
+四态判定：本周最火看新鲜度，高赞旧内容标长盛不衰而非最火。 ... ok
+test_find_fresh_reuse_and_poison_guard (__main__.TestKnowledge.test_find_fresh_reuse_and_poison_guard)
+缓存复用：括号变体命中干净键 + 前缀回退命中变体名 + 空采集不算命中（防投毒）。 ... ok
+test_job_persistence_roundtrip (__main__.TestKnowledge.test_job_persistence_roundtrip)
+record_job -> load_job -> list_jobs 全链路（临时库，不污染真实数据）。 ... ok
+test_normalize (__main__.TestKnowledge.test_normalize) ... ok
+test_normalize_strips_qualifiers (__main__.TestKnowledge.test_normalize_strips_qualifiers)
+括号限定词剥离（全角/半角）：让带分店/范围说明的候选名归一到干净键。 ... ok
+test_report_registry_merge (__main__.TestKnowledge.test_report_registry_merge)
+行程报告登记后能进历史列表（与攻略报告合并，文件不存在则过滤）。 ... ok
+test_mcp_tools_registered (__main__.TestMcpAndOpenapi.test_mcp_tools_registered)
+MCP 服务器注册了全套 11 个工具（含知识库检索）；plan_trip 参数面与 /api/trip 对齐（防漂移）。 ... ok
+test_openapi_schema (__main__.TestMcpAndOpenapi.test_openapi_schema)
+OpenAPI 规范含全部 API 端点（供 Dify/Coze/GPTs 等平台导入）。 ... ok
+test_web_url_is_always_handed_back (__main__.TestMcpAndOpenapi.test_web_url_is_always_handed_back)
+开网页是交付的一部分：相关工具必须把网页地址交出来。 ... ok
+test_citation_not_applied_inside_code_span (__main__.TestMdMini.test_citation_not_applied_inside_code_span)
+代码片段里的 [8] 不得被当成引用编号（否则会生成假锚点）。 ... ok
+test_empty_and_none_input (__main__.TestMdMini.test_empty_and_none_input)
+空输入安全降级为空串（报告正文理论上有为空的情况）。 ... ok
+test_headings_demoted_below_page_skeleton (__main__.TestMdMini.test_headings_demoted_below_page_skeleton)
+标题整体降级到 h3/h4/h5，避免与页面自身的 h1/h2 打架。 ... ok
+test_html_is_escaped (__main__.TestMdMini.test_html_is_escaped)
+不可信输入必须转义：标签注入与伪协议都要挡住。 ... ok
+test_inline_bold_and_citation_anchor (__main__.TestMdMini.test_inline_bold_and_citation_anchor)
+行内加粗与引用编号：编号锚到来源条目，结论可溯源。 ... ok
+test_lists_are_grouped_and_switch_tags (__main__.TestMdMini.test_lists_are_grouped_and_switch_tags)
+连续同类项合成一个列表；ul 切到 ol 时正确闭合，不混标签。 ... ok
+test_only_http_links_are_linkified (__main__.TestMdMini.test_only_http_links_are_linkified)
+只有 http/https 变链接；javascript: 等按原文输出，不当链接用。 ... ok
+test_paragraph_merge_and_blank_line_split (__main__.TestMdMini.test_paragraph_merge_and_blank_line_split)
+同段连续行用 <br> 合并；空行切段。 ... ok
+test_real_report_body_has_no_residual_markup (__main__.TestMdMini.test_real_report_body_has_no_residual_markup)
+拿库内真实攻略报告正文跑一遍：不得残留 Markdown 标记。 ... ok
+test_unclosed_fence_still_emits_content (__main__.TestMdMini.test_unclosed_fence_still_emits_content)
+未闭合的围栏代码块：内容照样输出，绝不吞掉。 ... ok
+test_unsupported_syntax_is_kept_as_text (__main__.TestMdMini.test_unsupported_syntax_is_kept_as_text)
+不支持的语法（表格）不解析但不丢弃——宁可少解析，不可丢内容。 ... ok
+test_classify_note (__main__.TestNotesSplit.test_classify_note)
+注意事项关键词兕底分类：避坑 > 费用 > 时间 > 提示。 ... ok
+test_normalize_notes (__main__.TestNotesSplit.test_normalize_notes)
+notes 规范化：旧字符串拆分、非法类型兕底、None 安全。 ... ok
+test_render_notes_bullets (__main__.TestNotesSplit.test_render_notes_bullets)
+MD 渲染（新 TripPlan 渲染器）：注意事项分点，避坑/费用加粗；字符串 notes 自动归一化。 ... ok
+test_overview_and_render_sections (__main__.TestOverviewAndHtml.test_overview_and_render_sections)
+概览卡纯函数（新签名：不含任何金额键）及 Markdown 渲染新板块。 ... ok
+test_render_trip_html (__main__.TestOverviewAndHtml.test_render_trip_html)
+HTML 渲染（新 TripPlan 投影）：关键区块（概览卡/避坑/热度/免责）与下钻锚点都在。 ... C:\Users\35290\Desktop\TravelGuide Assitant\.venv\Lib\site-packages\jinja2\nodes.py:129: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x00000283BE0DA3E0>
+  def __init__(self, *fields: t.Any, **attributes: t.Any) -> None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_coverage_issues (__main__.TestPlanQualityGuards.test_coverage_issues) ... ok
+test_filter_fabricated_food (__main__.TestPlanQualityGuards.test_filter_fabricated_food)
+餐厅防编造：food 未命中候选店名则清空，命中则保留。 ... ok
+test_pick_ticket_price_ignores_retail_items (__main__.TestPlanQualityGuards.test_pick_ticket_price_ignores_retail_items)
+P6：园内小吃/商品/单独收费项目即使被标成 type=门票，也不当景区门票本体价。 ... ok
+test_rebalance_days_thin_day_fixed (__main__.TestPlanQualityGuards.test_rebalance_days_thin_day_fixed)
+排布兜底：某天只剩一个时段时，把过满天的点位搬过来；搬移不增删点位、不碰晚上型与全天型。 ... ok
+test_slot_price_labels_same_source (__main__.TestPlanQualityGuards.test_slot_price_labels_same_source)
+行程槽位票价文案只读 catalog 同源价（ticket_price）；无价或旧 cost 字段一律不出价格行。 ... ok
+test_verify_food_rescue (__main__.TestPlanQualityGuards.test_verify_food_rescue)
+美食保底：餐厅全被评审淘汰但有正面证据时，恢复证据最强的前 2 家。 ... ok
+test_normalize_plan (__main__.TestPlanner.test_normalize_plan)
+行程规范化：不在名单的景点丢弃，非法时段修正，天数截断。 ... ok
+test_normalize_profile (__main__.TestPlanner.test_normalize_profile)
+档案规范化：非法时长/时段降级，字段补齐。 ... ok
+test_render_slot_price_same_source (__main__.TestPlanner.test_render_slot_price_same_source)
+预算退役：行程槽位只展示 catalog 同源确定票价，无价时不出价格行、不出任何估算。 ... ok
+test_render_trip (__main__.TestPlanner.test_render_trip)
+路书渲染（新 TripPlan 渲染器）：逐日卡片 + 详情卡 + 溯源链接 + 参数回显都在。 ... ok
+test_r10_sources (__main__.TestQualityGate.test_r10_sources) ... ok
+test_r1_coverage (__main__.TestQualityGate.test_r1_coverage) ... ok
+test_r2_no_silent_drop (__main__.TestQualityGate.test_r2_no_silent_drop) ... ok
+test_r2_skips_food (__main__.TestQualityGate.test_r2_skips_food)
+R2 只判行程骨架；强证据美食未入选交 R7，不误报 R2。 ... ok
+test_r3_category_fallback_temple_at_night (__main__.TestQualityGate.test_r3_category_fallback_temple_at_night)
+寺庙类排晚上且无官方时间可查 → warn 需核实（不武断判 fail）。 ... ok
+test_r3_late_close_hours_not_flagged (__main__.TestQualityGate.test_r3_late_close_hours_not_flagged)
+营业到晚间的点排晚上不误报（09:30-20:00）。 ... ok
+test_r3_night_content_in_daytime_warns_without_fix (__main__.TestQualityGate.test_r3_night_content_in_daytime_warns_without_fix)
+UGC 夜场内容主导却排白天 → warn；不给回炉指令（数据层面的问题回炉改不掉）。 ... ok
+test_r3_official_hours_conflict_fails (__main__.TestQualityGate.test_r3_official_hours_conflict_fails)
+官方营业时间与时段冲突（闭园 17:00 却排晚上）→ fail，并给回炉指令。 ... ok
+test_r3_time_slot_and_close_day (__main__.TestQualityGate.test_r3_time_slot_and_close_day) ... ok
+test_r4_time_feasible (__main__.TestQualityGate.test_r4_time_feasible) ... ok
+test_r5_skip_in_m1 (__main__.TestQualityGate.test_r5_skip_in_m1) ... ok
+test_r7_food (__main__.TestQualityGate.test_r7_food) ... ok
+test_r8_pitfall_attribution (__main__.TestQualityGate.test_r8_pitfall_attribution) ... ok
+test_r9_timeliness (__main__.TestQualityGate.test_r9_timeliness) ... ok
+test_report_aggregation_and_finalize (__main__.TestQualityGate.test_report_aggregation_and_finalize) ... ok
+test_ask_retrieval_preferred_with_fallback (__main__.TestRagCorpus.test_ask_retrieval_preferred_with_fallback)
+追问接入：检索可用走片段路径（含待确认清单），不可用退回压缩档案（零回归）。 ... ok
+test_chunks_are_entry_based (__main__.TestRagCorpus.test_chunks_are_entry_based)
+切块按要点/评论条目、不按字数：条目完整、字符串化空值被清洗。 ... ok
+test_city_guide_index_rebuilds (__main__.TestRagCorpus.test_city_guide_index_rebuilds) ... ok
+test_context_for_question_and_degrade (__main__.TestRagCorpus.test_context_for_question_and_degrade) ... ok
+test_index_search_roundtrip (__main__.TestRagCorpus.test_index_search_roundtrip) ... ok
+test_quick_glance (__main__.TestRender.test_quick_glance) ... ok
+test_captcha_detected_variants (__main__.TestRiskControlCircuitBreaker.test_captcha_detected_variants) ... ok
+test_fetch_video_refuses_after_stop (__main__.TestRiskControlCircuitBreaker.test_fetch_video_refuses_after_stop)
+风控已触发时 fetch_video 立即 raise（不触碰页面），不会再去导航。 ... ok
+test_fetch_video_refuses_when_budget_exhausted (__main__.TestRiskControlCircuitBreaker.test_fetch_video_refuses_when_budget_exhausted)
+预算用尽时 fetch_video 立即拒绝（不导航），提示里给出"稍后重跑补齐"的出路。 ... ok
+test_fetch_videos_short_circuits_after_stop (__main__.TestRiskControlCircuitBreaker.test_fetch_videos_short_circuits_after_stop)
+风控已触发时：一条都不采、不新开 Tab（此处没有浏览器，真去开 Tab 必炸）。 ... ok
+test_fetch_videos_short_circuits_when_budget_exhausted (__main__.TestRiskControlCircuitBreaker.test_fetch_videos_short_circuits_when_budget_exhausted)
+预算用尽时批量采集一条都不采、不新开 Tab（此处没有浏览器，真开 Tab 必炸）。 ... ok
+test_nav_budget_roundtrip (__main__.TestRiskControlCircuitBreaker.test_nav_budget_roundtrip)
+会话级导航预算：计数、用尽判定、reset 清零。 ... ok
+test_stop_survives_new_task_budget (__main__.TestRiskControlCircuitBreaker.test_stop_survives_new_task_budget) ... ok
+test_degrade_hint_when_walk_too_far (__main__.TestRouteAdviceDegrade.test_degrade_hint_when_walk_too_far) ... ok
+test_hint_when_transit_much_slower_than_taxi (__main__.TestRouteAdviceDegrade.test_hint_when_transit_much_slower_than_taxi)
+步行段不长但耗时是打车的两倍多（超 1.6 倍阈值）也要提醒。 ... ok
+test_no_hint_when_reasonable (__main__.TestRouteAdviceDegrade.test_no_hint_when_reasonable)
+方案合理时不加提醒：步行段短、耗时与打车相当就保持原样输出。 ... ok
+test_author_reply_detection (__main__.TestSanitizeAuthor.test_author_reply_detection) ... ok
+test_classify_comment (__main__.TestSentiment.test_classify_comment)
+关键词情感判定：负面优先（反词包含关系不被误判）。 ... ok
+test_sentiment_trend (__main__.TestSentiment.test_sentiment_trend)
+情感趋势：近30天好评率对比更早，样本不足/无时间给数据不足。 ... ok
+test_time_token_to_date (__main__.TestSentiment.test_time_token_to_date)
+评论时间换算：相对/绝对格式都认，识别不了给 None。 ... ok
+test_cancel_primitives (__main__.TestServicePrimitives.test_cancel_primitives)
+cancel_job 只对内存中 running 的任务生效；终态/不存在返回 False。 ... ok
+test_rank_candidates (__main__.TestSmartSearch.test_rank_candidates)
+点赞降序在前、无点赞垫后、按 video_id 去重、限量。 ... ok
+test_captcha_detected_and_session_stop (__main__.TestSourceGate.test_captcha_detected_and_session_stop) ... ok
+test_default_off_raises (__main__.TestSourceGate.test_default_off_raises) ... ok
+test_enabled_passes_and_notices_once (__main__.TestSourceGate.test_enabled_passes_and_notices_once) ... ok
+test_guardrail_zero_delay_rejects (__main__.TestSourceGate.test_guardrail_zero_delay_rejects) ... ok
+test_build_decisions_union_states_and_order (__main__.TestSpotDecision.test_build_decisions_union_states_and_order)
+F1.1：每个被圈定候选（含淘汰）都查得到结论；状态标注与排序正确。 ... ok
+test_evidence_mapping (__main__.TestSpotDecision.test_evidence_mapping) ... ok
+test_food_recommendation_marks_in (__main__.TestSpotDecision.test_food_recommendation_marks_in)
+food 字段点名推荐的餐厅标入选（不误显示备选、不触发 R2）。 ... ok
+test_normalize_official_and_expiry (__main__.TestSpotDecision.test_normalize_official_and_expiry) ... ok
+test_unresearched_and_hard_reason (__main__.TestSpotDecision.test_unresearched_and_hard_reason) ... ok
+test_claims_are_escaped (__main__.TestSpotReportHtml.test_claims_are_escaped)
+claim 来自抖音评论，属不可信输入：HTML 必须转义。 ... ok
+test_degrades_when_no_points (__main__.TestSpotReportHtml.test_degrades_when_no_points)
+没有要点时：速览与来源板块不渲染，但页面本身仍可用（视频清单还在）。 ... ok
+test_empty_body_and_items_do_not_crash (__main__.TestSpotReportHtml.test_empty_body_and_items_do_not_crash)
+全空输入不崩：正文为空则详解板块不渲染，页面骨架仍在。 ... ok
+test_every_citation_has_a_matching_source_anchor (__main__.TestSpotReportHtml.test_every_citation_has_a_matching_source_anchor)
+正文/速览里的 [n] 引用必须都能落到来源条目上，不许指向空锚点。 ... ok
+test_glance_buckets_match_markdown (__main__.TestSpotReportHtml.test_glance_buckets_match_markdown)
+图文的三栏必须与 Markdown 留档完全一致（防两份口径漂移）。 ... ok
+test_sections_present_and_numbered_sequentially (__main__.TestSpotReportHtml.test_sections_present_and_numbered_sequentially)
+四个板块齐全，编号连续（隐藏板块不得留空号）。 ... ok
+test_source_rows_carry_badges_and_flags (__main__.TestSpotReportHtml.test_source_rows_carry_badges_and_flags)
+来源条目带类别/置信度/立场/时效敏感标记，且时效敏感的要点被标出来。 ... ok
+test_main_friendly_on_uvicorn_startup_failure (__main__.TestStartupHelpers.test_main_friendly_on_uvicorn_startup_failure)
+uvicorn 启动失败（非零 SystemExit）→ 友好提示 + 返回 1；正常退出码 0 不误报。 ... ok
+test_main_reports_occupied_port (__main__.TestStartupHelpers.test_main_reports_occupied_port)
+端口被其他程序占用：不启动，给出可操作提示并返回 1。 ... ok
+test_main_reuses_running_service (__main__.TestStartupHelpers.test_main_reuses_running_service)
+服务已在运行：不重复启动，直接打开浏览器复用。 ... ok
+test_port_in_use_false_when_free (__main__.TestStartupHelpers.test_port_in_use_false_when_free) ... ok
+test_port_in_use_true_when_listening (__main__.TestStartupHelpers.test_port_in_use_true_when_listening) ... ok
+test_service_already_running_false_on_dead_port (__main__.TestStartupHelpers.test_service_already_running_false_on_dead_port) ... ok
+test_service_already_running_requires_ok_status (__main__.TestStartupHelpers.test_service_already_running_requires_ok_status)
+同端口上的其他程序若返回非本服务格式的响应，不得误判为"已在运行"。 ... ok
+test_build_legs_offline (__main__.TestTimeModelCases.test_build_legs_offline) ... ok
+test_day_weekdays_from (__main__.TestTimeModelCases.test_day_weekdays_from) ... ok
+test_is_all_day (__main__.TestTimeModelCases.test_is_all_day) ... ok
+test_r1_all_day_exemption (__main__.TestTimeModelCases.test_r1_all_day_exemption) ... ok
+test_r5_route_backtrack (__main__.TestTimeModelCases.test_r5_route_backtrack) ... ok
+test_hints_format_and_fail (__main__.TestTransportHints.test_hints_format_and_fail)
+LLM 交通估算：格式化带估算标注，缺字段丢弃，异常/空清单不阻断。 ... ok
+test_route_advice_degrade (__main__.TestTransportHints.test_route_advice_degrade)
+无高德 Key 时地理全链路返回 None（降级不阻断）。 ... ok
+test_transit_legs_degrades_without_stops (__main__.TestTransportHints.test_transit_legs_degrades_without_stops)
+换乘描述：站数/站名缺失时只少显示缺的那段，绝不留半截括号。 ... ok
+test_trip_validation (__main__.TestTripApi.test_trip_validation)
+/api/trip 参数校验：空城市/非法天数/非法消费偏好拒绝，不实际起任务。 ... [10/25/26 22:58:32] INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/trip                        
+                             "HTTP/1.1 400 Bad Request"                        
+                    INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/trip                        
+                             "HTTP/1.1 400 Bad Request"                        
+                    INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/trip                        
+                             "HTTP/1.1 400 Bad Request"                        
+                    INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/trip                        
+                             "HTTP/1.1 400 Bad Request"                        
+ok
+test_coords_dual_frame_and_inside_canvas (__main__.TestTripMapLayout.test_coords_dual_frame_and_inside_canvas)
+双坐标系同源，且全部落在画布内（含点位多的极端情况）。 ... ok
+test_degenerate_inputs_degrade_safely (__main__.TestTripMapLayout.test_degenerate_inputs_degrade_safely)
+空行程 / 空天 / 缺 blocks：返回空图而不是抛异常（报告可能没有行程）。 ... ok
+test_edges_link_consecutive_and_flag_same_day (__main__.TestTripMapLayout.test_edges_link_consecutive_and_flag_same_day)
+连线只连接相邻点，并标出是否同日（视觉上区分"当天内"与"跨天"）。 ... ok
+test_labels_do_not_overlap_across_days (__main__.TestTripMapLayout.test_labels_do_not_overlap_across_days)
+每天占一段横向区间，且区间之间留白——长景点名才不会被邻天压住。 ... ok
+test_missing_spot_name_does_not_crash (__main__.TestTripMapLayout.test_missing_spot_name_does_not_crash)
+景点名缺失（空串）不得崩——模板侧按空标签处理。 ... ok
+test_nodes_numbered_globally (__main__.TestTripMapLayout.test_nodes_numbered_globally)
+序号全局连续：跨天后仍接着数（图上徽标 = 行程次序）。 ... ok
+test_single_node_and_single_day (__main__.TestTripMapLayout.test_single_node_and_single_day)
+单点：无连线；单天多点：有同日连线但没有跨天连线。 ... ok
+test_spot_and_slot_passthrough (__main__.TestTripMapLayout.test_spot_and_slot_passthrough)
+景点名/时段/时长原样透传（模板零计算，不做任何格式化）。 ... ok
+test_vertical_undulation_is_continuous (__main__.TestTripMapLayout.test_vertical_undulation_is_continuous)
+纵向起伏：全局轮转到三条带，而不是每天重复同一个山峰形状。 ... ok
+test_build_catalog_rank_1to1 (__main__.TestTripPlanCatalog.test_build_catalog_rank_1to1) ... ok
+test_intro_sections_and_facts_ref (__main__.TestTripPlanCatalog.test_intro_sections_and_facts_ref) ... ok
+test_r11_no_dead_link (__main__.TestTripPlanCatalog.test_r11_no_dead_link) ... ok
+test_r12_triple_consistency (__main__.TestTripPlanCatalog.test_r12_triple_consistency) ... ok
+test_run_gate_thread_trip_plan (__main__.TestTripPlanCatalog.test_run_gate_thread_trip_plan) ... ok
+test_trip_plan_shape_and_same_source (__main__.TestTripPlanCatalog.test_trip_plan_shape_and_same_source) ... ok
+test_apply_trip_plan_checks_activates_r11_r12 (__main__.TestTripPlanWiring.test_apply_trip_plan_checks_activates_r11_r12) ... ok
+test_apply_trip_plan_checks_dead_link_to_unresolved (__main__.TestTripPlanWiring.test_apply_trip_plan_checks_dead_link_to_unresolved) ... ok
+test_poi_detail_pitfalls_fallback_from_avoid (__main__.TestTripPlanWiring.test_poi_detail_pitfalls_fallback_from_avoid) ... ok
+test_html_projects_template_context (__main__.TestTripRender.test_html_projects_template_context) ... ok
+test_markdown_ia_and_drilldown (__main__.TestTripRender.test_markdown_ia_and_drilldown) ... ok
+test_renderers_are_readonly (__main__.TestTripRender.test_renderers_are_readonly) ... ok
+test_close_button_focus_does_not_scroll_page (__main__.TestTripReportModalScroll.test_close_button_focus_does_not_scroll_page)
+聚焦关闭按钮必须带 preventScroll，否则聚焦会把页面拽到按钮处。 ... ok
+test_rendered_report_carries_the_fix (__main__.TestTripReportModalScroll.test_rendered_report_carries_the_fix)
+真实产物（磁盘上的路书 HTML）必须带上修复——模板改了不重渲染等于没改。 ... ok
+test_scroll_position_is_explicitly_saved_and_restored (__main__.TestTripReportModalScroll.test_scroll_position_is_explicitly_saved_and_restored) ... ok
+test_unlock_happens_before_restoring_scroll (__main__.TestTripReportModalScroll.test_unlock_happens_before_restoring_scroll)
+顺序要对：先解除 overflow 锁定、再恢复滚动。 ... ok
+test_fallback_when_llm_unavailable (__main__.TestVerify.test_fallback_when_llm_unavailable)
+LLM 调用抛异常时降级为全部单源，不阻断主流程。 ... ok
+test_stance_conflicts (__main__.TestVerify.test_stance_conflicts) ... ok
+test_empty_and_broken_input_safe (__main__.TestVerifyChecklist.test_empty_and_broken_input_safe)
+空 / 脏 TripPlan 都不得抛异常，且空清单不产出分组（不占版面）。 ... ok
+test_price_group_and_cutoff (__main__.TestVerifyChecklist.test_price_group_and_cutoff)
+有价的报出金额，缺价的并入"需查官方渠道"；事实截止日取自 meta。 ... ok
+test_rows_key_not_items (__main__.TestVerifyChecklist.test_rows_key_not_items)
+分组键名必须是 rows：Jinja2 里 g.items 会解析成 dict.items() 方法而非键。 ... ok
+test_same_detail_merged_with_true_count (__main__.TestVerifyChecklist.test_same_detail_merged_with_true_count)
+同一句话达阈值即合并为一行，且计数按真实点数而非行数。 ... ok
+test_spread_across_points (__main__.TestVerifyChecklist.test_spread_across_points)
+单点提示不过度刷屏：同一景点最多 2 条，保证清单覆盖到其它点。 ... ok
+test_time_keywords_hit_but_praise_not_misjudged (__main__.TestVerifyChecklist.test_time_keywords_hit_but_praise_not_misjudged)
+命中时效词的提示进清单；"装修好、服务好"这类好评不得误判为停业提示。 ... ok
+test_empty_pool_never_relaxes (__main__.TestVideoQualityGate.test_empty_pool_never_relaxes)
+搜索 0 结果（撞验证码风控/关键词过冷）绝不能报成"素材不足已降档"。 ... ok
+test_fetch_videos_gated_backfills (__main__.TestVideoQualityGate.test_fetch_videos_gated_backfills)
+候补补采：首批不达标就从候补顶上，凑够即停（不多消耗导航额度）。 ... ok
+test_fetch_videos_gated_relaxes_without_extra_navigation (__main__.TestVideoQualityGate.test_fetch_videos_gated_relaxes_without_extra_navigation)
+素材不够时只对已采回的数据降档重判（零额外导航），并如实标注降档轨迹。 ... ok
+test_filter_note_is_transparent (__main__.TestVideoQualityGate.test_filter_note_is_transparent)
+筛选明细必须说人话：候选池/达标数/候补/淘汰原因/降档轨迹/点赞区间一个不少。 ... ok
+test_gate_and_backfill_marks_reject (__main__.TestVideoQualityGate.test_gate_and_backfill_marks_reject) ... ok
+test_gated_empty_candidates_explains_cause (__main__.TestVideoQualityGate.test_gated_empty_candidates_explains_cause)
+无候选可采时如实说明是搜索没结果，不报"候选池已用尽"。 ... ok
+test_missing_metrics_never_reject (__main__.TestVideoQualityGate.test_missing_metrics_never_reject)
+指标缺失（旧缓存 JSON / 接口改版）时该维度不生效，绝不误杀存量数据。 ... ok
+test_quality_score_monotonic_and_penalty (__main__.TestVideoQualityGate.test_quality_score_monotonic_and_penalty)
+质量分：点赞单调递增、营销号砍半、播放量/收藏/新鲜度也参与（不是只看点赞）。 ... ok
+test_reject_reason_rules (__main__.TestVideoQualityGate.test_reject_reason_rules)
+严格档（默认）：点赞≥2000、一年内、时长≥30 秒、营销号直接拒。 ... ok
+test_relax_level_chain (__main__.TestVideoQualityGate.test_relax_level_chain) ... ok
+test_screen_pool_defers_without_likes (__main__.TestVideoQualityGate.test_screen_pool_defers_without_likes)
+搜索页解析不到点赞（选择器失效）：不猜数、不静默降标准，延后到详情页判定。 ... ok
+test_screen_pool_picks_and_reports (__main__.TestVideoQualityGate.test_screen_pool_picks_and_reports)
+预筛：picked 是首批深采名单，kept 多出的作候补，淘汰按原因计数。 ... ok
+test_screen_pool_relaxes_when_insufficient (__main__.TestVideoQualityGate.test_screen_pool_relaxes_when_insufficient)
+严格档达标不足→自动降档，且降档轨迹可展示（未静默放宽）。 ... ok
+test_extra_body_keys (__main__.TestWebSearchFallback.test_extra_body_keys)
+联网参数同时携带两系兼容键；未开启时只有思考控制。 ... ok
+test_web_search_degrade (__main__.TestWebSearchFallback.test_web_search_degrade)
+联网参数不兼容时：去参自动重试成功，降级标记置位后后续调用不再携带。 ... ok
+test_age_rule_blocks_dropped_condition (tests_evidence.TestLiteralEvidence.test_age_rule_blocks_dropped_condition) ... ok
+test_changed_offset_fails (tests_evidence.TestLiteralEvidence.test_changed_offset_fails) ... ok
+test_changed_quote_fails_integrity_check (tests_evidence.TestLiteralEvidence.test_changed_quote_fails_integrity_check) ... ok
+test_changed_snapshot_fails_integrity_check (tests_evidence.TestLiteralEvidence.test_changed_snapshot_fails_integrity_check) ... ok
+test_description_can_support_without_comment_quote (tests_evidence.TestLiteralEvidence.test_description_can_support_without_comment_quote) ... ok
+test_empty_excerpt_rejected (tests_evidence.TestLiteralEvidence.test_empty_excerpt_rejected) ... ok
+test_empty_quote_without_video_evidence_does_not_bypass (tests_evidence.TestLiteralEvidence.test_empty_quote_without_video_evidence_does_not_bypass) ... ok
+test_excerpt_is_copied_from_complete_source (tests_evidence.TestLiteralEvidence.test_excerpt_is_copied_from_complete_source) ... ok
+test_forged_source_rejected (tests_evidence.TestLiteralEvidence.test_forged_source_rejected) ... ok
+test_long_context_is_pending_without_truncating (tests_evidence.TestLiteralEvidence.test_long_context_is_pending_without_truncating) ... ok
+test_long_real_quote_keeps_context (tests_evidence.TestLiteralEvidence.test_long_real_quote_keeps_context) ... ok
+test_no_truncation_before_validation (tests_evidence.TestLiteralEvidence.test_no_truncation_before_validation) ... ok
+test_number_rule_blocks_changed_amount (tests_evidence.TestLiteralEvidence.test_number_rule_blocks_changed_amount) ... ok
+test_old_marked_matched_without_snapshot_is_not_verified (tests_evidence.TestLiteralEvidence.test_old_marked_matched_without_snapshot_is_not_verified) ... ok
+test_only_first_fifty_comments_are_evidence (tests_evidence.TestLiteralEvidence.test_only_first_fifty_comments_are_evidence) ... ok
+test_other_video_id_rejected (tests_evidence.TestLiteralEvidence.test_other_video_id_rejected) ... ok
+test_same_prefix_and_fake_suffix_rejected (tests_evidence.TestLiteralEvidence.test_same_prefix_and_fake_suffix_rejected) ... ok
+test_same_video_updated_comment_gets_distinct_evidence_id (tests_evidence.TestLiteralEvidence.test_same_video_updated_comment_gets_distinct_evidence_id) ... ok
+test_transcript_can_support_without_comment_quote (tests_evidence.TestLiteralEvidence.test_transcript_can_support_without_comment_quote) ... ok
+test_unknown_id_rejected (tests_evidence.TestLiteralEvidence.test_unknown_id_rejected) ... ok
+test_valid_age_and_amount_pass_basic_rules (tests_evidence.TestLiteralEvidence.test_valid_age_and_amount_pass_basic_rules) ... ok
+test_compressed_ask_does_not_restore_legacy_quotes (tests_evidence.TestQuoteExits.test_compressed_ask_does_not_restore_legacy_quotes) ... ok
+test_digest_ignores_model_written_quote_and_refills_id (tests_evidence.TestQuoteExits.test_digest_ignores_model_written_quote_and_refills_id) ... ok
+test_digest_summary_requires_refs_and_matching_numbers (tests_evidence.TestQuoteExits.test_digest_summary_requires_refs_and_matching_numbers) ... ok
+test_extract_rejects_claim_instead_of_only_clearing_quote (tests_evidence.TestQuoteExits.test_extract_rejects_claim_instead_of_only_clearing_quote) ...                     INFO     丢弃证据编号、完整摘录或来源无效的  extract.py:145
+                             要点：https://fixture.test/v1                     
+ok
+test_extract_uses_numbered_evidence_and_binds_url (tests_evidence.TestQuoteExits.test_extract_uses_numbered_evidence_and_binds_url) ... ok
+test_legacy_digest_literal_checker_rejects_extended_quote (tests_evidence.TestQuoteExits.test_legacy_digest_literal_checker_rejects_extended_quote) ... ok
+test_legacy_rag_does_not_index_unverified_comment_quotes (tests_evidence.TestQuoteExits.test_legacy_rag_does_not_index_unverified_comment_quotes) ... ok
+test_pending_claims_cannot_enter_fact_glance (tests_evidence.TestQuoteExits.test_pending_claims_cannot_enter_fact_glance) ... ok
+test_pending_point_cannot_enter_quote_bank (tests_evidence.TestQuoteExits.test_pending_point_cannot_enter_quote_bank) ... ok
+test_plan_quotes_are_scoped_to_current_spot (tests_evidence.TestQuoteExits.test_plan_quotes_are_scoped_to_current_spot) ... ok
+test_plan_without_evidence_drops_all_generated_quotes (tests_evidence.TestQuoteExits.test_plan_without_evidence_drops_all_generated_quotes) ... ok
+test_profile_and_digest_do_not_use_pending_claims (tests_evidence.TestQuoteExits.test_profile_and_digest_do_not_use_pending_claims) ... ok
+test_quote_bank_cannot_be_mutated_to_fake_text (tests_evidence.TestQuoteExits.test_quote_bank_cannot_be_mutated_to_fake_text) ... ok
+test_report_without_supported_evidence_does_not_call_llm (tests_evidence.TestQuoteExits.test_report_without_supported_evidence_does_not_call_llm) ... ok
+test_unknown_and_duplicate_quote_ids_are_filtered (tests_evidence.TestQuoteExits.test_unknown_and_duplicate_quote_ids_are_filtered) ... ok
+test_verifier_can_revoke_previously_available_quote (tests_evidence.TestQuoteExits.test_verifier_can_revoke_previously_available_quote) ... ok
+test_batch_context_is_complete_and_bounded (tests_evidence.TestSupportReview.test_batch_context_is_complete_and_bounded) ... ok
+test_batch_support_ids_are_remapped_and_failed_batch_stays_pending (tests_evidence.TestSupportReview.test_batch_support_ids_are_remapped_and_failed_batch_stays_pending) ... ok
+test_duplicate_support_ids_are_pending (tests_evidence.TestSupportReview.test_duplicate_support_ids_are_pending) ... ok
+test_missing_support_response_is_pending (tests_evidence.TestSupportReview.test_missing_support_response_is_pending) ... ok
+test_model_error_is_pending_not_trusted (tests_evidence.TestSupportReview.test_model_error_is_pending_not_trusted) ... ok
+test_numeric_rule_cannot_be_overridden_by_llm (tests_evidence.TestSupportReview.test_numeric_rule_cannot_be_overridden_by_llm) ... ok
+test_old_points_are_marked_unverified_and_quotes_cleared (tests_evidence.TestSupportReview.test_old_points_are_marked_unverified_and_quotes_cleared) ... ok
+test_rejected_source_cannot_inflate_confidence_or_conflicts (tests_evidence.TestSupportReview.test_rejected_source_cannot_inflate_confidence_or_conflicts) ... ok
+test_reviewed_pending_point_can_be_retried (tests_evidence.TestSupportReview.test_reviewed_pending_point_can_be_retried) ... ok
+test_supported_points_count_only_real_sources (tests_evidence.TestSupportReview.test_supported_points_count_only_real_sources) ... ok
+test_supported_quote_and_contradicted_claim_are_distinct (tests_evidence.TestSupportReview.test_supported_quote_and_contradicted_claim_are_distinct) ... ok
+test_atomic_budget_reservation (tests_planning.PlanningTest.test_atomic_budget_reservation) ... ok
+test_budget_not_refilled_after_restart (tests_planning.PlanningTest.test_budget_not_refilled_after_restart) ... ok
+test_cancel_after_request_stops_before_next_node (tests_planning.PlanningTest.test_cancel_after_request_stops_before_next_node) ... [10/25/26 22:58:36] INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_cancel_is_persistent_and_isolated (tests_planning.PlanningTest.test_cancel_is_persistent_and_isolated) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_duplicate_slots_and_all_day_overlap_fail_contract (tests_planning.PlanningTest.test_duplicate_slots_and_all_day_overlap_fail_contract) ... ok
+test_empty_plan_cannot_block_first_valid_plan_with_disclosed_conflict (tests_planning.PlanningTest.test_empty_plan_cannot_block_first_valid_plan_with_disclosed_conflict) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_equal_hard_counts_with_different_ids_are_rejected (tests_planning.PlanningTest.test_equal_hard_counts_with_different_ids_are_rejected) ... ok
+test_expired_and_absent_facts_unknown_explicit_exclusion_checked (tests_planning.PlanningTest.test_expired_and_absent_facts_unknown_explicit_exclusion_checked) ... ok
+test_expired_facts_not_used_as_qc_repair_instruction_in_strict_policy (tests_planning.PlanningTest.test_expired_facts_not_used_as_qc_repair_instruction_in_strict_policy) ... ok
+test_fatal_auth_does_not_retry (tests_planning.PlanningTest.test_fatal_auth_does_not_retry) ... [10/25/26 22:58:37] INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 401 Unauthorized"                
+ok
+test_finalizer_registration_failure_then_idempotent_retry (tests_planning.PlanningTest.test_finalizer_registration_failure_then_idempotent_retry) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_hard_first_rejects_new_violation_despite_soft_improvement (tests_planning.PlanningTest.test_hard_first_rejects_new_violation_despite_soft_improvement) ... ok
+test_hard_policy_graph_removes_closed_day_conflict (tests_planning.PlanningTest.test_hard_policy_graph_removes_closed_day_conflict) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_hard_subset_wins_and_ties_keep_old (tests_planning.PlanningTest.test_hard_subset_wins_and_ties_keep_old) ... ok
+test_hard_violation_never_finishes_as_quality_complete (tests_planning.PlanningTest.test_hard_violation_never_finishes_as_quality_complete) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_index_repair_checks_all_keys_not_any_prefix (tests_planning.PlanningTest.test_index_repair_checks_all_keys_not_any_prefix) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_inner_repair_removes_hard_violation_even_with_more_coverage_issues (tests_planning.PlanningTest.test_inner_repair_removes_hard_violation_even_with_more_coverage_issues) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_invalid_first_candidate_is_diagnostic_not_best_or_report (tests_planning.PlanningTest.test_invalid_first_candidate_is_diagnostic_not_best_or_report) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_invalid_initial_candidate_can_be_fixed_in_later_round (tests_planning.PlanningTest.test_invalid_initial_candidate_can_be_fixed_in_later_round) ... [10/25/26 22:58:38] INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_lease_released_even_when_owner_cleanup_fails (tests_planning.PlanningTest.test_lease_released_even_when_owner_cleanup_fails) ... ok
+test_legacy_inner_coverage_repair (tests_planning.PlanningTest.test_legacy_inner_coverage_repair) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_legacy_migration_matches_prompt_sequence_and_output (tests_planning.PlanningTest.test_legacy_migration_matches_prompt_sequence_and_output) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_lost_validation_coverage_and_invalid_contract_rejected (tests_planning.PlanningTest.test_lost_validation_coverage_and_invalid_contract_rejected) ... ok
+test_original_trip_entry_auto_and_explicit_reach_graph_and_report (tests_planning.PlanningTest.test_original_trip_entry_auto_and_explicit_reach_graph_and_report) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_parallel_runs_have_independent_checkpoints_and_usage (tests_planning.PlanningTest.test_parallel_runs_have_independent_checkpoints_and_usage) ... [10/25/26 22:58:39] INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_response_saved_before_graph_checkpoint_is_reused (tests_planning.PlanningTest.test_response_saved_before_graph_checkpoint_is_reused) ... ok
+test_resume_api_reuses_snapshot_and_no_crawl_or_session_reset (tests_planning.PlanningTest.test_resume_api_reuses_snapshot_and_no_crawl_or_session_reset) ... [10/25/26 22:58:42] INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: GET                  _client.py:1085
+                             http://testserver/api/planning-run                
+                             s/e82b35076c7a402c819aa360082cfb6e                
+                              "HTTP/1.1 200 OK"                                
+                    INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/planning-run                
+                             s/e82b35076c7a402c819aa360082cfb6e                
+                             /resume "HTTP/1.1 202 Accepted"                   
+[10/25/26 22:58:43] INFO     HTTP Request: GET                  _client.py:1085
+                             http://testserver/api/jobs/fixture                
+                             -job "HTTP/1.1 200 OK"                            
+ok
+test_retry_count_survives_run_resume (tests_planning.PlanningTest.test_retry_count_survives_run_resume) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_same_run_lease_blocks_second_thread (tests_planning.PlanningTest.test_same_run_lease_blocks_second_thread) ... ok
+test_sdk_retry_disabled_and_invalid_json_usage_counted (tests_planning.PlanningTest.test_sdk_retry_disabled_and_invalid_json_usage_counted) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_simultaneous_store_initialization_serializes_migration (tests_planning.PlanningTest.test_simultaneous_store_initialization_serializes_migration) ... ok
+test_skipped_embedding_can_be_completed_after_configuration (tests_planning.PlanningTest.test_skipped_embedding_can_be_completed_after_configuration) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_subprocess_generate_checkpoint_resumes_without_call (tests_planning.PlanningTest.test_subprocess_generate_checkpoint_resumes_without_call) ... ok
+test_subprocess_quality_checkpoint_resumes_without_call (tests_planning.PlanningTest.test_subprocess_quality_checkpoint_resumes_without_call) ... ok
+test_tampered_expired_or_incompatible_snapshot_rejected (tests_planning.PlanningTest.test_tampered_expired_or_incompatible_snapshot_rejected) ... ok
+test_timeout_budget_does_not_stack_sdk_retries (tests_planning.PlanningTest.test_timeout_budget_does_not_stack_sdk_retries) ... ok
+test_uncertain_request_window_marked_unknown_then_counted_again (tests_planning.PlanningTest.test_uncertain_request_window_marked_unknown_then_counted_again) ... ok
+test_unknown_usage_kept_null (tests_planning.PlanningTest.test_unknown_usage_kept_null) ... [10/25/26 22:58:55] INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_zero_budget_zero_factory_or_requests (tests_planning.PlanningTest.test_zero_budget_zero_factory_or_requests) ... ok
+test_new_task_keeps_captcha_breaker_until_explicit_clear (tests_upgrade.TestCrawlerSessionIsolation.test_new_task_keeps_captcha_breaker_until_explicit_clear) ... ok
+test_same_task_begin_is_idempotent (tests_upgrade.TestCrawlerSessionIsolation.test_same_task_begin_is_idempotent) ... ok
+test_task_b_does_not_clear_running_task_a (tests_upgrade.TestCrawlerSessionIsolation.test_task_b_does_not_clear_running_task_a) ... ok
+test_real_faiss_integration_if_installed (tests_upgrade.TestFaissIndexMapping.test_real_faiss_integration_if_installed) ... skipped '真实 faiss 未安装：本次仅验证替身映射，不宣称真实包集成'
+test_scores_are_mapped_back_to_original_rows (tests_upgrade.TestFaissIndexMapping.test_scores_are_mapped_back_to_original_rows) ... ok
+test_search_returns_correct_text_for_each_score (tests_upgrade.TestFaissIndexMapping.test_search_returns_correct_text_for_each_score) ... ok
+test_zero_and_bad_dimension_are_skipped_on_both_paths (tests_upgrade.TestFaissIndexMapping.test_zero_and_bad_dimension_are_skipped_on_both_paths) ... ok
+test_mysql_backend_without_dsn_fails_loudly (tests_service.AuthAndMySQLContractTest.test_mysql_backend_without_dsn_fails_loudly) ... ok
+test_mysql_dialect_compiles_claim_and_capacity_sql (tests_service.AuthAndMySQLContractTest.test_mysql_dialect_compiles_claim_and_capacity_sql) ... ok
+test_token_authentication_and_owner_isolation (tests_service.AuthAndMySQLContractTest.test_token_authentication_and_owner_isolation) ... ok
+test_key_conditions_are_not_ambiguous (tests_service.CacheAndLimitTest.test_key_conditions_are_not_ambiguous) ... ok
+test_persistent_slots_are_shared_across_store_instances (tests_service.CacheAndLimitTest.test_persistent_slots_are_shared_across_store_instances) ... ok
+test_real_redis_client_failure_is_bounded (tests_service.CacheAndLimitTest.test_real_redis_client_failure_is_bounded) ... ok
+test_redis_cache_roundtrip_and_negative (tests_service.CacheAndLimitTest.test_redis_cache_roundtrip_and_negative) ... ok
+test_redis_failure_falls_back_without_raising (tests_service.CacheAndLimitTest.test_redis_failure_falls_back_without_raising) ... ok
+test_single_flight_merges_concurrent_misses (tests_service.CacheAndLimitTest.test_single_flight_merges_concurrent_misses) ... ok
+test_diff_rechecks_old_plan_under_new_constraints (tests_service.ChangeAndDiffTest.test_diff_rechecks_old_plan_under_new_constraints) ... ok
+test_merge_changes_keeps_exclusions_and_summary (tests_service.ChangeAndDiffTest.test_merge_changes_keeps_exclusions_and_summary) ... ok
+test_submit_change_builds_new_request_and_task (tests_service.ChangeAndDiffTest.test_submit_change_builds_new_request_and_task) ... ok
+test_trip_change_worker_registers_child_version (tests_service.ChangeWorkerIntegrationTest.test_trip_change_worker_registers_child_version) ... ok
+test_change_version_inactive_until_cas_activate (tests_service.ReportVersionTest.test_change_version_inactive_until_cas_activate) ... ok
+test_initial_version_active_and_evidence_bound (tests_service.ReportVersionTest.test_initial_version_active_and_evidence_bound) ... ok
+test_quality_warning_is_not_passed (tests_service.ReportVersionTest.test_quality_warning_is_not_passed) ... ok
+test_cancel_needs_review_is_terminal (tests_service.TaskStoreTest.test_cancel_needs_review_is_terminal) ... ok
+test_cancel_queued_and_running (tests_service.TaskStoreTest.test_cancel_queued_and_running) ... ok
+test_expired_owner_cannot_write_and_retry_gets_new_generation (tests_service.TaskStoreTest.test_expired_owner_cannot_write_and_retry_gets_new_generation) ... ok
+test_idempotency_same_payload_reuses_and_conflict_409 (tests_service.TaskStoreTest.test_idempotency_same_payload_reuses_and_conflict_409) ... ok
+test_owner_isolation_and_event_cursor (tests_service.TaskStoreTest.test_owner_isolation_and_event_cursor) ... ok
+test_progress_returns_cancel_flag (tests_service.TaskStoreTest.test_progress_returns_cancel_flag) ... ok
+test_queue_and_owner_capacity_are_atomic_limits (tests_service.TaskStoreTest.test_queue_and_owner_capacity_are_atomic_limits) ... ok
+test_two_consumers_claim_one_job_only_once (tests_service.TaskStoreTest.test_two_consumers_claim_one_job_only_once) ... ok
+test_change_api_returns_accepted_job (tests_service.VersionApiTest.test_change_api_returns_accepted_job) ... [10/25/26 22:58:58] INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/reports/a2c0                
+                             d5b24e0b416c81a84093065713e9/chang                
+                             es "HTTP/1.1 202 Accepted"                        
+ok
+test_versions_diff_and_activate_cas (tests_service.VersionApiTest.test_versions_diff_and_activate_cas) ...                     INFO     HTTP Request: GET                  _client.py:1085
+                             http://testserver/api/reports/83f0                
+                             d09f0b4d43e68c6f0d359f8e80a6/versi                
+                             ons "HTTP/1.1 200 OK"                             
+[10/25/26 22:58:59] INFO     HTTP Request: GET                  _client.py:1085
+                             http://testserver/api/reports/83f0                
+                             d09f0b4d43e68c6f0d359f8e80a6/diff?                
+                             to_version_id=14c4b2fd2181491ba749                
+                             87c1f7392655 "HTTP/1.1 200 OK"                    
+                    INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/reports/83f0                
+                             d09f0b4d43e68c6f0d359f8e80a6/activ                
+                             ate "HTTP/1.1 409 Conflict"                       
+                    INFO     HTTP Request: POST                 _client.py:1085
+                             http://testserver/api/reports/83f0                
+                             d09f0b4d43e68c6f0d359f8e80a6/activ                
+                             ate "HTTP/1.1 200 OK"                             
+ok
+test_cooperative_cancel (tests_service.WorkerTest.test_cooperative_cancel) ... ok
+test_retry_then_exhaust (tests_service.WorkerTest.test_retry_then_exhaust) ... ok
+test_singleton_blocks_second_pipeline_worker (tests_service.WorkerTest.test_singleton_blocks_second_pipeline_worker) ... ok
+test_step_is_idempotent_for_same_input (tests_service.WorkerTest.test_step_is_idempotent_for_same_input) ... ok
+test_success_and_events (tests_service.WorkerTest.test_success_and_events) ... ok
+test_unknown_external_state_goes_needs_review_not_retry (tests_service.WorkerTest.test_unknown_external_state_goes_needs_review_not_retry) ... ok
+test_budget_exhaustion_stops_without_extra_model_request (tests_agent.AgentLoopTest.test_budget_exhaustion_stops_without_extra_model_request) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_real_tool_calls_are_executed_and_fed_back (tests_agent.AgentLoopTest.test_real_tool_calls_are_executed_and_fed_back) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_run_agent_job_resolves_owner_report (tests_agent.AgentLoopTest.test_run_agent_job_resolves_owner_report) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_search_knowledge_uses_embeddings_and_scope (tests_agent.AgentLoopTest.test_search_knowledge_uses_embeddings_and_scope) ... ok
+test_unknown_evidence_ids_are_rejected (tests_agent.AgentLoopTest.test_unknown_evidence_ids_are_rejected) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_unknown_tool_error_is_visible_and_loop_continues (tests_agent.AgentLoopTest.test_unknown_tool_error_is_visible_and_loop_continues) ...                     INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+                    INFO     HTTP Request: POST                 _client.py:1025
+                             https://fixture.test/v1/chat/compl                
+                             etions "HTTP/1.1 200 OK"                          
+ok
+test_get_evidence_returns_exact_quote_and_rejects_unknown (tests_agent.AgentToolTest.test_get_evidence_returns_exact_quote_and_rejects_unknown) ... ok
+test_query_route_only_accepts_report_poi_ids_and_respects_budget (tests_agent.AgentToolTest.test_query_route_only_accepts_report_poi_ids_and_respects_budget) ... ok
+test_read_report_and_poi_ids (tests_agent.AgentToolTest.test_read_report_and_poi_ids) ... ok
+test_unknown_tool_and_wrong_owner_report (tests_agent.AgentToolTest.test_unknown_tool_and_wrong_owner_report) ... ok
+
+----------------------------------------------------------------------
+Ran 438 tests in 36.156s
+
+OK (skipped=1)
+[geo] 高德今日调用已达上限（0 次/日），地理查询降级为 LLM 估算；如需提高设 AMAP_DAILY_CAP（个人免费额度 5000/日，请勿超）。
