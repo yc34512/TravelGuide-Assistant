@@ -554,7 +554,10 @@ def _guide_note(guide: dict, draft: dict | None = None) -> str:
 def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
                preferences: str = "",
                preference_mode: str = "均衡", start_date: str | None = None,
-               excluded_spots: list[str] | None = None) -> str:
+               excluded_spots: list[str] | None = None, *,
+               owner_id: str | None = None,
+               idempotency_key: str | None = None) -> str:
+    """兼容入口：提交持久任务，由有界 pipeline Worker 执行。"""
     if excluded_spots and not PLANNING_GRAPH_ENABLED:
         raise ValueError("明确排除约束需要启用规划子图")
     if excluded_spots and PLANNING_POLICY != "hard-first-v1":
@@ -562,27 +565,14 @@ def start_trip(city: str, days: int, hotel: str, spots: list[str] | None,
     if PLANNING_GRAPH_ENABLED:
         from service.planning_flow import ensure_runtime
         ensure_runtime()
-    job_id = uuid.uuid4().hex[:12]
-    with _LOCK:
-        JOBS[job_id] = {
-            "id": job_id,
-            "kind": "trip",
-            "keyword": f"{city} {days}天行程",
-            "mode": "trip",
-            "status": "running",
-            "stage": "排队中",
-            "log": [],
-            "result": None,
-            "error": None,
-            "cancel_requested": False,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        }
-    threading.Thread(
-        target=_run_trip,
-        args=(job_id, city, days, hotel, spots, preferences, preference_mode, start_date, excluded_spots),
-        daemon=True,
-    ).start()
-    return job_id
+    from config import LOCAL_OWNER_ID
+    from service import task_service
+    out = task_service.submit_trip(
+        owner_id=owner_id or LOCAL_OWNER_ID, city=city, days=days, hotel=hotel,
+        spots=spots, preferences=preferences, preference_mode=preference_mode,
+        start_date=start_date, excluded_spots=excluded_spots,
+        idempotency_key=idempotency_key)
+    return out["id"]
 
 
 def _run_trip(job_id: str, city: str, days: int, hotel: str,
@@ -591,7 +581,13 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
               start_date: str | None = None, excluded_spots: list[str] | None = None) -> None:
     job = JOBS[job_id]
     started = time.time()
-    crawler_base.reset_session()   # 任务级会话起点：清空风控标记与导航预算（逐点采集不再各自清零）
+    # 任务级导航预算起点；不清除账号会话的验证码熔断（S0 修正）。
+    if not crawler_base.reset_session(job_id):
+        job.update(status="error", stage="失败",
+                   error="另一采集任务仍持有导航预算，拒绝同时改写会话状态")
+        knowledge.record_job(job)
+        crawler_base.end_task(job_id)
+        return
 
     def log(msg: str) -> None:
         job["log"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
@@ -603,6 +599,7 @@ def _run_trip(job_id: str, city: str, days: int, hotel: str,
         job["status"] = status
         job["stage"] = stage
         job["error"] = error
+        crawler_base.end_task(job_id)
         try:
             knowledge.record_job(job)
         except Exception as e:

@@ -189,13 +189,26 @@ def _cosine_scores_faiss(query: list[float], vecs: list[list[float]]) -> list[fl
         arr = np.asarray(vecs, dtype="float32")
         if arr.ndim != 2 or arr.shape[1] != len(query):
             return None
+        # faiss 会把零向量归一化后仍留在索引里（相似度恒为 0），而纯 Python
+        # 降级路径把零向量视为无效。这里直接交回降级，保证两条实现判定一致。
+        norms = np.linalg.norm(arr, axis=1)
+        if not np.all(norms > 0):
+            return None
         faiss.normalize_L2(arr)
         q = np.asarray([query], dtype="float32")
         faiss.normalize_L2(q)
         index = faiss.IndexFlatIP(arr.shape[1])
         index.add(arr)
-        sims, _ = index.search(q, arr.shape[0])
-        return [float(x) for x in sims[0]]
+        sims, indices = index.search(q, arr.shape[0])
+        # search 返回的是**按相似度排序**的 (score, index) 对；必须用 indices 把
+        # 分数放回原始记录位置，否则 zip(items, scores) 会把高分配给无关文本。
+        # -1 是 faiss 的“无结果”占位，保留为 None 让调用方跳过。
+        out: list[float | None] = [None] * len(vecs)
+        for score, idx in zip(sims[0], indices[0]):
+            pos = int(idx)
+            if 0 <= pos < len(out):
+                out[pos] = float(score)
+        return out
     except Exception:
         return None
 

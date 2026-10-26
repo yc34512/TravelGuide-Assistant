@@ -17,6 +17,7 @@ from core.quality import filter_note
 from pipeline.candidates import candidate_foods
 from pipeline.heat import heat_index, sentiment_trend, time_windows, trend_of
 from pipeline.planner import candidate_spots
+from crawler import base as crawler_base
 from service.research import JOBS, _CRAWL_LOCK, _LOCK, Cancelled, dump_debug
 
 HEAT_SPOT_LIMIT = 6       # 每次刷榜的景点数硬上限（成本闸）
@@ -26,29 +27,25 @@ HEAT_FOOD_LIMIT = 2       # 美食榜并列：每次刷榜额外采的美食/餐
 HEAT_SENTIMENT_VIDEOS = 1  # 每个对象采评论的视频数（仅首个，算情感趋势；其余纯元数据控成本）
 
 
-def start_heat_refresh(city: str) -> str:
-    job_id = uuid.uuid4().hex[:12]
-    with _LOCK:
-        JOBS[job_id] = {
-            "id": job_id,
-            "kind": "heat",
-            "keyword": f"{city} 热度榜",
-            "mode": "heat",
-            "status": "running",
-            "stage": "排队中",
-            "log": [],
-            "result": None,
-            "error": None,
-            "cancel_requested": False,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        }
-    threading.Thread(target=_run_heat, args=(job_id, city), daemon=True).start()
-    return job_id
+def start_heat_refresh(city: str, *, owner_id: str | None = None,
+                       idempotency_key: str | None = None) -> str:
+    """兼容入口：提交持久任务，由有界 pipeline Worker 执行。"""
+    from config import LOCAL_OWNER_ID
+    from service import task_service
+    out = task_service.submit_heat(owner_id=owner_id or LOCAL_OWNER_ID, city=city,
+                                   idempotency_key=idempotency_key)
+    return out["id"]
 
 
 def _run_heat(job_id: str, city: str) -> None:
     job = JOBS[job_id]
     started = time.time()
+    if not crawler_base.reset_session(job_id):
+        job.update(status="error", stage="失败",
+                   error="另一采集任务仍持有导航预算，拒绝同时改写会话状态")
+        knowledge.record_job(job)
+        crawler_base.end_task(job_id)
+        return
 
     def log(msg: str) -> None:
         job["log"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
@@ -60,6 +57,7 @@ def _run_heat(job_id: str, city: str) -> None:
         job["status"] = status
         job["stage"] = stage
         job["error"] = error
+        crawler_base.end_task(job_id)
         try:
             knowledge.record_job(job)
         except Exception as e:
@@ -93,9 +91,7 @@ def _run_heat(job_id: str, city: str) -> None:
         job["stage"] = "采集热度数据"
         collected: dict[str, list] = {}
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        from crawler import base
-        base.require_ugc_source(log=log)   # 开源合规闸门：热度刷榜也属 UGC 采集，默认关闭
-        base.reset_session()
+        crawler_base.require_ugc_source(log=log)   # 开源合规闸门：热度刷榜也属 UGC 采集，默认关闭
         with _CRAWL_LOCK:
             if _cancelled():
                 raise Cancelled()

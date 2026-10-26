@@ -1,0 +1,6 @@
+# 服务模式可选依赖（在项目 .venv 中实测可安装/导入的版本）
+# 本地 SQLite 模式不需要这些包；STORAGE_BACKEND=mysql / CACHE_ENABLED=true 时才使用。
+SQLAlchemy==2.1.5
+PyMySQL==1.2.3
+alembic==1.20.0
+redis==6.4.0

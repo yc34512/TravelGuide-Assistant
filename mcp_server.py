@@ -58,6 +58,7 @@ def _resolve_target() -> tuple[str, str, int, bool]:
 
 
 BASE_URL, _HOST, _PORT, _IS_LOCAL = _resolve_target()
+_API_TOKEN = os.getenv("TG_API_TOKEN", "").strip()   # AUTH_MODE=api_token 时必填
 
 mcp = FastMCP("travel-guide-assistant")
 
@@ -75,7 +76,11 @@ def _client(**kw) -> httpx.AsyncClient:
     （实测常见的是直接回 502），会表现为"服务明明起着却调不通"这种极难排查的
     假故障。只有指向远端服务（TG_SERVER_URL 非本机）时才允许读环境代理。
     """
-    return httpx.AsyncClient(base_url=BASE_URL, trust_env=not _IS_LOCAL, **kw)
+    headers = dict(kw.pop("headers", {}) or {})
+    if _API_TOKEN:
+        headers["Authorization"] = f"Bearer {_API_TOKEN}"
+    return httpx.AsyncClient(base_url=BASE_URL, trust_env=not _IS_LOCAL,
+                             headers=headers, **kw)
 
 
 async def _healthy(timeout: float = 2.0) -> bool:

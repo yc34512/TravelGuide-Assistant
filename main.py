@@ -181,6 +181,7 @@ def main():
             page.quit()
         except Exception:
             pass
+        base.end_task()
 
 
 if __name__ == "__main__":

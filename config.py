@@ -8,9 +8,11 @@ load_dotenv()
 
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
-RAW_DIR = DATA_DIR / "raw"
-REPORT_DIR = DATA_DIR / "reports"
-DEBUG_DIR = DATA_DIR / "debug"
+RAW_DIR = Path(os.getenv("RAW_DIR", str(DATA_DIR / "raw")))
+REPORT_DIR = Path(os.getenv("REPORT_DIR", str(DATA_DIR / "reports")))
+DEBUG_DIR = Path(os.getenv("DEBUG_DIR", str(DATA_DIR / "debug")))
+KNOWLEDGE_DB_PATH = Path(os.getenv("KNOWLEDGE_DB_PATH",
+                                   str(DATA_DIR / "knowledge.db")))
 BROWSER_PROFILE_DIR = PROJECT_ROOT / "browser_profile"
 
 # 一期只迁移准备好资料后的规划。可关闭回退原流程；不改变采集导航与风控预算。
@@ -140,3 +142,49 @@ AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
 # 高德用量护栏：个人免费额度 5000 次/日；此处默认 300 次/日 作安全上限，
 # 防 bug/死循环烧光配额。达上限后地理查询自动降级为 LLM 估算（不阻断）。
 AMAP_DAILY_CAP = int(os.getenv("AMAP_DAILY_CAP", "300"))
+
+
+# —— 服务化（2026-10 升级）：持久任务、身份、Worker 与容量合同 ——
+# 默认本地 SQLite 模式；服务模式可切换 MySQL（缺少驱动/服务器时明确失败，不偷偷降级）。
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "sqlite").strip().lower()
+MYSQL_DSN = os.getenv("MYSQL_DSN", "").strip()
+TASK_DB_PATH = Path(os.getenv("TASK_DB_PATH", str(DATA_DIR / "tasks.db")))
+REPORT_DB_PATH = Path(os.getenv("REPORT_DB_PATH", str(DATA_DIR / "reports.db")))
+TASK_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+REPORT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# 身份：默认本地单用户（只算本地演示，不声称多用户隔离）；api_token 由服务端令牌映射主体。
+AUTH_MODE = os.getenv("AUTH_MODE", "local_single_user").strip().lower()
+LOCAL_OWNER_ID = os.getenv("LOCAL_OWNER_ID", "local_single_user").strip()
+
+# 有界 Worker：pipeline 串行执行长任务；query 固定小容量执行复杂追问。
+WORKER_ENABLED = os.getenv("WORKER_ENABLED", "true").lower() == "true"
+WORKER_EMBEDDED = os.getenv("WORKER_EMBEDDED", "true").lower() == "true"
+WORKER_ROLE = os.getenv("WORKER_ROLE", "both").strip().lower()
+PIPELINE_WORKER_CAPACITY = max(1, int(os.getenv("PIPELINE_WORKER_CAPACITY", "1")))
+QUERY_WORKER_CAPACITY = max(1, int(os.getenv("QUERY_WORKER_CAPACITY", "2")))
+WORKER_HEARTBEAT_SECONDS = max(1.0, float(os.getenv("WORKER_HEARTBEAT_SECONDS", "10")))
+WORKER_PROGRESS_SECONDS = max(0.5, float(os.getenv("WORKER_PROGRESS_SECONDS", "2")))
+WORKER_LEASE_SECONDS = max(3.0, float(os.getenv("WORKER_LEASE_SECONDS", "90")))
+WORKER_POLL_SECONDS = max(0.05, float(os.getenv("WORKER_POLL_SECONDS", "1.0")))
+WORKER_RETRY_DELAY_SECONDS = max(0.0, float(os.getenv("WORKER_RETRY_DELAY_SECONDS", "5")))
+WORKER_MAX_ATTEMPTS = max(1, int(os.getenv("WORKER_MAX_ATTEMPTS", "2")))
+MAX_QUEUE_TOTAL = max(1, int(os.getenv("MAX_QUEUE_TOTAL", "200")))
+MAX_ACTIVE_PER_OWNER = max(1, int(os.getenv("MAX_ACTIVE_PER_OWNER", "2")))
+CHECKPOINT_REALM = os.getenv("CHECKPOINT_REALM", "local-planning").strip()
+
+# 缓存与容量：Redis 可禁用；默认 NoOp，不在 import 时连接网络。
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+CACHE_ENABLED = os.getenv("CACHE_ENABLED", "false").lower() == "true"
+
+# 工具 Agent 的起始预算（待实测调整，不是性能结果）。
+AGENT_MAX_TOOL_ROUNDS = max(1, int(os.getenv("AGENT_MAX_TOOL_ROUNDS", "4")))
+AGENT_MAX_TOOL_CALLS = max(1, int(os.getenv("AGENT_MAX_TOOL_CALLS", "6")))
+AGENT_MAX_ROUTE_CALLS = max(0, int(os.getenv("AGENT_MAX_ROUTE_CALLS", "2")))
+AGENT_MAX_CHAT_ATTEMPTS = max(1, int(os.getenv("AGENT_MAX_CHAT_ATTEMPTS", "6")))
+AGENT_MAX_EMBED_ATTEMPTS = max(0, int(os.getenv("AGENT_MAX_EMBED_ATTEMPTS", "2")))
+AGENT_DEADLINE_SECONDS = max(5.0, float(os.getenv("AGENT_DEADLINE_SECONDS", "90")))
+AGENT_MAX_CONTEXT_CHARS = max(1000, int(os.getenv("AGENT_MAX_CONTEXT_CHARS", "12000")))
+AGENT_MAX_OUTPUT_TOKENS = max(256, int(os.getenv("AGENT_MAX_OUTPUT_TOKENS", "1200")))
+# 模型在途请求全局闸门（跨 API/Worker 进程由持久租约维护）。
+GLOBAL_MODEL_INFLIGHT = max(1, int(os.getenv("GLOBAL_MODEL_INFLIGHT", "2")))

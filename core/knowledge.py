@@ -14,10 +14,10 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from config import DATA_DIR
+from config import KNOWLEDGE_DB_PATH
 from core.sqlite_utils import ClosingConnection
 
-_DB_PATH = DATA_DIR / "knowledge.db"
+_DB_PATH = KNOWLEDGE_DB_PATH
 
 # 关键词归一化："西湖攻略"与"西湖"应命中同一缓存。去除常见后缀与空白；
 # 归一化后为空则保留原串，避免全部归入同一个伪关键词。

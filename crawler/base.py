@@ -29,8 +29,13 @@ UGC_ENABLE_NOTICE = (
 )
 
 _noticed = False          # 免责告知每进程只打印一次
-_session_stopped = False  # 本会话是否已触发验证码风控（触发后停止一切现采）
-_nav_count = 0            # 本会话已发生的详情页导航次数（会话级风控预算，见 config.SESSION_DETAIL_BUDGET）
+# 两个维度必须分开（本轮 S0 修正）：
+# - _session_stopped 属于浏览器/账号会话：验证码一旦触发，跨任务持续有效，
+#   只有人工确认风控已解除后显式 clear_account_risk() 才清除；
+# - _nav_count 属于当前任务：任务 A 正在采集时，任务 B 的初始化不得把 A 的计数清零。
+_session_stopped = False
+_nav_count = 0
+_active_task = None       # 当前持有导航预算的任务 token；None 表示空闲
 
 
 def douyin_enabled() -> bool:
@@ -75,7 +80,10 @@ def captcha_detected(page) -> bool:
 
 
 def stop_session() -> None:
-    """标记本会话触发验证码风控：后续搜索/采集立即返回空，不再发新请求（避免加重风控）。"""
+    """标记浏览器/账号会话触发验证码风控：后续搜索/采集立即返回空，不再发新请求。
+
+    这是**会话级**状态：任务 A 触发后，任务 B 开始也不会自动解除。只有人工确认
+    风控已平息（例如等待 20~30 分钟）后调用 clear_account_risk() 才恢复。"""
     global _session_stopped
     _session_stopped = True
 
@@ -84,8 +92,14 @@ def session_stopped() -> bool:
     return _session_stopped
 
 
+def clear_account_risk() -> None:
+    """人工确认风控已解除后，显式清除会话熔断。定时器/新任务不得自动调用。"""
+    global _session_stopped
+    _session_stopped = False
+
+
 def bump_navigation() -> int:
-    """记一次详情页导航（会话级预算的唯一计数口，在导航发生后调用）。"""
+    """记一次详情页导航（当前任务预算的唯一计数口，在导航发生后调用）。"""
     global _nav_count
     _nav_count += 1
     return _nav_count
@@ -109,12 +123,47 @@ def nav_budget_exhausted() -> bool:
     return _nav_count >= NAV_DETAIL_BUDGET
 
 
-def reset_session() -> None:
-    """新任务开始：清零风控停止标记与导航计数。
+def reset_session(task_id=None) -> bool:
+    """开始一个任务的导航预算；**不清除**账号会话的验证码熔断。
 
-    注意：由**任务入口**调用（research / trip / heatrefresh / CLI），不再由每次采集调用——
-    否则一次任务里的逐点采集会各自清零预算与风控标记，等于变相重试，必然撞上验证码。
+    由任务入口（research / trip / heatrefresh / CLI）调用，不再由每次采集调用——
+    否则一次任务里的逐点采集会各自清零预算，等于变相重试，必然撞上验证码。
+
+    task_id 用于区分并发任务：
+    - 当前没有任务持有预算，或就是同一任务：返回 True（新任务从 0 开始）；
+    - 另一任务仍持有预算：不重置，返回 False。调用方应等待/拒绝，而不能把
+      正在采集的任务 A 的计数清空。没有 task_id 的旧调用（CLI/测试）按显式
+      重新开始处理，但仍不清除会话熔断。
     """
-    global _session_stopped, _nav_count
-    _session_stopped = False
-    _nav_count = 0
+    global _nav_count, _active_task
+    token = None if task_id is None else str(task_id)
+    if token is None:
+        _nav_count = 0
+        _active_task = "__anonymous__"
+        return True
+    if _active_task is not None and _active_task != token:
+        return False
+    if _active_task is None:
+        _nav_count = 0
+    _active_task = token
+    return True
+
+
+def end_task(task_id=None) -> None:
+    """任务收口：释放导航预算所有权。不重置计数、不清除会话熔断。"""
+    global _active_task
+    if _active_task is None:
+        return
+    if task_id is None or _active_task == str(task_id):
+        _active_task = None
+
+
+def active_task() -> str | None:
+    return _active_task
+
+
+def session_state() -> dict:
+    """可观测状态：任务预算与账号会话熔断分开报告。"""
+    return {"task_id": _active_task, "nav_count": _nav_count,
+            "nav_budget": NAV_DETAIL_BUDGET, "budget_exhausted": nav_budget_exhausted(),
+            "account_stopped": _session_stopped}

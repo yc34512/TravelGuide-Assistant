@@ -265,13 +265,15 @@ def _history_block(history, limit: int = 2) -> str:
     return "\n".join(lines)
 
 
-def _retrieval_context(result: dict | None, question: str) -> str | None:
+def _retrieval_context(result: dict | None, question: str,
+                       owner_id: str = "local_single_user") -> str | None:
     """§13 检索优先的追问上下文；检索不可用返回 None（调用方退回压缩档案路径）。
 
     检索之外必带「尚未确认的信息」清单（防幻觉：这些不得当成已知事实）。"""
     try:
         from core import rag
-        ctx = rag.context_for_question(result or {}, question, max_chars=_CTX_MAX_CHARS)
+        ctx = rag.context_for_question(result or {}, question, max_chars=_CTX_MAX_CHARS,
+                                          owner_id=owner_id)
     except Exception:
         ctx = None
     if not ctx:
@@ -283,7 +285,8 @@ def _retrieval_context(result: dict | None, question: str) -> str | None:
     return ctx
 
 
-def answer(result: dict | None, question: str, history=None) -> str:
+def answer(result: dict | None, question: str, history=None,
+           owner_id: str = "local_single_user") -> str:
     """回答一个追问（唯一有副作用的一步：调用一次 LLM）。
 
     上下文优先走 §13 检索（档案切块 -> 按问题取 Top-K 片段），
@@ -293,7 +296,7 @@ def answer(result: dict | None, question: str, history=None) -> str:
     q = (question or "").strip()
     if not q:
         raise ValueError("问题不能为空")
-    ctx = _retrieval_context(result, q)
+    ctx = _retrieval_context(result, q, owner_id=owner_id)
     if not ctx:
         ctx = build_context(result, q)
     if not ctx:

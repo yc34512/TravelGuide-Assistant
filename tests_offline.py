@@ -2267,8 +2267,12 @@ class TestSourceGate(unittest.TestCase):
         self.assertFalse(self.base.captcha_detected(NormalPage()))
         self.base.stop_session()
         self.assertTrue(self.base.session_stopped())
+        # 新任务开始只重置任务预算，不清除账号会话熔断（S0）
         self.base.reset_session()
+        self.assertTrue(self.base.session_stopped())
+        self.base.clear_account_risk()          # 人工确认风控解除后才恢复
         self.assertFalse(self.base.session_stopped())
+        self.base.end_task()
 
 
 class TestAmapQuota(unittest.TestCase):
@@ -4948,7 +4952,10 @@ class TestRiskControlCircuitBreaker(unittest.TestCase):
 
     def tearDown(self):
         from crawler import base
+        base.clear_account_risk()
+        base.end_task()
         base.reset_session()
+        base.end_task()
 
     def test_captcha_detected_variants(self):
         from crawler import base
@@ -4962,13 +4969,18 @@ class TestRiskControlCircuitBreaker(unittest.TestCase):
         self.assertTrue(base.captcha_detected(_P(html='<div class="TTGCaptcha"></div>')))
         self.assertFalse(base.captcha_detected(object()))        # 取不到属性也不炸
 
-    def test_stop_and_reset_session_flag(self):
+    def test_stop_survives_new_task_budget(self):
         from crawler import base
+        base.clear_account_risk()
         self.assertFalse(base.session_stopped())
         base.stop_session()
         self.assertTrue(base.session_stopped())
+        # 新任务重置的是导航预算，不是账号会话熔断（S0）
         base.reset_session()
+        self.assertTrue(base.session_stopped())
+        base.clear_account_risk()
         self.assertFalse(base.session_stopped())
+        base.end_task()
 
     def test_fetch_videos_short_circuits_after_stop(self):
         """风控已触发时：一条都不采、不新开 Tab（此处没有浏览器，真去开 Tab 必炸）。"""
@@ -5820,6 +5832,9 @@ def load_tests(loader, tests, pattern):
     """既有CI入口同时执行新的证据链回归，不依赖额外命令。"""
     tests.addTests(loader.loadTestsFromName("tests_evidence"))
     tests.addTests(loader.loadTestsFromName("tests_planning"))
+    tests.addTests(loader.loadTestsFromName("tests_upgrade"))
+    tests.addTests(loader.loadTestsFromName("tests_service"))
+    tests.addTests(loader.loadTestsFromName("tests_agent"))
     return tests
 
 

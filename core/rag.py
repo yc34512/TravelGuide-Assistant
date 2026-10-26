@@ -319,11 +319,13 @@ def format_hit(h: dict, ns: str = "") -> str:
     return f"（{origin}{pending}）{h.get('text') or ''}"
 
 
-def context_for_question(result: dict, question: str, max_chars: int = 6000) -> str | None:
+def context_for_question(result: dict, question: str, max_chars: int = 6000,
+                         owner_id: str = "local_single_user") -> str | None:
     """§13 追问上下文：档案切块 -> 按问题检索 Top-K -> 只喂命中的片段 + 行程骨架。
 
     返回 None = 检索不可用（无 embedding / 无语料 / 非行程报告）——
-    调用方必须退回现有压缩档案路径（零回归，§13.6 降级链）。"""
+    调用方必须退回现有压缩档案路径（零回归，§13.6 降级链）。
+    缓存 key 含 owner、报告版本、embedding 模型、切块版本与问题哈希。"""
     tp = (result or {}).get("trip_plan") or {}
     if not tp:
         return None
@@ -331,6 +333,13 @@ def context_for_question(result: dict, question: str, max_chars: int = 6000) -> 
     if not q:
         return None
     ns = _result_key(result)
+    from core import cache
+    c = cache.get_cache()
+    ckey = cache.context_key(owner_id, ns, q)
+    if c.enabled:
+        cached = c.get(ckey)
+        if isinstance(cached, str):
+            return cached
     try:
         index_result(result)   # 惰性回填：历史报告也能被检索
     except Exception:
@@ -362,4 +371,7 @@ def context_for_question(result: dict, question: str, max_chars: int = 6000) -> 
     parts.append("■ 检索片段（与问题最相关的档案条目；标注了出处）")
     for h in hits:
         parts.append("- " + format_hit(h, ns))
-    return "\n".join(parts)[:max_chars]
+    ctx = "\n".join(parts)[:max_chars]
+    if c.enabled:
+        c.set(ckey, ctx, 1800, {"owner": owner_id, "report": ns})
+    return ctx

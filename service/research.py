@@ -343,28 +343,16 @@ MODES = {
 }
 
 
-def start_job(keyword: str, mode: str = "standard", force: bool = False) -> str:
-    preset = MODES.get(mode, MODES["standard"])
-    job_id = uuid.uuid4().hex[:12]
-    with _LOCK:
-        JOBS[job_id] = {
-            "id": job_id,
-            "keyword": keyword,
-            "mode": mode,
-            "status": "running",
-            "stage": "排队中",
-            "log": [],
-            "result": None,
-            "error": None,
-            "cancel_requested": False,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        }
-    threading.Thread(
-        target=_run_job,
-        args=(job_id, keyword, preset["limit"], preset["comments"], preset["asr"], force),
-        daemon=True,
-    ).start()
-    return job_id
+def start_job(keyword: str, mode: str = "standard", force: bool = False, *,
+              owner_id: str | None = None,
+              idempotency_key: str | None = None) -> str:
+    """兼容入口：现在只提交持久任务，由有界 Worker 执行，不再起每请求线程。"""
+    from config import LOCAL_OWNER_ID
+    from service import task_service
+    out = task_service.submit_research(
+        owner_id=owner_id or LOCAL_OWNER_ID, keyword=keyword, mode=mode,
+        force=force, idempotency_key=idempotency_key)
+    return out["id"]
 
 
 def get_job(job_id: str) -> dict | None:
@@ -391,7 +379,13 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
     job = JOBS[job_id]
     started = time.time()
     from crawler import base
-    base.reset_session()      # 任务级会话起点：清空风控标记与导航预算（逐点采集不再各自清零）
+    # 任务级导航预算起点；不清除账号会话的验证码熔断（S0 修正）。
+    if not base.reset_session(job_id):
+        job.update(status="error", stage="失败",
+                   error="另一采集任务仍持有导航预算，拒绝同时改写会话状态")
+        knowledge.record_job(job)
+        base.end_task(job_id)
+        return
 
     def log(msg: str) -> None:
         job["log"].append(f"{time.strftime('%H:%M:%S')}  {msg}")
@@ -404,6 +398,7 @@ def _run_job(job_id: str, keyword: str, limit: int, comments: int, asr: bool, fo
         job["status"] = status
         job["stage"] = stage
         job["error"] = error
+        base.end_task(job_id)
         try:
             knowledge.record_job(job)
         except Exception as e:

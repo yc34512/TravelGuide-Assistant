@@ -8,6 +8,7 @@
 import json
 import math
 import threading
+import time
 from datetime import date
 
 import httpx
@@ -228,19 +229,8 @@ def _transit_legs(transit: dict) -> str:
     return " 换乘 ".join(legs)
 
 
-def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
-    """两点具体交通方案：公交/地铁线路+站数+票价+时长，并列打车费用与时长。
-
-    返回如 "公交约42分钟·2元：603路(鼓楼站→云冈石窟站, 12站)，含步行约800米；打车约30分钟·约35元"；
-    1.5 公里内只给步行（不附打车）；1.5~3 公里并列给步行（这个距离公交换乘往往比走路还慢）；
-    公交方案劣化（步行段过长或耗时远超打车）时如实提醒，不让用户照着绕路；
-    无 Key / 全部查询失败返回 None（调用方降级）。
-    """
-    if not available():
-        return None
-    key = (origin_loc, dest_loc)
-    if key in _route_cache:
-        return _route_cache[key]
+def _route_advice_compute(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
+    """无缓存计算（调用方保证 available）。"""
     parts: list[str] = []
     d = distance_km(origin_loc, dest_loc)
     walk_range = d is not None and d < 1.5
@@ -315,5 +305,49 @@ def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
                   or (taxi_mins and transit_mins > taxi_mins * TRANSIT_SLOWER_RATIO)):
         parts.append("⚠️ 公交换乘与步行偏多，此距离建议直接打车或步行")
     out = "；".join(parts) or None
-    _route_cache[key] = out
     return out
+
+
+def route_advice_meta(origin_loc: str, dest_loc: str, city: str = "") -> dict:
+    """带缓存元信息的交通查询（工具 Agent 需要 cache_hit/as_of）。"""
+    if not available():
+        return {"advice": None, "cache_hit": False, "as_of": None,
+                "source": "amap", "reason": "no_api_key"}
+    key = (origin_loc, dest_loc)
+    if key in _route_cache:
+        return {"advice": _route_cache[key], "cache_hit": True,
+                "as_of": None, "source": "amap"}
+    from core import cache
+    c = cache.get_cache()
+    ckey = cache.route_key(origin_loc, dest_loc, "mixed",
+                           cache.departure_bucket(), "gcj02")
+    if c.enabled:
+        cached = c.get(ckey)
+        if isinstance(cached, dict):
+            advice, as_of = cached.get("advice"), cached.get("as_of")
+        elif cached is not None:
+            advice, as_of = cached, None
+        else:
+            advice, as_of = None, None
+        if advice is not None:
+            _route_cache[key] = advice
+            return {"advice": advice, "cache_hit": True,
+                    "as_of": as_of, "source": "amap"}
+    out = _route_advice_compute(origin_loc, dest_loc, city)
+    # 只缓存真正成功的方案；网络/配额失败不写成“没有路线”。
+    if out is not None:
+        _route_cache[key] = out
+        if c.enabled:
+            c.set(ckey, {"advice": out, "as_of": time.time()}, 300,
+                  {"as_of": time.time(), "source": "amap"})
+    return {"advice": out, "cache_hit": False, "as_of": time.time(), "source": "amap"}
+
+
+def route_advice(origin_loc: str, dest_loc: str, city: str = "") -> str | None:
+    """两点具体交通方案（兼容旧调用；缓存元信息见 route_advice_meta）。
+
+    返回如 "公交约42分钟·2元：603路(鼓楼站→云冈石窟站, 12站)，含步行约800米；打车约30分钟·约35元"；
+    1.5 公里内只给步行（不附打车）；1.5~3 公里并列给步行；
+    公交方案劣化时如实提醒；无 Key / 查询失败返回 None（调用方降级）。
+    """
+    return route_advice_meta(origin_loc, dest_loc, city)["advice"]
